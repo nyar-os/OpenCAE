@@ -311,6 +311,29 @@ impl OpenCae {
         inertia: Option<f64>,
         distributed_load: Option<f64>,
     ) -> Result<DocumentSummary, CaeError> {
+        self.add_element_tapered(id, from, to, youngs_modulus, area, kind, inertia, distributed_load, None)
+    }
+
+    /// Appends a truss or beam element with a linearly varying distributed
+    /// load and saves the document.
+    ///
+    /// `distributed_load` is the transverse load per unit length at the start
+    /// node and `distributed_load_end` the value at the end node, both in the
+    /// element's local `+y` direction. Beam requirements match
+    /// [`OpenCae::add_element_full`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_element_tapered(
+        &mut self,
+        id: &str,
+        from: &str,
+        to: &str,
+        youngs_modulus: Option<f64>,
+        area: Option<f64>,
+        kind: ElementKind,
+        inertia: Option<f64>,
+        distributed_load: Option<f64>,
+        distributed_load_end: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| {
             let material = if youngs_modulus.is_some() || area.is_some() {
                 Some(crate::ElementMaterial { youngs_modulus, area })
@@ -318,7 +341,7 @@ impl OpenCae {
             else {
                 None
             };
-            model.add_element_kind(id, from, to, material, kind, inertia, distributed_load)
+            model.add_element_with_loads(id, from, to, material, kind, inertia, distributed_load, distributed_load_end)
         })
     }
 

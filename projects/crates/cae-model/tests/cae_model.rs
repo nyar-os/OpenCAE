@@ -183,6 +183,7 @@ fn validation_reports_required_error_codes() {
         kind: cae_model::ElementKind::Truss,
         inertia: None,
         distributed_load: None,
+        distributed_load_end: None,
     });
     assert!(duplicate_element.validate().iter().any(|issue| issue.code == "element/duplicate"));
 

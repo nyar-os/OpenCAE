@@ -173,10 +173,19 @@ pub struct Element {
     /// strictly positive for beam elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inertia: Option<f64>,
-    /// Uniform distributed load `w` per unit length in the element's local
-    /// `+y` direction; only valid on beam elements.
+    /// Distributed load per unit length at the `from` end in the element's
+    /// local `+y` direction; only valid on beam elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distributed_load: Option<f64>,
+    /// Distributed load per unit length at the `to` end in the element's local
+    /// `+y` direction.
+    ///
+    /// Together with [`Element::distributed_load`] this defines a linearly
+    /// varying (trapezoidal) transverse load. When the start value is omitted
+    /// it is `0`, and when this end value is omitted the load is uniform.
+    /// Only valid on beam elements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distributed_load_end: Option<f64>,
 }
 
 /// Enforced (prescribed) values of the constrained degrees of freedom of a
@@ -412,6 +421,28 @@ impl Model {
         inertia: Option<f64>,
         distributed_load: Option<f64>,
     ) -> Result<(), CaeError> {
+        self.add_element_with_loads(id, from, to, material, kind, inertia, distributed_load, None)
+    }
+
+    /// Appends a structural element with a linearly varying distributed load.
+    ///
+    /// `distributed_load` is the load per unit length at the `from` end and
+    /// `distributed_load_end` the value at the `to` end, both in the local
+    /// `+y` direction. Supplying only the end value defines a triangular load
+    /// that starts at zero; two equal values are a uniform load. Beam
+    /// requirements and rejection rules match [`Model::add_element_kind`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_element_with_loads(
+        &mut self,
+        id: impl Into<String>,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        material: Option<ElementMaterial>,
+        kind: ElementKind,
+        inertia: Option<f64>,
+        distributed_load: Option<f64>,
+        distributed_load_end: Option<f64>,
+    ) -> Result<(), CaeError> {
         let id = id.into();
         let from = from.into();
         let to = to.into();
@@ -451,7 +482,7 @@ impl Model {
                 }
             }
             ElementKind::Truss => {
-                if distributed_load.is_some() {
+                if distributed_load.is_some() || distributed_load_end.is_some() {
                     return Err(CaeError::new(
                         "element/distributed-load-requires-beam",
                         format!(
@@ -461,13 +492,15 @@ impl Model {
                 }
             }
         }
-        if distributed_load.is_some_and(|value| !value.is_finite()) {
+        if distributed_load.is_some_and(|value| !value.is_finite())
+            || distributed_load_end.is_some_and(|value| !value.is_finite())
+        {
             return Err(CaeError::new(
                 "element/invalid-distributed-load",
                 format!("distributed load w of element `{id}` must be finite"),
             ));
         }
-        self.elements.push(Element { id, from, to, material, kind, inertia, distributed_load });
+        self.elements.push(Element { id, from, to, material, kind, inertia, distributed_load, distributed_load_end });
         self.bump_revision();
         Ok(())
     }

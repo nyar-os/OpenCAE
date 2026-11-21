@@ -60,6 +60,33 @@ fn cantilever_uniform_load() -> Model {
     model
 }
 
+/// Cantilever with a triangular load of peak intensity `q0` at the fixed end
+/// tapering to zero at the free end.
+fn cantilever_triangular_load(q0: f64) -> Model {
+    let mut model = beam_model(1);
+    model.elements[0].distributed_load = Some(q0);
+    model.elements[0].distributed_load_end = Some(0.0);
+    model
+}
+
+/// Simply supported beam loaded by a triangular transverse load that grows
+/// linearly from zero at the pin to `q2` at the roller.
+fn simply_supported_triangular_load(q2: f64) -> Model {
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", L / 2.0, 0.0).expect("n2");
+    model.add_node("n3", L, 0.0).expect("n3");
+    model.add_element_kind("e1", "n1", "n2", None, ElementKind::Beam, Some(I), None).expect("e1");
+    model.add_element_kind("e2", "n2", "n3", None, ElementKind::Beam, Some(I), None).expect("e2");
+    model.elements[0].distributed_load = Some(0.0);
+    model.elements[0].distributed_load_end = Some(q2 / 2.0);
+    model.elements[1].distributed_load = Some(q2 / 2.0);
+    model.elements[1].distributed_load_end = Some(q2);
+    model.add_support_full("n1", true, true, false, false).expect("pin");
+    model.add_support_full("n3", false, true, false, false).expect("roller");
+    model
+}
+
 /// Pinned-pinned column loaded by an axial compressive force at the free
 /// translation of the far end.
 fn pinned_pinned_column(elements: usize) -> Model {
@@ -121,6 +148,34 @@ fn cantilever_uniform_load_matches_analytic_deflection() {
 
     let tip = solution.nodes.iter().find(|node| node.id == "n2").expect("tip");
     assert_close(tip.uy, -2.0 * L.powi(4) / (8.0 * E * I), 1e-9);
+}
+
+#[test]
+fn cantilever_triangular_load_matches_analytic_deflection_and_reactions() {
+    let q0 = -2.0;
+    let model = cantilever_triangular_load(q0);
+    let solution = solve(&model).expect("solve");
+
+    let tip = solution.nodes.iter().find(|node| node.id == "n2").expect("tip");
+    assert_close(tip.uy, q0 * L.powi(4) / (30.0 * E * I), 1e-9);
+
+    let reaction = solution.reactions.iter().find(|reaction| reaction.node == "n1").expect("reaction");
+    assert_close(reaction.fy, -q0 * L / 2.0, 1e-9);
+    assert_close(reaction.mz, -q0 * L.powi(2) / 6.0, 1e-9);
+}
+
+#[test]
+fn simply_supported_triangular_load_reactions_follow_equilibrium() {
+    let q2 = -2.0;
+    let model = simply_supported_triangular_load(q2);
+    let solution = solve(&model).expect("solve");
+
+    let total = q2 * L / 2.0;
+    let left = solution.reactions.iter().find(|reaction| reaction.node == "n1").expect("left reaction");
+    let right = solution.reactions.iter().find(|reaction| reaction.node == "n3").expect("right reaction");
+    assert_close(left.fy, -total / 3.0, 1e-9);
+    assert_close(right.fy, -2.0 * total / 3.0, 1e-9);
+    assert_close(left.fy + right.fy, -total, 1e-12);
 }
 
 #[test]
@@ -266,6 +321,10 @@ fn distributed_load_on_truss_is_rejected() {
     let error = model
         .add_element_kind("e1", "n1", "n2", None, ElementKind::Truss, None, Some(-1.0))
         .expect_err("truss distributed load must be rejected");
+    assert_eq!(error.code, "element/distributed-load-requires-beam");
+    let error = model
+        .add_element_with_loads("e1", "n1", "n2", None, ElementKind::Truss, None, None, Some(-1.0))
+        .expect_err("truss tapered load must be rejected");
     assert_eq!(error.code, "element/distributed-load-requires-beam");
 }
 

@@ -301,11 +301,11 @@ function elementKindOption(parsed: Parsed): ElementKind | undefined {
 }
 
 async function elementAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w'], []);
+    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2'], []);
     const file = positional(
         parsed,
         0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>]',
+        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]',
     );
     const id = required(parsed, '--id');
     const from = required(parsed, '--from');
@@ -315,6 +315,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     const kind = elementKindOption(parsed);
     const inertia = number(parsed, '--I');
     const distributedLoad = number(parsed, '--w');
+    const distributedLoadEnd = number(parsed, '--w2');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const summary = document.addElement({
@@ -326,6 +327,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             kind,
             inertia,
             distributedLoad,
+            distributedLoadEnd,
         });
         console.log(message('elementAdded', { id, revision: String(summary.revision) }));
         return 0;

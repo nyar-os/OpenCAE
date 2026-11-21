@@ -945,14 +945,18 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                 let c = delta[0] / length;
                 let s = delta[1] / length;
                 let mut local_load = [0.0; 6];
-                if let Some(load) = element.distributed_load {
-                    if !load.is_finite() {
-                        return Err(CaeError::new(
-                            "element/invalid-distributed-load",
-                            format!("distributed load w of element `{}` must be finite", element.id),
-                        ));
-                    }
-                    add_uniform_transverse(&mut local_load, load, length);
+                if element.distributed_load.is_some_and(|value| !value.is_finite())
+                    || element.distributed_load_end.is_some_and(|value| !value.is_finite())
+                {
+                    return Err(CaeError::new(
+                        "element/invalid-distributed-load",
+                        format!("distributed load w of element `{}` must be finite", element.id),
+                    ));
+                }
+                let load_start = element.distributed_load.unwrap_or(0.0);
+                let load_end = element.distributed_load_end.unwrap_or(load_start);
+                if load_start != 0.0 || load_end != 0.0 {
+                    add_linear_transverse(&mut local_load, load_start, load_end, length);
                 }
                 if let Some(gravity) = gravity {
                     let mass_per_length = density * area;
@@ -1002,7 +1006,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                 });
             }
             ElementKind::Truss => {
-                if element.distributed_load.is_some() {
+                if element.distributed_load.is_some() || element.distributed_load_end.is_some() {
                     return Err(CaeError::new(
                         "element/distributed-load-requires-beam",
                         format!(
@@ -1207,10 +1211,21 @@ fn beam_transform(c: f64, s: f64) -> [[f64; 6]; 6] {
 }
 
 fn add_uniform_transverse(load: &mut [f64; 6], w: f64, length: f64) {
-    load[1] += w * length / 2.0;
-    load[2] += w * length * length / 12.0;
-    load[4] += w * length / 2.0;
-    load[5] -= w * length * length / 12.0;
+    add_linear_transverse(load, w, w, length);
+}
+
+/// Adds the consistent nodal vector of a linearly varying transverse load
+/// `q(x) = q1 + (q2 − q1)·x/L` in the local `+y` direction.
+///
+/// The entries are the exact integrals of the Euler-Bernoulli shape functions
+/// against the linear load; `q1 = q2` reproduces the uniform `[wL/2, wL²/12,
+/// wL/2, −wL²/12]` vector.
+fn add_linear_transverse(load: &mut [f64; 6], q1: f64, q2: f64, length: f64) {
+    let length2 = length * length;
+    load[1] += length * (7.0 * q1 + 3.0 * q2) / 20.0;
+    load[2] += length2 * (3.0 * q1 + 2.0 * q2) / 60.0;
+    load[4] += length * (3.0 * q1 + 7.0 * q2) / 20.0;
+    load[5] -= length2 * (2.0 * q1 + 3.0 * q2) / 60.0;
 }
 
 fn mass_matrix(model: &Model, layout: &Layout) -> Result<Vec<f64>, CaeError> {

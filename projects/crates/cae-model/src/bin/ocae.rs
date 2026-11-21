@@ -20,7 +20,7 @@ Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
-                    [--kind truss|beam] [--I <I>] [--w <w>]
+                    [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]
   ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
@@ -151,11 +151,11 @@ fn node_add(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn element_add(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w"], &[])?;
+    let parsed = parse(args, &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w", "--w2"], &[])?;
     let file = positional(
         &parsed,
         0,
-        "element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>]",
+        "element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]",
     )?;
     let id = required(&parsed, "--id")?;
     let from = required(&parsed, "--from")?;
@@ -168,9 +168,20 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
     };
     let inertia = number(&parsed, "--I")?;
     let distributed_load = number(&parsed, "--w")?;
+    let distributed_load_end = number(&parsed, "--w2")?;
     let mut session = session();
     session.open(Path::new(file))?;
-    let summary = session.add_element_full(id, from, to, youngs_modulus, area, kind, inertia, distributed_load)?;
+    let summary = session.add_element_tapered(
+        id,
+        from,
+        to,
+        youngs_modulus,
+        area,
+        kind,
+        inertia,
+        distributed_load,
+        distributed_load_end,
+    )?;
     println!("element `{id}` added as {} (revision {})", kind.as_str(), summary.revision);
     Ok(0)
 }

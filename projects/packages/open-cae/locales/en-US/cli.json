@@ -6,7 +6,7 @@
             "  ocae create <file.ocae> [--units mm|m] [--dimension 2|3]",
             "  ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]",
             "  ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]",
-            "                    [--kind truss|beam] [--I <I>] [--w <w>]",
+            "                    [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]",
             "  ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]",
             "  ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]",
             "  ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]",

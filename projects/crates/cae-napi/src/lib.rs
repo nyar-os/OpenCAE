@@ -168,8 +168,9 @@ fn node_add(ctx: CallContext) -> Result<JsValue> {
 /// Adds a truss or beam element to a document and saves it.
 ///
 /// The request accepts `kind` (`"truss"` or `"beam"`, default `"truss"`),
-/// `inertia` (required for beams) and `distributedLoad` (beam transverse load
-/// per unit length in local `+y`).
+/// `inertia` (required for beams), `distributedLoad` (beam transverse load per
+/// unit length in local `+y` at the start node) and `distributedLoadEnd` (the
+/// value at the end node, forming a linearly varying load).
 #[function]
 fn element_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -182,10 +183,12 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let kind = element_kind_field(&request)?;
     let inertia = number_field(&request, "inertia")?;
     let distributed_load = number_field(&request, "distributedLoad")?;
+    let distributed_load_end = number_field(&request, "distributedLoadEnd")?;
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary =
-        session.add_element_full(&id, &from, &to, youngs_modulus, area, kind, inertia, distributed_load).map_err(fail)?;
+    let summary = session
+        .add_element_tapered(&id, &from, &to, youngs_modulus, area, kind, inertia, distributed_load, distributed_load_end)
+        .map_err(fail)?;
     respond(&ctx, &summary)
 }
 

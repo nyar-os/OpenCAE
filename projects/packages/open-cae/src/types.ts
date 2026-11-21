@@ -270,10 +270,16 @@ export interface ElementAddRequest {
     /** Second moment of area; required and positive for beams. */
     readonly inertia?: number;
     /**
-     * Uniform distributed load per unit length in the element's local `+y`
-     * direction. Only valid on beams.
+     * Distributed load per unit length at the start node in the element's
+     * local `+y` direction. Only valid on beams.
      */
     readonly distributedLoad?: number;
+    /**
+     * Distributed load per unit length at the end node. Together with
+     * `distributedLoad` this is a linearly varying (trapezoidal) load; omitting
+     * it keeps the load uniform.
+     */
+    readonly distributedLoadEnd?: number;
 }
 
 /** Request of `setMaterial()`. */

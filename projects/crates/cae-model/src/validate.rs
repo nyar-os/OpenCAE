@@ -204,7 +204,7 @@ impl Model {
                     ));
                 }
             }
-            if element.distributed_load.is_some() {
+            if element.distributed_load.is_some() || element.distributed_load_end.is_some() {
                 if element.kind != ElementKind::Beam {
                     report.push(check_error(
                         "element/distributed-load-requires-beam",
@@ -214,7 +214,9 @@ impl Model {
                         ),
                     ));
                 }
-                if element.distributed_load.is_some_and(|value| !value.is_finite()) {
+                if element.distributed_load.is_some_and(|value| !value.is_finite())
+                    || element.distributed_load_end.is_some_and(|value| !value.is_finite())
+                {
                     report.push(check_error(
                         "element/invalid-distributed-load",
                         format!("distributed load w of element `{}` must be finite", element.id),

@@ -135,7 +135,7 @@ cargo run -p cae-model --bin ocae --offline -- buckling beam.ocae --modes 2
 cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --out out/report.md
 ```
 
-`--kind beam` requires `--I`; `--w` is the distributed transverse load in the element-local `+y` direction (force/length, positive upwards) and is converted to the consistent nodal vector `[0, wL/2, wL²/12, 0, wL/2, −wL²/12]`. The nodal moment `--mz` is positive counter-clockwise. `self-weight --g -9810 --axis y` is equivalent to `model gravity --gy -9810`.
+`--kind beam` requires `--I`; `--w` is the distributed transverse load in the element-local `+y` direction at the start node (force/length, positive upwards) and `--w2` optionally sets the intensity at the end node. A uniform load (`--w` only, or `--w2` equal to it) is converted to the consistent nodal vector `[0, wL/2, wL²/12, 0, wL/2, −wL²/12]`; `--w2` closes a linearly varying (trapezoidal) load instead. The nodal moment `--mz` is positive counter-clockwise. `self-weight --g -9810 --axis y` is equivalent to `model gravity --gy -9810`.
 
 Prescribed displacements (support settlements or driven degrees of freedom) use the same command; supplying `--ux/--uy/--uz/--rotation` also constrains that degree of freedom:
 
@@ -152,7 +152,7 @@ For a propped cantilever with a 2 mm roller settlement the roller reaction is `3
 |------|------|
 | `ocae create <file.ocae> [--units mm\|m] [--dimension 2\|3]` | Create a document; the default dimension is 2 and consistent steel defaults are written (millimetre system E=210000 MPa, A=100 mm²; metre system E=2.1e11 Pa, A=1e-4 m²) |
 | `ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]` | Add a node; duplicate ids are rejected; `--z` defaults to 0 and may be non-zero only in 3D documents |
-| `ocae element add <file> --id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>]` | Add a truss/beam element; `beam` is 2D-only and requires a positive `--I`; `--w` is a local `+y` distributed load |
+| `ocae element add <file> --id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>]` | Add a truss/beam element; `beam` is 2D-only and requires a positive `--I`; `--w`/`--w2` are the local `+y` transverse intensities at the start/end node (uniform when `--w2` is omitted) |
 | `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`) |
 | `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]` | Add/merge support constraints; `--rz` is available only on beam nodes and `--dz` only in 3D documents. A supplied displacement clamps that degree of freedom to the given value and implies its flag |
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
@@ -209,7 +209,7 @@ The file is UTF-8 JSON with camelCase fields:
 | `dimension` | Spatial dimension, `2` or `3`. When missing, `2` is assumed so old documents load without changes; other values raise `document/dimension` |
 | `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name` |
 | `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
-| `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` and accepts an optional `distributedLoad` in the local `+y` direction |
+| `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying) |
 | `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
 | `gravity` | Optional `[gx, gy, gz]`; when set, self-weight is applied from the density |
@@ -250,7 +250,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 3. **Constraint handling**: only active, unconstrained degrees of freedom are assembled and the reduced system is solved (row/column elimination first), avoiding the ill-conditioning of the large-number penalty method. When a support prescribes a non-zero displacement `u_c`, the free right-hand side is corrected by `−K_fc·u_c`; the constrained values are then written back into the displacement vector, so reactions and element forces follow from the same `K·u − F` residual as homogeneous supports.
 4. **Linear equation solution**: a self-written Gaussian elimination with partial pivoting (no linear algebra crate). A pivot smaller than `1e-12 × the largest matrix magnitude` is treated as singular and returns `model/mechanism`.
 5. **Distributed loads and self-weight**:
-   - The beam distributed load `w` (local `+y`) becomes the consistent nodal vector `[0, wL/2, wL²/12, 0, wL/2, −wL²/12]` and is then applied through the coordinate transformation; this expression is the exact integral for Euler-Bernoulli shape functions.
+   - The beam distributed load (local `+y`) becomes the consistent nodal vector and is then applied through the coordinate transformation. A uniform `w` gives `[0, wL/2, wL²/12, 0, wL/2, −wL²/12]`; a linear load `q(x) = q1 + (q2 − q1)·x/L` gives `[0, L(7q1+3q2)/20, L²(3q1+2q2)/60, 0, L(3q1+7q2)/20, −L²(2q1+3q2)/60]`. Both are the exact integrals for Euler-Bernoulli shape functions.
    - Truss self-weight splits `ρALg` equally between the two end nodes (lumped-mass style: exact total force balance, but without the higher-order terms of a consistent mass matrix).
    - Beam self-weight decomposes gravity into local axial and transverse components: the axial component is split equally as `ρAL(g·t)/2` (exact for linear shape functions), and the transverse component uses the consistent load above (exact for beam shape functions).
 6. **Results**:
@@ -281,7 +281,8 @@ pnpm --filter @wae/open-cae run typecheck
 `projects/crates/cae-model/tests/beam_modal.rs` asserts analytical solutions:
 
 - cantilever beam with an end concentrated force: end deflection `PL³/(3EI)`, fixed-end reaction moment `PL` (relative error `1e-9`);
-- cantilever beam with a distributed load: end deflection `wL⁴/(8EI)` (`1e-9`);
+- cantilever beam with a uniform distributed load: end deflection `wL⁴/(8EI)` (`1e-9`);
+- cantilever beam with a triangular load of peak `q0` at the fixed end: end deflection `q0L⁴/(30EI)` and fixed-end reaction moment `q0L²/6` (`1e-9`);
 - simply supported beam with a midspan concentrated force: midspan deflection `PL³/(48EI)` and maximum bending moment `PL/4` (`1e-9`);
 - fixed-free axial bar (10 elements): first frequency within `< 3%` of `(1/(4L))√(E/ρ)`;
 - cantilever beam (40 elements): first bending frequency within `< 5%` of `1.875104²·√(EI/(ρAL⁴))/(2π)`;
@@ -332,7 +333,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Beams are **2D Euler-Bernoulli only** (no shear deformation, no axial-bending coupling, no moment releases); **3D beams/frames (beam3d / frame3d) are not implemented** and return `capability/not-implemented`.
 - Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, thermal, contact and prestress are not supported. Prescribed displacements are supported as a single static kinematic boundary condition, not as a time-dependent or multi-step loading history.
 - Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects. Three-dimensional beams remain unsupported, so three-dimensional buckling is limited to truss models.
-- Loads are limited to **nodal concentrated forces/moments** and **element distributed transverse loads `w`**; arbitrary distributed loads and temperature loads are not supported.
+- Loads are limited to **nodal concentrated forces/moments** and **element transverse loads that are uniform or linear along the member in the local `+y` direction**; arbitrary curved distributed loads, loads in a global direction and temperature loads are not supported.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.
 - The solver is **dense**: memory `O(n²)` and time `O(n³)`, suitable for small models but not for large engineering models.
