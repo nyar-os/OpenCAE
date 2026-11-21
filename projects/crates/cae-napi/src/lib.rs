@@ -190,6 +190,8 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let distributed_load_end = number_field(&request, "distributedLoadEnd")?;
     let temperature = number_field(&request, "temperature")?;
     let temperature_gradient = number_field(&request, "temperatureGradient")?;
+    let distributed_load_from = number_field(&request, "distributedLoadFrom")?;
+    let distributed_load_to = number_field(&request, "distributedLoadTo")?;
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session
@@ -208,6 +210,18 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
         .map_err(fail)?;
     if temperature_gradient.is_some() {
         session.set_element_temperature_gradient(&id, temperature_gradient).map_err(fail)?;
+    }
+    if distributed_load_from.is_some() || distributed_load_to.is_some() {
+        let span = match (distributed_load_from, distributed_load_to) {
+            (Some(start), Some(end)) => Some((start, end)),
+            _ => {
+                return Err(fail(CaeError::new(
+                    "element/invalid-load-span",
+                    "`distributedLoadFrom` and `distributedLoadTo` must be supplied together",
+                )));
+            }
+        };
+        session.set_element_load_span(&id, span).map_err(fail)?;
     }
     respond(&ctx, &summary)
 }

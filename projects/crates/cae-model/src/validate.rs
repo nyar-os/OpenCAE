@@ -279,7 +279,11 @@ impl Model {
                     ));
                 }
             }
-            if element.distributed_load.is_some() || element.distributed_load_end.is_some() {
+            if element.distributed_load.is_some()
+                || element.distributed_load_end.is_some()
+                || element.distributed_load_from.is_some()
+                || element.distributed_load_to.is_some()
+            {
                 if element.kind != ElementKind::Beam {
                     report.push(check_error(
                         "element/distributed-load-requires-beam",
@@ -297,6 +301,36 @@ impl Model {
                         format!("distributed load w of element `{}` must be finite", element.id),
                     ));
                 }
+            }
+            match (element.distributed_load_from, element.distributed_load_to) {
+                (None, None) => {}
+                (Some(start), Some(end)) => {
+                    if !start.is_finite() || !end.is_finite() || start < 0.0 || end > 1.0 || start >= end {
+                        report.push(check_error(
+                            "element/invalid-load-span",
+                            format!(
+                                "load span of element `{}` must satisfy 0 <= start < end <= 1 (currently {start}..{end})",
+                                element.id
+                            ),
+                        ));
+                    }
+                    if element.distributed_load.is_none() {
+                        report.push(check_error(
+                            "element/missing-distributed-load",
+                            format!(
+                                "element `{}` limits a distributed load span but does not declare the load intensity",
+                                element.id
+                            ),
+                        ));
+                    }
+                }
+                _ => report.push(check_error(
+                    "element/invalid-load-span",
+                    format!(
+                        "element `{}` must declare both the start and the end fraction of a distributed load span",
+                        element.id
+                    ),
+                )),
             }
             if let Some(delta) = element.temperature {
                 if !delta.is_finite() {

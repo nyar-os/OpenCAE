@@ -319,11 +319,15 @@ function elementKindOption(parsed: Parsed): ElementKind | undefined {
 }
 
 async function elementAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt', '--dt-grad'], []);
+    const parsed = parse(
+        args,
+        ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt', '--dt-grad', '--w-from', '--w-to'],
+        [],
+    );
     const file = positional(
         parsed,
         0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>]',
+        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>]',
     );
     const id = required(parsed, '--id');
     const from = required(parsed, '--from');
@@ -336,6 +340,11 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     const distributedLoadEnd = number(parsed, '--w2');
     const temperature = number(parsed, '--dt');
     const temperatureGradient = number(parsed, '--dt-grad');
+    const distributedLoadFrom = number(parsed, '--w-from');
+    const distributedLoadTo = number(parsed, '--w-to');
+    if ((distributedLoadFrom === undefined) !== (distributedLoadTo === undefined)) {
+        throw failure('cli/missing-option', 'missingOption', { option: '--w-from and --w-to' });
+    }
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const summary = document.addElement({
@@ -348,6 +357,8 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             inertia,
             distributedLoad,
             distributedLoadEnd,
+            distributedLoadFrom,
+            distributedLoadTo,
             temperature,
             temperatureGradient,
         });

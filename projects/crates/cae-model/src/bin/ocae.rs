@@ -25,6 +25,7 @@ Usage:
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
   ocae element release <file> --id <id> [--start] [--end]
   ocae element gradient <file> --id <id> [--value <dT>]
+  ocae element span <file> --id <id> [--start <s>] [--end <s>]
   ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--alpha <a>]
   ocae material preset <file> --preset <name> [--section rectangle|circle|i]
                         [--width <w>] [--height <h>] [--diameter <d>] [--depth <d>]
@@ -222,13 +223,16 @@ fn element_command(args: &[String]) -> Result<i32, CaeError> {
         Some("add") => element_add(&args[1..]),
         Some("release") => element_release(&args[1..]),
         Some("gradient") => element_gradient(&args[1..]),
+        Some("span") => element_span(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `element` does not exist; only `add`, `release` or `gradient` is supported"),
+            format!(
+                "subcommand `{other}` of `element` does not exist; only `add`, `release`, `gradient` or `span` is supported"
+            ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`element` is missing a subcommand; only `add`, `release` or `gradient` is supported",
+            "`element` is missing a subcommand; only `add`, `release`, `gradient` or `span` is supported",
         )),
     }
 }
@@ -263,6 +267,34 @@ fn element_gradient(args: &[String]) -> Result<i32, CaeError> {
     match value {
         Some(value) => println!("element `{id}` gradient set to {value} (revision {})", summary.revision),
         None => println!("element `{id}` gradient cleared (revision {})", summary.revision),
+    }
+    Ok(0)
+}
+
+fn element_span(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--start", "--end"], &[])?;
+    let file = positional(&parsed, 0, "element span <file> --id <id> [--start <s>] [--end <s>]")?;
+    let id = required(&parsed, "--id")?;
+    let start = number(&parsed, "--start")?;
+    let end = number(&parsed, "--end")?;
+    let span = match (start, end) {
+        (Some(start), Some(end)) => Some((start, end)),
+        (None, None) => None,
+        _ => {
+            return Err(CaeError::new(
+                "cli/missing-option",
+                "specify both `--start` and `--end`, or neither to restore a full-span load",
+            ));
+        }
+    };
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_element_load_span(id, span)?;
+    match span {
+        Some((start, end)) => {
+            println!("element `{id}` load span set to {start}..{end} (revision {})", summary.revision)
+        }
+        None => println!("element `{id}` load span cleared (revision {})", summary.revision),
     }
     Ok(0)
 }

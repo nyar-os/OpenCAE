@@ -736,6 +736,15 @@ export interface ElementAddRequest {
      */
     readonly distributedLoadEnd?: number;
     /**
+     * Start of the loaded segment as a fraction of the element length. Supply
+     * it together with `distributedLoadTo`; the load then acts only between the
+     * two fractions, with `distributedLoad`/`distributedLoadEnd` as the
+     * intensities at the segment ends.
+     */
+    readonly distributedLoadFrom?: number;
+    /** End of the loaded segment as a fraction of the element length. */
+    readonly distributedLoadTo?: number;
+    /**
      * Uniform temperature change of the member in kelvin (or °C difference).
      * Requires the material `alpha`; a uniform change produces axial strain
      * only and never bends the member.

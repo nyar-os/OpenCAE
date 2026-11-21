@@ -184,6 +184,8 @@ fn validation_reports_required_error_codes() {
         inertia: None,
         distributed_load: None,
         distributed_load_end: None,
+        distributed_load_from: None,
+        distributed_load_to: None,
         temperature: None,
         temperature_gradient: None,
         release: None,

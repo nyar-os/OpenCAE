@@ -879,6 +879,21 @@ struct BeamLocal {
     transverse_end: f64,
     /// Uniform distributed axial load per unit length (gravity component).
     axial_uniform: f64,
+    /// Distributed load limited to a fraction of the member length.
+    partial: Option<PartialLoad>,
+}
+
+/// Distributed load acting between two fractions of the member length.
+#[derive(Debug, Clone, Copy)]
+struct PartialLoad {
+    /// Start of the loaded segment as a fraction of the length.
+    start: f64,
+    /// End of the loaded segment as a fraction of the length.
+    end: f64,
+    /// Load intensity at [`PartialLoad::start`].
+    load_start: f64,
+    /// Load intensity at [`PartialLoad::end`].
+    load_end: f64,
 }
 
 struct System {
@@ -1504,11 +1519,9 @@ pub fn solve_internal_forces(model: &Model, stations: usize) -> Result<InternalF
                 let axial_uniform = beam.axial_uniform;
                 for index in 0..stations {
                     let position = length * index as f64 / (stations - 1) as f64;
-                    let shear = result.end_forces.v1 + q1 * position + 0.5 * slope * position * position;
-                    let moment = -result.end_forces.m1
-                        + result.end_forces.v1 * position
-                        + 0.5 * q1 * position * position
-                        + slope * position * position * position / 6.0;
+                    let (load_force, load_moment) = beam_load_resultants(q1, slope, beam.partial.as_ref(), length, position);
+                    let shear = result.end_forces.v1 + load_force;
+                    let moment = -result.end_forces.m1 + result.end_forces.v1 * position + position * load_force - load_moment;
                     samples.push(SectionForces {
                         position,
                         axial_force: -result.end_forces.n1 - axial_uniform * position,
@@ -1755,6 +1768,22 @@ pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolu
         let quintic = load_slope / (120.0 * flexural_rigidity.max(f64::MIN_POSITIVE));
         let fixed_cubic = -length * (2.0 * quartic + 3.0 * quintic * length);
         let fixed_quadratic = length * length * (quartic + 2.0 * quintic * length);
+        // A partial load needs its own fixed-end correction: the particular
+        // solution is cancelled at both ends and both end rotations with a
+        // cubic/quadratic correction so it can be superposed on the full-span
+        // particular solution.
+        let partial_correction = match &element.model {
+            ElementModel::Beam(beam) => beam.partial.map(|partial| {
+                let rigidity = flexural_rigidity.max(f64::MIN_POSITIVE);
+                let (cubic_end, quadratic_end) = partial_deflection_integrals(&partial, length, length);
+                let end_deflection = cubic_end / (6.0 * rigidity);
+                let end_rotation = quadratic_end / (2.0 * rigidity);
+                let cubic = (2.0 * end_deflection / length - end_rotation) / (length * length);
+                let quadratic = (end_rotation * length - 3.0 * end_deflection) / (length * length);
+                (partial, rigidity, cubic, quadratic)
+            }),
+            ElementModel::Truss { .. } => None,
+        };
 
         let mut samples = Vec::with_capacity(stations);
         let mut maximum = 0.0_f64;
@@ -1775,12 +1804,18 @@ pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolu
             let d4 = -2.0 * xi + 3.0 * xi2;
             let power3 = position * position * position;
             let power4 = power3 * position;
-            let particular =
+            let mut particular =
                 quartic * power4 + quintic * power4 * position + fixed_cubic * power3 + fixed_quadratic * position * position;
-            let particular_slope = 4.0 * quartic * power3
+            let mut particular_slope = 4.0 * quartic * power3
                 + 5.0 * quintic * power4
                 + 3.0 * fixed_cubic * position * position
                 + 2.0 * fixed_quadratic * position;
+            if let Some((partial, rigidity, cubic, quadratic)) = partial_correction {
+                let (cubic_integral, quadratic_integral) = partial_deflection_integrals(&partial, length, position);
+                particular += cubic_integral / (6.0 * rigidity) + cubic * power3 + quadratic * position * position;
+                particular_slope +=
+                    quadratic_integral / (2.0 * rigidity) + 3.0 * cubic * position * position + 2.0 * quadratic * position;
+            }
             let transverse = n1 * v1 + n2 * theta1 + n3 * v2 + n4 * theta2 + particular;
             let rotation = d1 * v1 + d2 * theta1 + d3 * v2 + d4 * theta2 + particular_slope;
             let axial_particular = if element.youngs_modulus > 0.0 && element.area > 0.0 {
@@ -2310,8 +2345,10 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         format!("distributed load w of element `{}` must be finite", element.id),
                     ));
                 }
-                let mut load_start = element.distributed_load.unwrap_or(0.0);
-                let mut load_end = element.distributed_load_end.unwrap_or(load_start);
+                let user_start = element.distributed_load.unwrap_or(0.0);
+                let user_end = element.distributed_load_end.unwrap_or(user_start);
+                let mut load_start = 0.0;
+                let mut load_end = 0.0;
                 let mut axial_uniform = 0.0;
                 if let Some(gravity) = gravity {
                     let mass_per_length = density * area;
@@ -2323,6 +2360,36 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     local_load[0] += 0.5 * axial;
                     local_load[3] += 0.5 * axial;
                 }
+                let partial = match (element.distributed_load_from, element.distributed_load_to) {
+                    (Some(start), Some(end)) => {
+                        if !start.is_finite() || !end.is_finite() || start < 0.0 || end > 1.0 || start >= end {
+                            return Err(CaeError::new(
+                                "element/invalid-load-span",
+                                format!(
+                                    "load span of element `{}` must satisfy 0 <= start < end <= 1 (currently {start}..{end})",
+                                    element.id
+                                ),
+                            ));
+                        }
+                        let partial = PartialLoad { start, end, load_start: user_start, load_end: user_end };
+                        add_partial_transverse(&mut local_load, partial, length);
+                        Some(partial)
+                    }
+                    (None, None) => {
+                        load_start += user_start;
+                        load_end += user_end;
+                        None
+                    }
+                    _ => {
+                        return Err(CaeError::new(
+                            "element/invalid-load-span",
+                            format!(
+                                "element `{}` must declare both the start and the end fraction of a distributed load span",
+                                element.id
+                            ),
+                        ));
+                    }
+                };
                 if load_start != 0.0 || load_end != 0.0 {
                     add_linear_transverse(&mut local_load, load_start, load_end, length);
                 }
@@ -2424,6 +2491,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         transverse_start: load_start,
                         transverse_end: load_end,
                         axial_uniform,
+                        partial,
                     })),
                 });
             }
@@ -2771,6 +2839,90 @@ fn add_linear_transverse(load: &mut [f64; 6], q1: f64, q2: f64, length: f64) {
     load[2] += length2 * (3.0 * q1 + 2.0 * q2) / 60.0;
     load[4] += length * (3.0 * q1 + 7.0 * q2) / 20.0;
     load[5] -= length2 * (2.0 * q1 + 3.0 * q2) / 60.0;
+}
+
+/// Adds the consistent nodal vector of a linearly varying transverse load
+/// acting between two fractions of the member length.
+///
+/// The integral of the cubic Hermite shape functions against the linear load is
+/// evaluated with three-point Gauss-Legendre quadrature, which is exact for the
+/// quartic integrand.
+fn add_partial_transverse(load: &mut [f64; 6], partial: PartialLoad, length: f64) {
+    const POINTS: [f64; 3] = [-0.774_596_669_241_483_4, 0.0, 0.774_596_669_241_483_4];
+    const WEIGHTS: [f64; 3] = [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0];
+    let start = partial.start * length;
+    let end = partial.end * length;
+    let half = 0.5 * (end - start);
+    let middle = 0.5 * (end + start);
+    for (point, weight) in POINTS.iter().zip(WEIGHTS) {
+        let position = middle + half * point;
+        let xi = position / length;
+        let intensity = partial.load_start + (partial.load_end - partial.load_start) * (position - start) / (end - start);
+        let shape = [
+            1.0 - 3.0 * xi * xi + 2.0 * xi * xi * xi,
+            length * (xi - 2.0 * xi * xi + xi * xi * xi),
+            3.0 * xi * xi - 2.0 * xi * xi * xi,
+            length * (-xi * xi + xi * xi * xi),
+        ];
+        let scale = weight * half * intensity;
+        load[1] += scale * shape[0];
+        load[2] += scale * shape[1];
+        load[4] += scale * shape[2];
+        load[5] += scale * shape[3];
+    }
+}
+
+/// Cumulative transverse load and its first moment about the start node at
+/// `position`, combining the full-span trapezoid with an optional partial load.
+fn beam_load_resultants(
+    full_start: f64,
+    full_slope: f64,
+    partial: Option<&PartialLoad>,
+    length: f64,
+    position: f64,
+) -> (f64, f64) {
+    let mut force = full_start * position + 0.5 * full_slope * position * position;
+    let mut first_moment = 0.5 * full_start * position * position + full_slope * position.powi(3) / 3.0;
+    if let Some(partial) = partial {
+        let (partial_force, partial_moment) = partial_load_resultants(partial, length, position);
+        force += partial_force;
+        first_moment += partial_moment;
+    }
+    (force, first_moment)
+}
+
+/// Resultant and first moment of a partial load up to `position`.
+fn partial_load_resultants(partial: &PartialLoad, length: f64, position: f64) -> (f64, f64) {
+    let start = partial.start * length;
+    let end = partial.end * length;
+    let loaded = position.min(end);
+    if loaded <= start {
+        return (0.0, 0.0);
+    }
+    let slope = (partial.load_end - partial.load_start) / (end - start);
+    let span = loaded - start;
+    let force = partial.load_start * span + 0.5 * slope * span * span;
+    let first_moment = 0.5 * partial.load_start * (loaded * loaded - start * start)
+        + slope * ((loaded.powi(3) - start.powi(3)) / 3.0 - start * (loaded * loaded - start * start) / 2.0);
+    (force, first_moment)
+}
+
+/// Integrals of a partial load against `(x − s)³` and `(x − s)²` up to
+/// `position`, before dividing by `6·E·I` and `2·E·I`.
+fn partial_deflection_integrals(partial: &PartialLoad, length: f64, position: f64) -> (f64, f64) {
+    let start = partial.start * length;
+    let end = partial.end * length;
+    let loaded = position.min(end);
+    if loaded <= start {
+        return (0.0, 0.0);
+    }
+    let slope = (partial.load_end - partial.load_start) / (end - start);
+    let near = position - loaded;
+    let far = position - start;
+    let base = partial.load_start + slope * (position - start);
+    let cubic = base * (far.powi(4) - near.powi(4)) / 4.0 - slope * (far.powi(5) - near.powi(5)) / 5.0;
+    let quadratic = base * (far.powi(3) - near.powi(3)) / 3.0 - slope * (far.powi(4) - near.powi(4)) / 4.0;
+    (cubic, quadratic)
 }
 
 fn mass_matrix(model: &Model, layout: &Layout) -> Result<Vec<f64>, CaeError> {

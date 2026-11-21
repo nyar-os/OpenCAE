@@ -180,6 +180,7 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae element add <file> --id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]` | Add a truss/beam element; `beam` is 2D-only and requires a positive `--I`; `--w`/`--w2` are the local `+y` transverse intensities at the start/end node (uniform when `--w2` is omitted); `--dt` is a uniform temperature change and requires a material `alpha` |
 | `ocae element release <file> --id <id> [--start] [--end]` | Release the bending moment at the start and/or end of a beam (hinge); truss elements are rejected |
 | `ocae element gradient <file> --id <id> [--value <dT>]` | Set or clear the through-depth temperature gradient of a beam; a positive value heats the local `+y` face and requires material `alpha` plus a section depth |
+| `ocae element span <file> --id <id> [--start <s>] [--end <s>]` | Limit a beam distributed load to the fractions `--start..--end` of the member length; omit both options to load the whole member again |
 | `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--section ...]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`); `--alpha` is the coefficient of thermal expansion in `1/K` |
 | `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
 | `ocae library [--units mm\|m]` | Print the built-in material presets and supported section shapes as JSON |
@@ -281,6 +282,7 @@ The file is UTF-8 JSON with camelCase fields:
 | 2D truss linear static (`truss2d`) | ✅ supported |
 | 3D truss linear static (`truss3d`) | ✅ supported |
 | 2D Euler-Bernoulli beam (`beam2d`, including axial force/shear/bending moment, distributed loads, end moments, end releases) | ✅ supported |
+| partial-span distributed loads (`distributedLoadFrom`/`distributedLoadTo`, uniform or linear over part of a member) | ✅ supported |
 | beam end moment releases (`endRelease`, static condensation of hinges) | ✅ supported |
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | uniform member temperature change (`thermalExpansion`, `α·ΔT` thermal strain + equivalent nodal loads) | ✅ supported |
@@ -338,6 +340,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 17. **Deflected shape**: `solve_deflection(model, stations)` (CLI `ocae deflections`) transforms the nodal displacements into the member frame, restores released hinge rotations, and evaluates the cubic Hermite interpolation of `(v1, θ1, v2, θ2)` plus the exact fixed-end particular solution of the linearly varying transverse load (`EI·v'''' = q(x)`, a quartic/quintic polynomial). The axial displacement adds the quadratic term of a uniform axial load. Each station reports `axial`, `transverse`, `rotation` and the deformed global `x/y/z`, so simply supported, cantilever and triangular-load cases reproduce the closed-form deflections exactly.
 18. **Nodal stress summary**: `solve_nodal_stress(model, stations)` (CLI `ocae nodal-stresses`) reuses the per-element stress recovery, routes the first and last station to the `from` and `to` nodes, and reports the arithmetic mean of the connected axial stresses, the minimum/maximum extreme-fibre stresses of the connected ends, the largest absolute value with its governing element, and the utilisation against `allowableStress`. It is a screening view of the sampled stress field, not a fibre-level integration.
 19. **Load-case summary**: `summarize_load_cases(model)` (CLI `ocae load-cases`) always solves the unfactored `base` case and then each stored combination on the same `loads`/`gravity` scaled model used by combination analysis. Each row reports the applied resultant, the largest displacement and its node, the extreme axial force and bending moment with their elements, the strain energy and the equilibrium flag, giving a compact table for reports without superseding the per-element diagrams.
+20. **Partial-span loads**: `distributed_load_from`/`distributed_load_to` limit a beam transverse load to the fractions `[a, b]` of the length, with the intensity varying linearly from the start to the end of that segment. The consistent nodal vector is integrated with exact three-point Gauss-Legendre quadrature of the cubic Hermite shape functions. Internal-force sampling adds the segment resultant and its first moment piecewise, and the deflection sampler superposes its own fixed-end particular solution, so a simply supported beam loaded over its middle half reproduces `R = |q|L/4`, `M_mid = 3|q|L²/32` and `δ_mid = 19|q|L⁴/(2048EI)`.
 
 ## Validation and tests
 
@@ -358,6 +361,7 @@ pnpm --filter @wae/open-cae run typecheck
 - `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`), cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load (`wL⁴/8EI`), triangular load (`11wL⁴/120EI`), a straight truss sample and the session JSON export.
 - `tests/nodal_stress.rs`: a cantilever end-stress average, a shared node that combines two element ends, a truss nodal stress without utilisation and the session JSON export.
 - `tests/load_cases.rs`: load/gravity factor scaling of the `base` row and combinations, a gravity-dominated case, a model without combinations and the session JSON export.
+- `tests/partial_load.rs`: a simply supported beam loaded over its middle half — reactions `|q|L/4`, the piecewise shear and moments (`3|q|L²/32` at midspan), the sampled ends against the element end forces, the midspan deflection `19|q|L⁴/(2048EI)`, a full-span equivalence check and the load-span validation errors.
 
 `projects/crates/cae-model/tests/beam_modal.rs` asserts analytical solutions:
 
@@ -453,6 +457,7 @@ projects/
     tests/reactions.rs   support-reaction summary and CSV tests
     tests/springs.rs     elastic spring-support tests
     tests/thermal.rs     uniform temperature-change, thermal-expansion and gradient tests
+    tests/partial_load.rs  partial-span distributed load tests
     tests/releases.rs    beam end-release (hinge) tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
@@ -472,7 +477,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Beams are **2D Euler-Bernoulli only** (no shear deformation, no axial-bending coupling); bending-moment **end releases are supported** as condensed hinges. **3D beams/frames (beam3d / frame3d) are not implemented** and return `capability/not-implemented`.
 - Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, heat transfer, contact and prestress are not supported. Prescribed displacements are supported as a single static kinematic boundary condition, not as a time-dependent or multi-step loading history.
 - Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects. Three-dimensional beams remain unsupported, so three-dimensional buckling is limited to truss models.
-- Loads are limited to **nodal concentrated forces/moments**, **element transverse loads that are uniform or linear along the member in the local `+y` direction**, **uniform member temperature changes** (axial expansion only) and a **through-depth temperature gradient** (thermal bending). Heat transfer, arbitrary curved distributed loads and loads in a global direction are not supported; load combinations do not scale temperature changes.
+- Loads are limited to **nodal concentrated forces/moments**, **element transverse loads that are uniform or linear along the member in the local `+y` direction** (optionally limited to part of the span), **uniform member temperature changes** (axial expansion only) and a **through-depth temperature gradient** (thermal bending). Heat transfer, arbitrary curved distributed loads and loads in a global direction are not supported; load combinations do not scale temperature changes.
 - Load combinations only scale the **single applied load set and self-weight**; independent named load patterns (separate live-load cases) are not modelled, so a combination cannot mix two different nodal load layouts.
 - The material and section are **global**: all elements share one material and one parametric section. Per-element `E`/`A` overrides still exist, but there is no per-element section library yet.
 - Spring supports are **linear elastic and two-way**: no tension-only/compression-only (gap) behaviour, no friction, no plasticity, and no nonlinear force-displacement law is modelled.

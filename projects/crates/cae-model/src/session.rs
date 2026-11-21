@@ -401,6 +401,16 @@ impl OpenCae {
         self.edit(|model| model.set_element_temperature(id, temperature))
     }
 
+    /// Sets or clears the loaded segment of an existing beam's distributed
+    /// load and saves the document.
+    ///
+    /// `span` holds the start and end fractions of the element length; `None`
+    /// restores a load over the whole member. Both fractions must be supplied
+    /// together.
+    pub fn set_element_load_span(&mut self, id: &str, span: Option<(f64, f64)>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_element_load_span(id, span))
+    }
+
     /// Sets or clears the linear temperature gradient of an existing beam and
     /// saves the document.
     ///

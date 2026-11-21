@@ -278,6 +278,19 @@ pub struct Element {
     /// Only valid on beam elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distributed_load_end: Option<f64>,
+    /// Start of the loaded segment as a fraction of the element length.
+    ///
+    /// When both this and [`Element::distributed_load_to`] are present the
+    /// distributed load acts only between these fractions, and
+    /// [`Element::distributed_load`] / [`Element::distributed_load_end`] are the
+    /// intensities at the segment ends instead of at the member ends. Both
+    /// fractions must satisfy `0 <= from < to <= 1`. Only valid on beam
+    /// elements that declare a distributed load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distributed_load_from: Option<f64>,
+    /// End of the loaded segment as a fraction of the element length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distributed_load_to: Option<f64>,
     /// Uniform temperature change `ΔT` of the member (kelvin or degrees
     /// Celsius difference).
     ///
@@ -716,6 +729,8 @@ impl Model {
             inertia,
             distributed_load,
             distributed_load_end,
+            distributed_load_from: None,
+            distributed_load_to: None,
             temperature: None,
             temperature_gradient: None,
             release: None,
@@ -820,6 +835,58 @@ impl Model {
             .find(|element| element.id == id)
             .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
         element.temperature = temperature;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the loaded segment of an existing beam's distributed
+    /// load.
+    ///
+    /// `span` holds the start and end fractions of the element length, so
+    /// `Some((0.25, 0.75))` applies the load to the middle half of the member.
+    /// The element must already declare a distributed load. The fractions must
+    /// satisfy `0 <= start < end <= 1` and are rejected with
+    /// `element/invalid-load-span` otherwise; a truss is rejected with
+    /// `element/distributed-load-requires-beam`. `None` restores a load over
+    /// the whole member.
+    pub fn set_element_load_span(&mut self, id: &str, span: Option<(f64, f64)>) -> Result<(), CaeError> {
+        if let Some((start, end)) = span {
+            if !start.is_finite() || !end.is_finite() || start < 0.0 || end > 1.0 || start >= end {
+                return Err(CaeError::new(
+                    "element/invalid-load-span",
+                    format!("load span of element `{id}` must satisfy 0 <= start < end <= 1 (currently {start}..{end})"),
+                ));
+            }
+        }
+        let element = self
+            .elements
+            .iter_mut()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        if let Some((_, _)) = span {
+            if element.kind != ElementKind::Beam {
+                return Err(CaeError::new(
+                    "element/distributed-load-requires-beam",
+                    format!("element `{id}` is a truss element and cannot carry a distributed load span"),
+                ));
+            }
+            if element.distributed_load.is_none() {
+                return Err(CaeError::new(
+                    "element/missing-distributed-load",
+                    format!("element `{id}` must declare a distributed load before its span can be limited"),
+                ));
+            }
+        }
+        match span {
+            Some((start, end)) => {
+                element.distributed_load_from = Some(start);
+                element.distributed_load_to = Some(end);
+            }
+            None => {
+                element.distributed_load_from = None;
+                element.distributed_load_to = None;
+            }
+        }
         self.bump_revision();
         Ok(())
     }
