@@ -186,7 +186,7 @@ async function dispatch(args: readonly string[]): Promise<number> {
         case 'node':
             return subcommand(args, 'add', 'node');
         case 'element':
-            return subcommand(args, 'add', 'element');
+            return elementCommand(args.slice(1));
         case 'material':
             return materialCommand(args.slice(1));
         case 'library':
@@ -344,6 +344,37 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             temperature,
         });
         console.log(message('elementAdded', { id, revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function elementCommand(args: readonly string[]): Promise<number> {
+    const action = args[0];
+    if (action === 'add') {
+        return elementAdd(args.slice(1));
+    }
+    if (action === 'release') {
+        return elementRelease(args.slice(1));
+    }
+    if (action === undefined) {
+        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'element', expected: 'add or release' });
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'element', action, expected: 'add or release' });
+}
+
+async function elementRelease(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id'], ['--start', '--end']);
+    const file = positional(parsed, 0, 'element release <file> --id <id> [--start] [--end]');
+    const id = required(parsed, '--id');
+    const start = parsed.flags.has('--start');
+    const end = parsed.flags.has('--end');
+    if (!start && !end) {
+        throw failure('cli/missing-option', 'missingOption', { option: '--start or --end' });
+    }
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.setElementRelease({ id, start, end });
+        console.log(message('elementReleased', { id, start: String(start), end: String(end), revision: String(summary.revision) }));
         return 0;
     });
 }

@@ -14,7 +14,9 @@
 
 use std::path::Path;
 
-use cae_model::{CaeError, ElementKind, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, library_json};
+use cae_model::{
+    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, library_json,
+};
 use serde::Serialize;
 use serde_json::Value;
 use wae::{CallContext, Error, JsValue, Result, function, register_module};
@@ -202,6 +204,24 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
             temperature,
         )
         .map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Sets or clears the bending-moment releases of a beam element.
+///
+/// The request accepts `id`, `start` and `end`. When both flags are `false` the
+/// release is cleared and the member becomes fully continuous again.
+#[function]
+fn element_release(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let start = boolean_field(&request, "start")?;
+    let end = boolean_field(&request, "end")?;
+    let release = if start || end { Some(EndRelease { start, end }) } else { None };
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_element_release(&id, release).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -544,6 +564,7 @@ register_module![
     save,
     node_add,
     element_add,
+    element_release,
     material_set,
     material_preset,
     library,

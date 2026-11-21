@@ -45,8 +45,8 @@ pub use crate::{
     export::{export_csv, export_md, export_vtk, write_atomic},
     library::{MATERIAL_PRESETS, MaterialPreset, SectionProperties, library_json, material_preset},
     model::{
-        Element, ElementKind, ElementMaterial, FORMAT, Load, LoadCombination, Material, Model, Node, PrescribedDisplacement,
-        Section, SpringStiffness, Support, Units, VERSION,
+        Element, ElementKind, ElementMaterial, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
+        PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
     },
     session::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,

@@ -4,7 +4,7 @@ use boost_check::{CheckReport, Issue as CheckIssue, Severity as CheckSeverity};
 use serde::Serialize;
 
 use crate::{
-    model::{ElementKind, FORMAT, Model, VERSION, beam_nodes},
+    model::{ElementKind, FORMAT, Model, VERSION, rotation_nodes},
     solver::check_stability,
 };
 
@@ -324,9 +324,26 @@ impl Model {
                     ));
                 }
             }
+            if let Some(release) = element.release {
+                if element.kind != ElementKind::Beam {
+                    report.push(check_error(
+                        "element/release-requires-beam",
+                        format!(
+                            "element `{}` is a truss element and cannot have bending-moment releases; use a beam element",
+                            element.id
+                        ),
+                    ));
+                }
+                else if release.is_empty() {
+                    report.push(check_error(
+                        "element/invalid-release",
+                        format!("release of element `{}` must free at least one end", element.id),
+                    ));
+                }
+            }
         }
 
-        let beam_nodes = beam_nodes(self);
+        let rotation_nodes = rotation_nodes(self);
         for support in &self.supports {
             if self.node(&support.node).is_none() {
                 report.push(check_error("support/unknown-node", format!("support references unknown node `{}`", support.node)));
@@ -347,10 +364,10 @@ impl Model {
                         format!("node `{}` in a three-dimensional document cannot constrain rz rotation; beam elements are two-dimensional only", support.node),
                     ));
                 }
-                else if !beam_nodes.contains(support.node.as_str()) {
+                else if !rotation_nodes.contains(support.node.as_str()) {
                     report.push(check_error(
                         "support/inactive-dof",
-                        format!("node `{}` is not connected to any beam element, so it has no rz rotational degree of freedom to constrain", support.node),
+                        format!("node `{}` has no rz rotational degree of freedom: it has no beam element, or every beam end at the node is released", support.node),
                     ));
                 }
             }
@@ -409,11 +426,11 @@ impl Model {
                             ),
                         ));
                     }
-                    else if !beam_nodes.contains(support.node.as_str()) {
+                    else if !rotation_nodes.contains(support.node.as_str()) {
                         report.push(check_error(
                             "support/inactive-dof",
                             format!(
-                                "node `{}` is not connected to any beam element, so it has no rotational degree of freedom for a kr spring",
+                                "node `{}` has no rotational degree of freedom for a kr spring: it has no beam element, or every beam end at the node is released",
                                 support.node
                             ),
                         ));
@@ -486,10 +503,10 @@ impl Model {
                         format!("node `{}` in a three-dimensional document cannot carry an mz moment; beam elements are two-dimensional only", load.node),
                     ));
                 }
-                else if !beam_nodes.contains(load.node.as_str()) {
+                else if !rotation_nodes.contains(load.node.as_str()) {
                     report.push(check_error(
                         "load/inactive-dof",
-                        format!("node `{}` is not connected to any beam element, so it has no rotational degree of freedom for the mz moment", load.node),
+                        format!("node `{}` has no rotational degree of freedom for the mz moment: it has no beam element, or every beam end at the node is released", load.node),
                     ));
                 }
             }

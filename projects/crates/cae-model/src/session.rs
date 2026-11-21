@@ -396,6 +396,15 @@ impl OpenCae {
         self.edit(|model| model.set_element_temperature(id, temperature))
     }
 
+    /// Sets or clears the bending-moment releases of an existing beam and saves
+    /// the document.
+    ///
+    /// `release` frees the start and/or end bending rotation; `None` restores a
+    /// fully continuous member. Truss elements cannot be released.
+    pub fn set_element_release(&mut self, id: &str, release: Option<crate::EndRelease>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_element_release(id, release))
+    }
+
     /// Replaces the global material and section data and saves the document.
     pub fn set_material(&mut self, youngs_modulus: f64, area: f64, name: Option<String>) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| {

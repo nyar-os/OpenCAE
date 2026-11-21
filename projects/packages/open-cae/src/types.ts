@@ -596,6 +596,21 @@ export interface ElementAddRequest {
     readonly temperature?: number;
 }
 
+/** Bending-moment release (hinge) at the ends of a two-dimensional beam. */
+export interface EndRelease {
+    /** Release the bending moment at the `from` node. */
+    readonly start: boolean;
+    /** Release the bending moment at the `to` node. */
+    readonly end: boolean;
+}
+
+/** Request of `setElementRelease()`. Both flags false clears the release. */
+export interface ElementReleaseRequest {
+    readonly id: string;
+    readonly start?: boolean;
+    readonly end?: boolean;
+}
+
 /** Request of `setMaterial()`. */
 export interface MaterialSetRequest {
     readonly youngsModulus: number;

@@ -19,6 +19,7 @@ import type {
     CreateOptions,
     DocumentSummary,
     ElementAddRequest,
+    ElementReleaseRequest,
     ExportFormat,
     ExportReport,
     GravitySetRequest,
@@ -115,6 +116,11 @@ export function nodeAdd(path: string, request: NodeAddRequest): DocumentSummary 
 /** Adds a truss or beam element and returns the updated summary. */
 export function elementAdd(path: string, request: ElementAddRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('element.add').element_add(path, JSON.stringify(request)));
+}
+
+/** Sets or clears the bending-moment releases of a beam element. */
+export function elementRelease(path: string, request: ElementReleaseRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('element.release').element_release(path, JSON.stringify(request)));
 }
 
 /** Replaces the global material and returns the updated summary. */

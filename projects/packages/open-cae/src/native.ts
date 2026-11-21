@@ -20,6 +20,7 @@ export interface NativeBinding {
     save(path: string, target?: string): string;
     node_add(path: string, requestJson: string): string;
     element_add(path: string, requestJson: string): string;
+    element_release(path: string, requestJson: string): string;
     material_set(path: string, requestJson: string): string;
     material_preset(path: string, requestJson: string): string;
     library(requestJson?: string): string;

@@ -185,6 +185,7 @@ fn validation_reports_required_error_codes() {
         distributed_load: None,
         distributed_load_end: None,
         temperature: None,
+        release: None,
     });
     assert!(duplicate_element.validate().iter().any(|issue| issue.code == "element/duplicate"));
 

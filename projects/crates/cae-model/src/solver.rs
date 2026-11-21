@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CaeError, Severity,
-    model::{Element, ElementKind, LoadCombination, Model, Units, beam_nodes},
+    model::{Element, ElementKind, LoadCombination, Model, Units, rotation_nodes},
 };
 
 /// Version of the JSON result report produced by [`solve`].
@@ -647,7 +647,11 @@ struct AssemblyElement {
     length: f64,
     youngs_modulus: f64,
     area: f64,
-    displacement_dofs: Vec<usize>,
+    /// Global degree of freedom of every local element degree of freedom.
+    ///
+    /// `None` marks a released beam rotation that is condensed out and has no
+    /// global counterpart.
+    displacement_dofs: Vec<Option<usize>>,
     model: ElementModel,
 }
 
@@ -664,8 +668,13 @@ enum ElementModel {
 
 struct BeamLocal {
     transform: [[f64; 6]; 6],
+    /// Original continuous 6×6 stiffness, used to recover the internal rotation
+    /// of released ends.
     stiffness: [[f64; 6]; 6],
+    /// Original consistent local load vector.
     load: [f64; 6],
+    /// Released local degrees of freedom (only indices 2 and 5).
+    released: [bool; 6],
     /// Combined user and gravity transverse intensity at the start node.
     transverse_start: f64,
     /// Combined user and gravity transverse intensity at the end node.
@@ -759,7 +768,8 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
     let mut elements = Vec::with_capacity(system.elements.len());
     let mut strain_energy = 0.0;
     for element in &system.elements {
-        let local_displacement: Vec<f64> = element.displacement_dofs.iter().map(|&dof| displacement[dof]).collect();
+        let local_displacement: Vec<f64> =
+            element.displacement_dofs.iter().map(|slot| slot.map(|dof| displacement[dof]).unwrap_or(0.0)).collect();
         let (axial_force, end_forces, energy) = match &element.model {
             ElementModel::Truss { direction, axial_stiffness, components, thermal } => {
                 let mut axial = 0.0;
@@ -783,6 +793,7 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
                 for (row, value) in local.iter_mut().enumerate() {
                     *value = (0..6).map(|column| beam.transform[row][column] * local_displacement[column]).sum();
                 }
+                restore_released_rotations(beam, &mut local);
                 let mut forces = [0.0; 6];
                 for (row, value) in forces.iter_mut().enumerate() {
                     *value = (0..6).map(|column| beam.stiffness[row][column] * local[column]).sum::<f64>() - beam.load[row];
@@ -1036,7 +1047,15 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
                 local[5][5] = 2.0 * length * length / 15.0;
                 let transform = &beam.transform;
                 for (row, &row_dof) in element.displacement_dofs.iter().enumerate() {
+                    let Some(row_dof) = row_dof
+                    else {
+                        continue;
+                    };
                     for (column, &column_dof) in element.displacement_dofs.iter().enumerate() {
+                        let Some(column_dof) = column_dof
+                        else {
+                            continue;
+                        };
                         let value: f64 = (0..6)
                             .map(|a| (0..6).map(|b| transform[a][row] * local[a][b] * transform[b][column]).sum::<f64>())
                             .sum();
@@ -1058,8 +1077,9 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
                         let i = row % components;
                         let j = column % components;
                         let projector = if i == j { 1.0 } else { 0.0 } - direction[i] * direction[j];
-                        geometric[element.displacement_dofs[row] * size + element.displacement_dofs[column]] +=
-                            scale * sign * projector;
+                        let row_dof = element.displacement_dofs[row].expect("truss degree of freedom");
+                        let column_dof = element.displacement_dofs[column].expect("truss degree of freedom");
+                        geometric[row_dof * size + column_dof] += scale * sign * projector;
                     }
                 }
             }
@@ -1641,7 +1661,7 @@ pub(crate) fn check_stability(model: &Model) -> Result<(), Vec<String>> {
 
 fn build_layout(model: &Model) -> Layout {
     let three_dimensional = model.dimension == 3;
-    let beams = beam_nodes(model);
+    let beams = rotation_nodes(model);
     let uses_rotation = !three_dimensional && !beams.is_empty();
     let slots = if three_dimensional || uses_rotation { 3 } else { 2 };
     let full_size = model.nodes.len() * slots;
@@ -1790,29 +1810,40 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                 }
                 let local_stiffness = beam_stiffness(youngs_modulus, area, inertia, length);
                 let transform = beam_transform(c, s);
+                let release = element.release.unwrap_or_default();
+                let released = [false, false, release.start, false, false, release.end];
+                let (condensed_stiffness, condensed_load) = condense_releases(&local_stiffness, &local_load, released);
                 let displacement_dofs = vec![
-                    layout.dof(from * layout.slots)?,
-                    layout.dof(from * layout.slots + 1)?,
-                    layout.dof(from * layout.slots + 2)?,
-                    layout.dof(to * layout.slots)?,
-                    layout.dof(to * layout.slots + 1)?,
-                    layout.dof(to * layout.slots + 2)?,
+                    Some(layout.dof(from * layout.slots)?),
+                    Some(layout.dof(from * layout.slots + 1)?),
+                    if release.start { None } else { Some(layout.dof(from * layout.slots + 2)?) },
+                    Some(layout.dof(to * layout.slots)?),
+                    Some(layout.dof(to * layout.slots + 1)?),
+                    if release.end { None } else { Some(layout.dof(to * layout.slots + 2)?) },
                 ];
                 let mut global_stiffness = [[0.0_f64; 6]; 6];
                 for (row, row_values) in global_stiffness.iter_mut().enumerate() {
                     for (column, value) in row_values.iter_mut().enumerate() {
                         *value = (0..6)
                             .map(|a| {
-                                (0..6).map(|b| transform[a][row] * local_stiffness[a][b] * transform[b][column]).sum::<f64>()
+                                (0..6)
+                                    .map(|b| transform[a][row] * condensed_stiffness[a][b] * transform[b][column])
+                                    .sum::<f64>()
                             })
                             .sum();
                     }
                 }
                 for (row, &row_dof) in displacement_dofs.iter().enumerate() {
+                    let Some(row_dof) = row_dof
+                    else {
+                        continue;
+                    };
                     for (column, &column_dof) in displacement_dofs.iter().enumerate() {
-                        stiffness[row_dof * size + column_dof] += global_stiffness[row][column];
+                        if let Some(column_dof) = column_dof {
+                            stiffness[row_dof * size + column_dof] += global_stiffness[row][column];
+                        }
                     }
-                    let load: f64 = (0..6).map(|a| transform[a][row] * local_load[a]).sum();
+                    let load: f64 = (0..6).map(|a| transform[a][row] * condensed_load[a]).sum();
                     forces[row_dof] += load;
                 }
                 elements.push(AssemblyElement {
@@ -1828,6 +1859,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         transform,
                         stiffness: local_stiffness,
                         load: local_load,
+                        released,
                         transverse_start: load_start,
                         transverse_end: load_end,
                         axial_uniform,
@@ -1850,9 +1882,10 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                 let mut displacement_dofs = Vec::with_capacity(2 * translation_components);
                 for &node in &[from, to] {
                     for component in 0..translation_components {
-                        displacement_dofs.push(layout.dof(node * layout.slots + component)?);
+                        displacement_dofs.push(Some(layout.dof(node * layout.slots + component)?));
                     }
                 }
+                let active: Vec<usize> = displacement_dofs.iter().map(|slot| slot.expect("truss degree of freedom")).collect();
                 for row in 0..2 * translation_components {
                     let row_end = row / translation_components;
                     for column in 0..2 * translation_components {
@@ -1862,7 +1895,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                             * direction[row % translation_components]
                             * direction[column % translation_components]
                             * axial_stiffness;
-                        stiffness[displacement_dofs[row] * size + displacement_dofs[column]] += value;
+                        stiffness[active[row] * size + active[column]] += value;
                     }
                 }
                 if let Some(gravity) = gravity {
@@ -2079,6 +2112,98 @@ fn beam_transform(c: f64, s: f64) -> [[f64; 6]; 6] {
 /// The entries are the exact integrals of the Euler-Bernoulli shape functions
 /// against the linear load; `q1 = q2` reproduces the uniform `[wL/2, wL²/12,
 /// wL/2, −wL²/12]` vector.
+/// Inverts the rotational block of the released degrees of freedom.
+///
+/// Only one or two bending rotations (local indices 2 and 5) can be released,
+/// so the block is at most 2×2 and is inverted directly.
+fn invert_release_block(stiffness: &[[f64; 6]; 6], indices: &[usize]) -> Vec<f64> {
+    let count = indices.len();
+    let mut block = vec![0.0; count * count];
+    for (a, &i) in indices.iter().enumerate() {
+        for (b, &j) in indices.iter().enumerate() {
+            block[a * count + b] = stiffness[i][j];
+        }
+    }
+    if count == 1 {
+        vec![1.0 / block[0]]
+    }
+    else {
+        let determinant = block[0] * block[3] - block[1] * block[2];
+        vec![block[3] / determinant, -block[1] / determinant, -block[2] / determinant, block[0] / determinant]
+    }
+}
+
+/// Condenses released bending rotations out of a beam stiffness and load.
+///
+/// `K_cond = K − K_er·K_rr⁻¹·K_re` and `f_cond = f − K_er·K_rr⁻¹·f_r`; the rows
+/// and columns of released local degrees of freedom become zero because they
+/// have no global counterpart.
+fn condense_releases(stiffness: &[[f64; 6]; 6], load: &[f64; 6], released: [bool; 6]) -> ([[f64; 6]; 6], [f64; 6]) {
+    let indices: Vec<usize> = (0..6).filter(|&index| released[index]).collect();
+    if indices.is_empty() {
+        return (*stiffness, *load);
+    }
+    let count = indices.len();
+    let inverse = invert_release_block(stiffness, &indices);
+    let mut condensed_stiffness = *stiffness;
+    let mut condensed_load = *load;
+    for row in 0..6 {
+        if released[row] {
+            condensed_stiffness[row] = [0.0; 6];
+            continue;
+        }
+        // `z = K_rr⁻¹·K_erᵀ` for this row.
+        let mut z = vec![0.0; count];
+        for a in 0..count {
+            for b in 0..count {
+                z[a] += inverse[a * count + b] * stiffness[row][indices[b]];
+            }
+        }
+        for column in 0..6 {
+            if released[column] {
+                condensed_stiffness[row][column] = 0.0;
+            }
+            else {
+                let correction: f64 = (0..count).map(|k| z[k] * stiffness[indices[k]][column]).sum();
+                condensed_stiffness[row][column] = stiffness[row][column] - correction;
+            }
+        }
+        let correction: f64 = (0..count).map(|k| z[k] * load[indices[k]]).sum();
+        condensed_load[row] = load[row] - correction;
+    }
+    for &index in &indices {
+        condensed_load[index] = 0.0;
+    }
+    (condensed_stiffness, condensed_load)
+}
+
+/// Recovers the internal rotation of each released beam end.
+///
+/// A released end carries no moment, so `K_re·d_e + K_rr·θ_r = f_r` is solved
+/// for `θ_r` before the full end forces are recovered.
+fn restore_released_rotations(beam: &BeamLocal, local: &mut [f64; 6]) {
+    let indices: Vec<usize> = (0..6).filter(|&index| beam.released[index]).collect();
+    if indices.is_empty() {
+        return;
+    }
+    let count = indices.len();
+    let inverse = invert_release_block(&beam.stiffness, &indices);
+    let mut rhs = vec![0.0; count];
+    for (a, &index) in indices.iter().enumerate() {
+        let mut value = beam.load[index];
+        for column in 0..6 {
+            if !beam.released[column] {
+                value -= beam.stiffness[index][column] * local[column];
+            }
+        }
+        rhs[a] = value;
+    }
+    for a in 0..count {
+        let rotation: f64 = (0..count).map(|b| inverse[a * count + b] * rhs[b]).sum();
+        local[indices[a]] = rotation;
+    }
+}
+
 fn add_linear_transverse(load: &mut [f64; 6], q1: f64, q2: f64, length: f64) {
     let length2 = length * length;
     load[1] += length * (7.0 * q1 + 3.0 * q2) / 20.0;

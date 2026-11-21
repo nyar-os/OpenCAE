@@ -47,6 +47,8 @@ export const errorCodes = [
     'element/distributed-load-requires-beam',
     'element/invalid-distributed-load',
     'element/invalid-temperature',
+    'element/invalid-release',
+    'element/release-requires-beam',
     'element/unknown-id',
     'support/unknown-node',
     'support/no-freedom',

@@ -11,7 +11,9 @@ use std::{
     process,
 };
 
-use cae_model::{CaeError, ElementKind, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, not_implemented};
+use cae_model::{
+    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, not_implemented,
+};
 
 const USAGE: &str = "\
 ocae - OpenCAE truss/beam linear-static, modal and buckling solver (2D/3D)
@@ -20,8 +22,9 @@ Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
-                    [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]
-  ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]
+                    [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
+  ocae element release <file> --id <id> [--start] [--end]
+  ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--alpha <a>]
   ocae material preset <file> --preset <name> [--section rectangle|circle|i]
                         [--width <w>] [--height <h>] [--diameter <d>] [--depth <d>]
                         [--flange-width <b>] [--flange-thickness <t>] [--web-thickness <t>]
@@ -82,7 +85,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         }
         "create" => create(&args[1..]),
         "node" => subcommand(args, "add", "node"),
-        "element" => subcommand(args, "add", "element"),
+        "element" => element_command(&args[1..]),
         "material" => material_command(&args[1..]),
         "library" => library_command(&args[1..]),
         "support" => subcommand(args, "add", "support"),
@@ -204,6 +207,40 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
         temperature,
     )?;
     println!("element `{id}` added as {} (revision {})", kind.as_str(), summary.revision);
+    Ok(0)
+}
+
+fn element_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("add") => element_add(&args[1..]),
+        Some("release") => element_release(&args[1..]),
+        Some(other) => Err(CaeError::new(
+            "cli/unknown-command",
+            format!("subcommand `{other}` of `element` does not exist; only `add` or `release` is supported"),
+        )),
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`element` is missing a subcommand; only `add` or `release` is supported",
+        )),
+    }
+}
+
+fn element_release(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id"], &["--start", "--end"])?;
+    let file = positional(&parsed, 0, "element release <file> --id <id> [--start] [--end]")?;
+    let id = required(&parsed, "--id")?;
+    let start = parsed.flags.contains("--start");
+    let end = parsed.flags.contains("--end");
+    if !start && !end {
+        return Err(CaeError::new(
+            "cli/missing-option",
+            "specify `--start` and/or `--end`; a release must free at least one end",
+        ));
+    }
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_element_release(id, Some(EndRelease { start, end }))?;
+    println!("element `{id}` released (start={start}, end={end}, revision {})", summary.revision);
     Ok(0)
 }
 

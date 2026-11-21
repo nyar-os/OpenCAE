@@ -19,6 +19,7 @@ import type {
     Dimension,
     DocumentSummary,
     ElementAddRequest,
+    ElementReleaseRequest,
     ExportFormat,
     ExportReport,
     GravitySetRequest,
@@ -121,6 +122,15 @@ export class CaeDocument {
     addElement(request: ElementAddRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.elementAdd(this.path, request));
+    }
+
+    /**
+     * Sets or clears the bending-moment releases of a beam element and saves
+     * the file. `{ start: false, end: false }` clears the release.
+     */
+    setElementRelease(request: ElementReleaseRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.elementRelease(this.path, request));
     }
 
     /** Replaces the global material and saves the file. */
