@@ -311,7 +311,8 @@ fn combination_remove(ctx: CallContext) -> Result<JsValue> {
     if !removed {
         return Err(Error::new(format!("combination/unknown-name: no load combination named `{name}` exists")));
     }
-    respond(&ctx, &removed)
+    let summary = session.summary().map_err(fail)?;
+    respond(&ctx, &summary)
 }
 
 /// Solves every load combination and returns the solutions plus their
