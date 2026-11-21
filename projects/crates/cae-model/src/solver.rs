@@ -252,6 +252,12 @@ pub struct Mode {
     pub eigenvalue: f64,
     /// Largest absolute nodal shape value.
     pub max_amplitude: f64,
+    /// Effective modal mass `(φᵀ·M·r)²` in the global X, Y and Z directions.
+    ///
+    /// The shape is mass-normalized, so the participation factor is
+    /// `φᵀ·M·r` and its square is the mass excited by this mode. The ratio to
+    /// `ModalSolution::total_mass` is the effective mass fraction.
+    pub effective_mass: [f64; 3],
     /// Mass-normalized mode shape in model node order.
     pub shape: Vec<ModeShape>,
 }
@@ -271,6 +277,12 @@ pub struct ModalSolution {
     /// Number of eigenvalues skipped because they were zero, negative or
     /// non-finite; skipped values are never emitted.
     pub skipped: usize,
+    /// Total translational mass in the global X, Y and Z directions.
+    ///
+    /// Two-dimensional models report `z = 0`. The sum of
+    /// `Mode::effective_mass` divided by these values is the cumulative mass
+    /// participation of the returned modes.
+    pub total_mass: [f64; 3],
     /// Modes in ascending frequency order.
     pub modes: Vec<Mode>,
 }
@@ -710,6 +722,15 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
         return Err(CaeError::new("model/mechanism", "no free degrees of freedom available for modal analysis"));
     }
     let mass = mass_matrix(model, &system.layout)?;
+    let translations = if model.dimension == 3 { 3 } else { 2 };
+    let mut total_mass = [0.0_f64; 3];
+    for node in 0..model.nodes.len() {
+        for (component, value) in total_mass.iter_mut().enumerate().take(translations) {
+            if let Some(dof) = system.layout.index.get(node * system.layout.slots + component).copied().flatten() {
+                *value += mass[dof];
+            }
+        }
+    }
     let count = free.len();
     let mut matrix = vec![0.0; count * count];
     for (row, &row_dof) in free.iter().enumerate() {
@@ -750,6 +771,17 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
         for (row, &dof) in free.iter().enumerate() {
             shape_values[dof] = eigenvectors[row * count + index] / mass[dof].sqrt();
         }
+        let mut effective_mass = [0.0_f64; 3];
+        for node in 0..model.nodes.len() {
+            for (component, value) in effective_mass.iter_mut().enumerate().take(translations) {
+                if let Some(dof) = system.layout.index.get(node * system.layout.slots + component).copied().flatten() {
+                    *value += mass[dof] * shape_values[dof];
+                }
+            }
+        }
+        for value in &mut effective_mass {
+            *value *= *value;
+        }
         let mut max_amplitude = 0.0_f64;
         let shape: Vec<ModeShape> = model
             .nodes
@@ -768,6 +800,7 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
             frequency_hz: eigenvalue.sqrt() / (2.0 * std::f64::consts::PI),
             eigenvalue,
             max_amplitude,
+            effective_mass,
             shape,
         });
     }
@@ -778,6 +811,7 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
         units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
         requested: modes,
         skipped,
+        total_mass,
         modes: result_modes,
     })
 }

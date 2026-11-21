@@ -238,7 +238,7 @@ The file is UTF-8 JSON with camelCase fields:
 | 2D Euler-Bernoulli beam (`beam2d`, including axial force/shear/bending moment, distributed loads, end moments) | ✅ supported |
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
-| modal analysis (`modal`, lumped mass + Jacobi) | ✅ supported |
+| modal analysis (`modal`, lumped mass + Jacobi, effective modal mass) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
@@ -269,7 +269,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
    - each element reports local end forces `endForces = {n1,v1,m1,n2,v2,m2} = K_local·d_local − f_eq` and `maxAbsMoment`; the axial force `axialForce` is reported separately with tension positive;
    - `solve_internal_forces(model, stations)` (CLI `ocae forces`) recovers section forces by equilibrium from the end forces and the applied linear/gravity loads: `N(x) = −n1 − p·x`, `V(x) = v1 + ∫q`, `M(x) = −m1 + v1·x + ∫q(x−s)ds`, sampled at equally spaced stations; the end stations reproduce the end forces exactly;
    - total strain energy `Σ ½·dᵀKd` is reported as `strainEnergy`.
-7. **Modal analysis**: uses the same `K` as the original problem and a diagonal lumped mass matrix — `ρAL/2` for translational degrees of freedom and `ρIL/2` (rotary inertia) for beam rotational degrees of freedom. It forms the symmetric matrix `A = M^(−1/2)·K·M^(−1/2)`, computes eigenvalues with symmetric Jacobi iterations (off-diagonal tolerance `1e-12·max|A|`, at most 100 sweeps) and frequencies `f = √λ/(2π)`. Zero, negative or non-finite eigenvalues are skipped and counted in `skipped`; NaN is never emitted.
+7. **Modal analysis**: uses the same `K` as the original problem and a diagonal lumped mass matrix — `ρAL/2` for translational degrees of freedom and `ρIL/2` (rotary inertia) for beam rotational degrees of freedom. It forms the symmetric matrix `A = M^(−1/2)·K·M^(−1/2)`, computes eigenvalues with symmetric Jacobi iterations (off-diagonal tolerance `1e-12·max|A|`, at most 100 sweeps) and frequencies `f = √λ/(2π)`. Zero, negative or non-finite eigenvalues are skipped and counted in `skipped`; NaN is never emitted. Each mode reports the effective modal mass `(φᵀ·M·r)²` in X/Y/Z, and `totalMass` reports the total translational mass so the effective mass fraction can be obtained by division; the fixed-free axial bar first mode approaches the analytical `8/π²` fraction.
 8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Two-dimensional beams and two- or three-dimensional trusses are assembled.
 9. **Mechanism detection**: every solve performs a numerical rank check on the free-degree-of-freedom stiffness matrix (whether `K_ff` has full rank); on failure it reports `model/mechanism` and lists as many unconstrained nodes as possible.
 10. **Load combinations**: each combination clones the model, multiplies every nodal load and element distributed load by `loads`, multiplies the gravity vector by `gravity` (clearing it when the result is the zero vector), solves the scaled model and keeps the full static solution. The envelope reports the governing nodal displacement, signed axial force/moment maxima and per-node/per-element extremes with the combination names that produced them. Prescribed displacements are not scaled.
@@ -296,7 +296,8 @@ pnpm --filter @wae/open-cae run typecheck
 - cantilever beam with a uniform distributed load: end deflection `wL⁴/(8EI)` (`1e-9`);
 - cantilever beam with a triangular load of peak `q0` at the fixed end: end deflection `q0L⁴/(30EI)` and fixed-end reaction moment `q0L²/6` (`1e-9`);
 - simply supported beam with a midspan concentrated force: midspan deflection `PL³/(48EI)` and maximum bending moment `PL/4` (`1e-9`);
-- fixed-free axial bar (10 elements): first frequency within `< 3%` of `(1/(4L))√(E/ρ)`;
+- fixed-free axial bar (10 elements): first frequency within `< 3%` of `(1/(4L))√(E/ρ)`, and its first-mode effective mass fraction within `< 5%` of the analytical `8/π²`;
+- single free translational degree of freedom: effective mass equals the free nodal mass `ρAL/2` and `totalMass` equals `ρAL` (`1e-12`);
 - cantilever beam (40 elements): first bending frequency within `< 5%` of `1.875104²·√(EI/(ρAL⁴))/(2π)`;
 - pinned-pinned beam column (20 elements): first linear buckling factor within `0.1%` of the Euler load `P_cr = π²EI/L²`;
 - three-dimensional tetrahedron truss: the two lateral buckling factors match the closed-form geometric-stiffness eigenvalue `E·A·R²/(N·(R²+2H²))` (relative error `1e-8`);

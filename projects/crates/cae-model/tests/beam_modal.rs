@@ -299,6 +299,52 @@ fn fixed_free_bar_fundamental_frequency_matches_analytic_within_three_percent() 
 }
 
 #[test]
+fn modal_effective_mass_of_a_single_free_dof_matches_the_free_nodal_mass() {
+    let mut model = Model::new(Units::Millimeter);
+    model.set_material_full(Some("steel".to_string()), E, A, RHO);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", L, 0.0).expect("n2");
+    model.add_element("e1", "n1", "n2", None).expect("bar");
+    model.add_support("n1", true, true).expect("fixed end");
+    model.add_support("n2", false, true).expect("lateral guide");
+
+    let modal = solve_modal(&model, 1).expect("modal");
+    let free_mass = 0.5 * RHO * A * L;
+    let total_mass = RHO * A * L;
+    assert_close(modal.total_mass[0], total_mass, 1e-12);
+    assert_close(modal.total_mass[1], total_mass, 1e-12);
+    assert_close(modal.total_mass[2], 0.0, 1e-12);
+    let mode = modal.modes.first().expect("first mode");
+    assert_close(mode.effective_mass[0], free_mass, 1e-12);
+    assert_close(mode.effective_mass[1], 0.0, 1e-12);
+    assert_close(mode.effective_mass[2], 0.0, 1e-12);
+    let expected_frequency = (E * A / (L * free_mass)).sqrt() / (2.0 * std::f64::consts::PI);
+    assert_close(mode.frequency_hz, expected_frequency, 1e-9);
+}
+
+#[test]
+fn fixed_free_bar_first_axial_mode_effective_mass_is_within_five_percent_of_eight_over_pi_squared() {
+    let elements = 10;
+    let mut model = Model::new(Units::Millimeter);
+    model.set_material_full(Some("steel".to_string()), E, A, RHO);
+    for index in 0..=elements {
+        let x = L * index as f64 / elements as f64;
+        model.add_node(format!("n{}", index + 1), x, 0.0).expect("node");
+        model.add_support(format!("n{}", index + 1), false, true).expect("lateral guide");
+    }
+    for index in 0..elements {
+        model.add_element(format!("e{}", index + 1), format!("n{}", index + 1), format!("n{}", index + 2), None).expect("bar");
+    }
+    model.add_support("n1", true, true).expect("fixed end");
+
+    let modal = solve_modal(&model, 1).expect("modal");
+    let mode = modal.modes.first().expect("first mode");
+    let fraction = mode.effective_mass[0] / modal.total_mass[0];
+    let analytic = 8.0 / std::f64::consts::PI.powi(2);
+    assert_close(fraction, analytic, 0.05);
+}
+
+#[test]
 fn cantilever_beam_first_bending_frequency_matches_analytic_within_five_percent() {
     let mut model = beam_model(40);
     model.set_material_full(Some("steel".to_string()), E, A, RHO);

@@ -293,6 +293,11 @@ export interface Mode {
     readonly frequencyHz: number;
     readonly eigenvalue: number;
     readonly maxAmplitude: number;
+    /**
+     * Effective modal mass `(φᵀ·M·r)²` in the global X, Y and Z directions.
+     * Divide by `totalMass` for the effective mass fraction.
+     */
+    readonly effectiveMass: readonly [number, number, number];
     readonly shape: readonly ModeShape[];
 }
 
@@ -305,6 +310,8 @@ export interface ModalSolution {
     readonly requested: number;
     /** Zero, negative or non-finite eigenvalues that were skipped. */
     readonly skipped: number;
+    /** Total translational mass in the global X, Y and Z directions. */
+    readonly totalMass: readonly [number, number, number];
     readonly modes: readonly Mode[];
 }
 
