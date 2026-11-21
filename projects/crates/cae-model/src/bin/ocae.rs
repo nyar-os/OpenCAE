@@ -23,6 +23,7 @@ Usage:
                     [--kind truss|beam] [--I <I>] [--w <w>]
   ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
+                    [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
   ocae self-weight <file> --g <g> [--axis x|y|z]
@@ -195,23 +196,43 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn support_add(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--node"], &["--dx", "--dy", "--dz", "--rz"])?;
-    let file = positional(&parsed, 0, "support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]")?;
+    let parsed = parse(args, &["--node", "--ux", "--uy", "--uz", "--rotation"], &["--dx", "--dy", "--dz", "--rz"])?;
+    let file = positional(
+        &parsed,
+        0,
+        "support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]",
+    )?;
     let node = required(&parsed, "--node")?;
     let dx = parsed.flags.contains("--dx");
     let dy = parsed.flags.contains("--dy");
     let dz = parsed.flags.contains("--dz");
     let rz = parsed.flags.contains("--rz");
-    if !dx && !dy && !dz && !rz {
+    let ux = number(&parsed, "--ux")?;
+    let uy = number(&parsed, "--uy")?;
+    let uz = number(&parsed, "--uz")?;
+    let rotation = number(&parsed, "--rotation")?;
+    let prescribed = ux.is_some() || uy.is_some() || uz.is_some() || rotation.is_some();
+    if !dx && !dy && !dz && !rz && !prescribed {
         return Err(CaeError::new(
             "cli/missing-option",
-            "specify at least one of `--dx`, `--dy`, `--dz` or `--rz`; otherwise the support constrains no degree of freedom",
+            "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz` or `--rotation`; otherwise the support constrains no degree of freedom",
         ));
     }
     let mut session = session();
     session.open(Path::new(file))?;
-    let summary = session.add_support_full(node, dx, dy, dz, rz)?;
-    println!("support `{node}` added (dx={dx}, dy={dy}, dz={dz}, rz={rz}, revision {})", summary.revision);
+    let summary = if prescribed {
+        if dx || dy || dz || rz {
+            session.add_support_full(node, dx, dy, dz, rz)?;
+        }
+        session.prescribe_displacement(node, ux, uy, uz, rotation)?
+    }
+    else {
+        session.add_support_full(node, dx, dy, dz, rz)?
+    };
+    println!(
+        "support `{node}` added (dx={dx}, dy={dy}, dz={dz}, rz={rz}, ux={ux:?}, uy={uy:?}, uz={uz:?}, rotation={rotation:?}, revision {})",
+        summary.revision
+    );
     Ok(0)
 }
 

@@ -355,19 +355,27 @@ async function materialSet(args: readonly string[]): Promise<number> {
 }
 
 async function supportAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--node'], ['--dx', '--dy', '--dz', '--rz']);
-    const file = positional(parsed, 0, 'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]');
+    const parsed = parse(args, ['--node', '--ux', '--uy', '--uz', '--rotation'], ['--dx', '--dy', '--dz', '--rz']);
+    const file = positional(
+        parsed,
+        0,
+        'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]',
+    );
     const node = required(parsed, '--node');
     const dx = parsed.flags.has('--dx');
     const dy = parsed.flags.has('--dy');
     const dz = parsed.flags.has('--dz');
     const rz = parsed.flags.has('--rz');
-    if (!dx && !dy && !dz && !rz) {
+    const ux = number(parsed, '--ux');
+    const uy = number(parsed, '--uy');
+    const uz = number(parsed, '--uz');
+    const rotation = number(parsed, '--rotation');
+    if (!dx && !dy && !dz && !rz && ux === undefined && uy === undefined && uz === undefined && rotation === undefined) {
         throw failure('cli/missing-option', 'noFreedom');
     }
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.addSupport({ node, dx, dy, dz, rz });
+        const summary = document.addSupport({ node, dx, dy, dz, rz, ux, uy, uz, rotation });
         console.log(
             message('supportAdded', {
                 node,

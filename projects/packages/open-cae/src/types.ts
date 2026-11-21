@@ -285,7 +285,10 @@ export interface MaterialSetRequest {
     readonly name?: string;
 }
 
-/** Request of `addSupport()`. At least one flag must be `true`. */
+/**
+ * Request of `addSupport()`. At least one constraint flag or prescribed value
+ * must be present.
+ */
 export interface SupportAddRequest {
     readonly node: string;
     readonly dx?: boolean;
@@ -293,6 +296,17 @@ export interface SupportAddRequest {
     readonly dz?: boolean;
     /** Rotation about Z; only valid at beam nodes in two dimensions. */
     readonly rz?: boolean;
+    /**
+     * Enforced displacement along X; implies `dx`. Non-zero values model a
+     * support settlement or a driven displacement.
+     */
+    readonly ux?: number;
+    /** Enforced displacement along Y; implies `dy`. */
+    readonly uy?: number;
+    /** Enforced displacement along Z; implies `dz` and is valid in 3D only. */
+    readonly uz?: number;
+    /** Enforced rotation about Z in radians; implies `rz`. */
+    readonly rotation?: number;
 }
 
 /** Request of `addLoad()`. */

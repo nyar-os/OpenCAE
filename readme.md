@@ -1,6 +1,6 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, modal and linear buckling analysis. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, modal and linear buckling analysis. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
@@ -62,6 +62,7 @@ document.export('md', 'out/report.md');              // deterministic Markdown r
 
 - Sessions: `capabilities()`, `create(path, options?)`, `open(path)`, `dispose()`.
 - Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/validate/solve/export/report/save/close`; every edit operation writes atomically to the file.
+- `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
 
@@ -136,6 +137,15 @@ cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --ou
 
 `--kind beam` requires `--I`; `--w` is the distributed transverse load in the element-local `+y` direction (force/length, positive upwards) and is converted to the consistent nodal vector `[0, wL/2, wL²/12, 0, wL/2, −wL²/12]`. The nodal moment `--mz` is positive counter-clockwise. `self-weight --g -9810 --axis y` is equivalent to `model gravity --gy -9810`.
 
+Prescribed displacements (support settlements or driven degrees of freedom) use the same command; supplying `--ux/--uy/--uz/--rotation` also constrains that degree of freedom:
+
+```shell
+cargo run -p cae-model --bin ocae --offline -- support add beam.ocae --node n2 --uy -2
+cargo run -p cae-model --bin ocae --offline -- solve beam.ocae   # roller settles 2 mm
+```
+
+For a propped cantilever with a 2 mm roller settlement the roller reaction is `3EIδ/L³` downwards, the fixed-end reaction is the opposite force and the fixed-end moment is `3EIδ/L²`; the value is asserted to relative error `1e-12` in the tests.
+
 ## CLI commands
 
 | Command | Description |
@@ -144,7 +154,7 @@ cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --ou
 | `ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]` | Add a node; duplicate ids are rejected; `--z` defaults to 0 and may be non-zero only in 3D documents |
 | `ocae element add <file> --id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>]` | Add a truss/beam element; `beam` is 2D-only and requires a positive `--I`; `--w` is a local `+y` distributed load |
 | `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`) |
-| `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz]` | Add/merge support constraints; `--rz` is available only on beam nodes and `--dz` only in 3D documents |
+| `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]` | Add/merge support constraints; `--rz` is available only on beam nodes and `--dz` only in 3D documents. A supplied displacement clamps that degree of freedom to the given value and implies its flag |
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
 | `ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]` | Set the gravity acceleration; the zero vector clears it |
 | `ocae self-weight <file> --g <g> [--axis x\|y\|z]` | Set the gravity acceleration along the given axis |
@@ -200,12 +210,12 @@ The file is UTF-8 JSON with camelCase fields:
 | `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name` |
 | `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
 | `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` and accepts an optional `distributedLoad` in the local `+y` direction |
-| `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false` |
+| `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
 | `gravity` | Optional `[gx, gy, gz]`; when set, self-weight is applied from the density |
 | `revision` | Edit counter incremented by CLI modifications; may be 0 |
 
-**Dimension consistency**: if a `dimension: 2` document contains a non-zero `z`, `dz: true`, a non-zero `fz` or a non-zero `gz`, validation returns a `document/dimension-mismatch` error (edit commands also reject it before writing) instead of silently ignoring those values. 3D documents do not allow `beam` elements, `rz: true` or a non-zero `mz` (returning `capability/not-implemented` or `document/dimension-mismatch`). `rz`/`mz` may only be used on nodes connected by beam elements; otherwise `support/inactive-dof` / `load/inactive-dof` is reported.
+**Dimension consistency**: if a `dimension: 2` document contains a non-zero `z`, `dz: true`, a non-zero `fz` or a non-zero `gz`, validation returns a `document/dimension-mismatch` error (edit commands also reject it before writing) instead of silently ignoring those values. 3D documents do not allow `beam` elements, `rz: true` or a non-zero `mz` (returning `capability/not-implemented` or `document/dimension-mismatch`). `rz`/`mz` may only be used on nodes connected by beam elements; otherwise `support/inactive-dof` / `load/inactive-dof` is reported. A `prescribed` value must be finite and its matching flag must be `true`, otherwise `support/invalid-prescribed` or `support/prescribed-unconstrained` is reported; a non-zero `prescribed.uz` in 2D or `prescribed.rz` in 3D is a `document/dimension-mismatch`.
 
 **Degree-of-freedom activation**: a 2D document that contains any beam element uses 3 degrees of freedom per node (`ux, uy, rz`); however, `rz` is active only at nodes touched by a beam, so purely truss parts never produce zero-stiffness rotation rows. Pure truss documents still use 2 degrees of freedom per node. 3D trusses keep 3 translational degrees of freedom per node.
 
@@ -219,6 +229,7 @@ The file is UTF-8 JSON with camelCase fields:
 | 3D truss linear static (`truss3d`) | ✅ supported |
 | 2D Euler-Bernoulli beam (`beam2d`, including axial force/shear/bending moment, distributed loads, end moments) | ✅ supported |
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
+| prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
@@ -230,13 +241,13 @@ The file is UTF-8 JSON with camelCase fields:
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling` is available through the Rust API, the native addon and the TypeScript SDK/CLI for two-dimensional truss/beam and three-dimensional truss models.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling` and `prescribedDisplacement` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families.
 
 ## Numerical methods
 
 1. **Direct stiffness method**: truss elements are assembled from the 3D length `L`, direction cosines `c` and axial stiffness `k = EA/L`. 2D beam elements use the 6×6 Euler-Bernoulli stiffness in local `[u1x, u1y, θ1, u2x, u2y, θ2]` coordinates (`EA/L`, `12EI/L³`, `6EI/L²`, `4EI/L`, `2EI/L`) and are assembled as `TᵀKT` with the rotation transformation `c = Δx/L, s = Δy/L`.
 2. **Degree-of-freedom activation**: a 2D document containing beams uses `ux, uy, rz` globally, but `rz` is active only at beam nodes; 2D documents without beams use only `ux, uy`; 3D trusses use `ux, uy, uz`. This prevents zero-stiffness rotation rows in purely truss parts.
-3. **Constraint handling**: only active, unconstrained degrees of freedom are assembled and the reduced system is solved (row/column elimination first), avoiding the ill-conditioning of the large-number penalty method.
+3. **Constraint handling**: only active, unconstrained degrees of freedom are assembled and the reduced system is solved (row/column elimination first), avoiding the ill-conditioning of the large-number penalty method. When a support prescribes a non-zero displacement `u_c`, the free right-hand side is corrected by `−K_fc·u_c`; the constrained values are then written back into the displacement vector, so reactions and element forces follow from the same `K·u − F` residual as homogeneous supports.
 4. **Linear equation solution**: a self-written Gaussian elimination with partial pivoting (no linear algebra crate). A pivot smaller than `1e-12 × the largest matrix magnitude` is treated as singular and returns `model/mechanism`.
 5. **Distributed loads and self-weight**:
    - The beam distributed load `w` (local `+y`) becomes the consistent nodal vector `[0, wL/2, wL²/12, 0, wL/2, −wL²/12]` and is then applied through the coordinate transformation; this expression is the exact integral for Euler-Bernoulli shape functions.
@@ -279,6 +290,13 @@ pnpm --filter @wae/open-cae run typecheck
 - vertical bar self-weight: sum of reactions equals total weight (relative error `1e-9`);
 - rejection/behaviour tests for 3D beams, truss distributed loads, zero-density modal analysis, three-dimensional buckling and Markdown report determinism.
 
+`projects/crates/cae-model/tests/prescribed.rs` asserts prescribed-displacement behaviour:
+
+- axial bar with a prescribed end elongation: `N = EAδ/L`, `σ = Eδ/L` and equal/opposite end reactions (`1e-12`);
+- propped cantilever with a `δ` roller settlement: tip rotation `−1.5δ/L`, roller reaction `−3EIδ/L³`, fixed reaction `+3EIδ/L³`, fixed-end moment `3EIδ/L²` (`1e-12`);
+- rejection of empty prescriptions, unknown nodes, `uz` in 2D and `rz` in 3D, plus the `support/prescribed-unconstrained` validation finding;
+- `.ocae` round trips that preserve the `prescribed` block.
+
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
 ## Repository structure
@@ -295,6 +313,7 @@ projects/
     src/bin/ocae.rs      thin CLI: argument parsing, API calls, printing and exit codes
     tests/cae_model.rs   truss model solve and export tests
     tests/beam_modal.rs  analytical beam, self-weight, modal and buckling tests
+    tests/prescribed.rs  analytical prescribed-displacement and settlement tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -311,7 +330,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 ## Limitations
 
 - Beams are **2D Euler-Bernoulli only** (no shear deformation, no axial-bending coupling, no moment releases); **3D beams/frames (beam3d / frame3d) are not implemented** and return `capability/not-implemented`.
-- Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, thermal, contact, prestress and enforced displacement are not supported.
+- Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, thermal, contact and prestress are not supported. Prescribed displacements are supported as a single static kinematic boundary condition, not as a time-dependent or multi-step loading history.
 - Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects. Three-dimensional beams remain unsupported, so three-dimensional buckling is limited to truss models.
 - Loads are limited to **nodal concentrated forces/moments** and **element distributed transverse loads `w`**; arbitrary distributed loads and temperature loads are not supported.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.

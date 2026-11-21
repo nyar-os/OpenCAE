@@ -208,6 +208,10 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
 }
 
 /// Adds or merges a support entry of a document and saves it.
+///
+/// `ux`, `uy`, `uz` and `rotation` enforce non-zero displacement values and
+/// imply the matching constraint; when they are present the entry is written
+/// through the prescribed-displacement path.
 #[function]
 fn support_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -217,9 +221,22 @@ fn support_add(ctx: CallContext) -> Result<JsValue> {
     let dy = boolean_field(&request, "dy")?;
     let dz = boolean_field(&request, "dz")?;
     let rz = boolean_field(&request, "rz")?;
+    let ux = number_field(&request, "ux")?;
+    let uy = number_field(&request, "uy")?;
+    let uz = number_field(&request, "uz")?;
+    let rotation = number_field(&request, "rotation")?;
+    let prescribed = ux.is_some() || uy.is_some() || uz.is_some() || rotation.is_some();
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary = session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?;
+    let summary = if prescribed {
+        if dx || dy || dz || rz {
+            session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?;
+        }
+        session.prescribe_displacement(&node, ux, uy, uz, rotation).map_err(fail)?
+    }
+    else {
+        session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?
+    };
     respond(&ctx, &summary)
 }
 
