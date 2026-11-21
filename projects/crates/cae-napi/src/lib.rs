@@ -444,6 +444,20 @@ fn internal_forces(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &forces)
 }
 
+/// Returns support reactions and the global force equilibrium check.
+///
+/// The request accepts an optional `out` path for the JSON report.
+#[function]
+fn reactions(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.reactions(out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Recovers extreme-fibre beam stresses from the sampled internal forces.
 ///
 /// The request accepts `stations` (default 11, at least 2) and an optional
@@ -503,6 +517,7 @@ register_module![
     solve_combinations,
     validate,
     solve,
+    reactions,
     internal_forces,
     stresses,
     export,

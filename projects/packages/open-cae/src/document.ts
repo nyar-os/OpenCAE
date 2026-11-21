@@ -28,6 +28,8 @@ import type {
     MaterialSetRequest,
     ModalSolution,
     NodeAddRequest,
+    ReactionOptions,
+    ReactionSummary,
     Report,
     Solution,
     SolveOptions,
@@ -195,6 +197,12 @@ export class CaeDocument {
     internalForces(options: InternalForceOptions = {}): InternalForceSolution {
         this.assertOpen();
         return service.internalForces(this.path, options);
+    }
+
+    /** Returns support reactions and the global force equilibrium check. */
+    reactions(options: ReactionOptions = {}): ReactionSummary {
+        this.assertOpen();
+        return service.reactions(this.path, options);
     }
 
     /** Recovers extreme-fibre stresses and utilisation per element. */

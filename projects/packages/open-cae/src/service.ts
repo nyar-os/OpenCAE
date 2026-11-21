@@ -30,6 +30,8 @@ import type {
     NodeAddRequest,
     OpenCAECapabilities,
     Report,
+    ReactionOptions,
+    ReactionSummary,
     Solution,
     SolveOptions,
     StressOptions,
@@ -186,6 +188,14 @@ export function solveCombinations(path: string, options: CombinationSolveOptions
         request === undefined
             ? binding('combination.solve').solve_combinations(path)
             : binding('combination.solve').solve_combinations(path, request),
+    );
+}
+
+/** Returns support reactions and the global force equilibrium check. */
+export function reactions(path: string, options: ReactionOptions = {}): ReactionSummary {
+    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    return decode<ReactionSummary>(() =>
+        request === undefined ? binding('solve.reactions').reactions(path) : binding('solve.reactions').reactions(path, request),
     );
 }
 

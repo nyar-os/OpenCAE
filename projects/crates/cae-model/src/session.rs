@@ -20,8 +20,9 @@ use crate::{
     library::material_preset,
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
-        BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution,
-        StressSolution, solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal, solve_stress,
+        BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION,
+        ReactionSummary, Solution, StressSolution, solve, solve_buckling, solve_combinations, solve_internal_forces,
+        solve_modal, solve_stress,
     },
     validate::{Issue, Severity},
 };
@@ -89,7 +90,7 @@ pub struct ValidationReport {
 /// Supported export formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
-    /// Two CSV files (`nodes.csv`, `elements.csv`) inside a directory.
+    /// Three CSV files (`nodes.csv`, `elements.csv`, `reactions.csv`) inside a directory.
     Csv,
     /// One legacy ASCII VTK `UNSTRUCTURED_GRID` file.
     Vtk,
@@ -595,6 +596,19 @@ impl OpenCae {
         Ok(forces)
     }
 
+    /// Returns the support reactions and the global force equilibrium check.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn reactions(&self, out: Option<&Path>) -> Result<ReactionSummary, CaeError> {
+        let summary = self.solve(None)?.reaction_summary;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize reaction summary: {error}")))?;
+            write_atomic(path, &json)?;
+        }
+        Ok(summary)
+    }
+
     /// Recovers extreme-fibre stresses from the sampled internal forces.
     ///
     /// When `out` is given the JSON report is written atomically to that path.
@@ -632,7 +646,11 @@ impl OpenCae {
         let files = match format {
             ExportFormat::Csv => {
                 export_csv(model, &solution, target)?;
-                vec![target.join("nodes.csv").display().to_string(), target.join("elements.csv").display().to_string()]
+                vec![
+                    target.join("nodes.csv").display().to_string(),
+                    target.join("elements.csv").display().to_string(),
+                    target.join("reactions.csv").display().to_string(),
+                ]
             }
             ExportFormat::Vtk => {
                 export_vtk(model, &solution, target)?;

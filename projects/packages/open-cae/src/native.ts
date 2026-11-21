@@ -31,6 +31,7 @@ export interface NativeBinding {
     solve_combinations(path: string, requestJson?: string): string;
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
+    reactions(path: string, requestJson?: string): string;
     internal_forces(path: string, requestJson?: string): string;
     stresses(path: string, requestJson?: string): string;
     export(path: string, format: string, target: string): string;

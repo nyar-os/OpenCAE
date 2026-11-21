@@ -27,10 +27,11 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CaeError> {
         .map_err(|error| CaeError::new("io/write", format!("cannot write `{}`: {error}", target.display())))
 }
 
-/// Writes `nodes.csv` and `elements.csv` into `directory`.
+/// Writes `nodes.csv`, `elements.csv` and `reactions.csv` into `directory`.
 ///
 /// The solution must have been obtained from the same model so that node
-/// coordinates and displacement rows line up.
+/// coordinates and displacement rows line up. `reactions.csv` lists one row per
+/// support (`node,fx,fy,fz,mz`) using the signs of the reaction summary.
 pub fn export_csv(model: &Model, solution: &Solution, directory: &Path) -> Result<(), CaeError> {
     check_alignment(model, solution)?;
     fs::create_dir_all(directory).map_err(|error| {
@@ -67,8 +68,14 @@ pub fn export_csv(model: &Model, solution: &Solution, directory: &Path) -> Resul
         );
     }
 
+    let mut reactions = String::from("node,fx,fy,fz,mz\n");
+    for support in &solution.reaction_summary.supports {
+        let _ = writeln!(reactions, "{},{},{},{},{}", csv_field(&support.node), support.fx, support.fy, support.fz, support.mz);
+    }
+
     write_atomic(&directory.join("nodes.csv"), &nodes)?;
     write_atomic(&directory.join("elements.csv"), &elements)?;
+    write_atomic(&directory.join("reactions.csv"), &reactions)?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, load combinations, modal (with effective mass) and linear buckling analysis, plus a built-in material and parametric-section library. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, load combinations, modal (with effective mass) and linear buckling analysis, plus a built-in material and parametric-section library. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
@@ -43,7 +43,8 @@ document.addLoad({ node: 'n3', fy: -1000 });
 
 const validation = document.validate(); // { ok, issues }
 const solution = document.solve();       // displacements, reactions, element axial force/stress/strain
-document.export('csv', 'out/csv');       // out/csv/nodes.csv, elements.csv
+document.export('csv', 'out/csv');       // out/csv/nodes.csv, elements.csv, reactions.csv
+const reactions = document.reactions();  // support reactions + equilibrium check
 const report = document.report();        // document summary + issues + solution
 document.save();                         // atomically writes back to the original file
 await cae.dispose();
@@ -66,7 +67,7 @@ const stresses = document.stresses({ stations: 11 });     // sigma = N/A +/- M/S
 ```
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/internalForces/stresses/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/reactions/internalForces/stresses/export/report/save/close`; every edit operation writes atomically to the file.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
@@ -177,7 +178,8 @@ For a propped cantilever with a 2 mm roller settlement the roller reaction is `3
 | `ocae buckling <file> [--modes N] [--out report.json]` | Shortcut for a linear buckling solve |
 | `ocae forces <file> [--stations N] [--out report.json]` | Print sampled axial force, shear and bending moment per element; `--stations` counts both ends and defaults to 11 |
 | `ocae stresses <file> [--stations N] [--out report.json]` | Recover extreme-fibre stresses, governing station and utilisation; a beam model needs a material section |
-| `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv` and `<dir>/elements.csv`; node columns include `x,y,z` and `ux,uy,uz` |
+| `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv`, `<dir>/elements.csv` and `<dir>/reactions.csv`; node columns include `x,y,z` and `ux,uy,uz` |
+| `ocae reactions <file> [--out report.json]` | Print per-support reactions and the global `reaction + applied` equilibrium check |
 | `ocae export <file> --format vtk --out <dir\|file.vtk>` | Write legacy ASCII VTK; points are 3D coordinates and displacements are 3D vectors |
 | `ocae export <file> --format md --out <dir\|file.md>` | Write a deterministic Markdown report; appends the first 5 modes when density is positive |
 | `ocae report <file>` | Solve and print a JSON report (document summary, validation issues, solution and optional modal) |
@@ -260,6 +262,7 @@ The file is UTF-8 JSON with camelCase fields:
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | beam stress recovery and utilisation (`stresses`) | ✅ supported |
+| support reaction summary and equilibrium check (`reactions`) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
@@ -295,6 +298,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 10. **Load combinations**: each combination clones the model, multiplies every nodal load and element distributed load by `loads`, multiplies the gravity vector by `gravity` (clearing it when the result is the zero vector), solves the scaled model and keeps the full static solution. The envelope reports the governing nodal displacement, signed axial force/moment maxima and per-node/per-element extremes with the combination names that produced them. Prescribed displacements are not scaled.
 11. **Material and section library**: presets store Young's modulus and density in `mm` units and convert by `1e6` (Pa) and `1e12` (kg/m³). Sections compute `A`, `I_strong = b h³/12` (rectangle), `I_weak`, the extreme-fibre distance `c` and a Saint-Venant torsion constant (`J ≈ a b³/3·(1 − 0.63 b/a + 0.052 (b/a)⁵)` for rectangles, `π d⁴/32` for circles and a thin-walled sum for I-sections). The elastic section modulus is `I_strong / c`; a beam may omit `inertia` and inherit `I_strong` from the section.
 12. **Beam stress recovery**: at every internal-force station the report computes `σ_min/σ_max = N/A ± |M|/S` with `S = I/c`, where `I` is the element inertia (or the material-section inertia) and `c` is the material-section extreme-fibre distance. Each element reports the largest absolute stress, the governing station and, when `allowableStress` is declared, `utilisation = |σ|max / allowableStress`; the report also names the governing element. Trusses report `N/A` only. This is a sampled check, not a fibre-level integration.
+13. **Support reaction summary**: after solving, the reaction vector `R = K·u − F` is grouped per support (`fx, fy, fz, mz`) and the report compares `reaction + applied` with a tolerance that scales with the largest resultant. `applied` includes nodal forces, consistent distributed loads and self-weight; `balanced` is the global force-equilibrium check. The same summary is included in every static solution and written to `reactions.csv` by the CSV exporter.
 
 ## Validation and tests
 
@@ -357,6 +361,13 @@ pnpm --filter @wae/open-cae run typecheck
 - a beam without a material section is rejected with `material/missing-section`, and fewer than two stations with `analysis/invalid-stations`;
 - the session writes a valid `open-cae-stress-report` JSON file.
 
+`projects/crates/cae-model/tests/reactions.rs` asserts the reaction summary:
+
+- a cantilever tip load gives `fy = +P`, `mz = +PL`, `applied.fy = −P` and zero unbalanced force (`1e-9`);
+- the session writes a JSON report with `balanced: true` and the support node;
+- CSV export writes `reactions.csv` with one header row and one row per support (`1e-9`);
+- static solutions keep the `reactionSummary` field.
+
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
 ## Repository structure
@@ -378,6 +389,7 @@ projects/
     tests/combinations.rs linear load-combination and envelope tests
     tests/library.rs     material-preset and section-property tests
     tests/stress.rs      beam stress-recovery tests
+    tests/reactions.rs   support-reaction summary and CSV tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -404,5 +416,5 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.
 - The solver is **dense**: memory `O(n²)` and time `O(n³)`, suitable for small models but not for large engineering models.
 - Mechanism detection is based on numerical pivot thresholds; extremely ill-conditioned but theoretically stable structures may be misclassified.
-- CSV/VTK numerical units follow the document declaration and the exporter performs no conversion; VTK uses the legacy ASCII format. CSV node columns are `id,x,y,z,ux,uy,uz` (z/uz are 0 in 2D).
+- CSV/VTK numerical units follow the document declaration and the exporter performs no conversion; VTK uses the legacy ASCII format. CSV node columns are `id,x,y,z,ux,uy,uz` (z/uz are 0 in 2D) and `reactions.csv` columns are `node,fx,fy,fz,mz`.
 - External formats such as Abaqus `.inp`, Nastran and STEP are neither imported nor exported.

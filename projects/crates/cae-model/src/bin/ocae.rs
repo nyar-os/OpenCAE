@@ -37,6 +37,7 @@ Usage:
   ocae combinations <file> [--out report.json]
   ocae validate <file>
   ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N]
+  ocae reactions <file> [--out report.json]
                    [--element truss|beam] [--dimension 2|3]
   ocae modal <file> [--modes N] [--out report.json]
   ocae buckling <file> [--modes N] [--out report.json]
@@ -90,6 +91,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "combinations" => combinations_command(&args[1..]),
         "validate" => validate(&args[1..]),
         "solve" => solve_command(&args[1..]),
+        "reactions" => reactions_command(&args[1..]),
         "modal" => modal_command(&args[1..]),
         "buckling" => buckling_command(&args[1..]),
         "forces" => forces_command(&args[1..]),
@@ -509,6 +511,32 @@ fn validate(args: &[String]) -> Result<i32, CaeError> {
     let report = session.validate()?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
     Ok(if report.ok { 0 } else { 1 })
+}
+
+fn reactions_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--out"], &[])?;
+    let file = positional(&parsed, 0, "reactions <file> [--out report.json]")?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.reactions(out.as_deref())?;
+    println!(
+        "reactions: {} support(s), reaction=({}, {}, {}), applied=({}, {}, {}), unbalanced=({}, {}, {}), tolerance={}, balanced={}",
+        summary.supports.len(),
+        summary.reaction.fx,
+        summary.reaction.fy,
+        summary.reaction.fz,
+        summary.applied.fx,
+        summary.applied.fy,
+        summary.applied.fz,
+        summary.unbalanced.fx,
+        summary.unbalanced.fy,
+        summary.unbalanced.fz,
+        summary.tolerance,
+        summary.balanced
+    );
+    println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
+    Ok(0)
 }
 
 fn solve_command(args: &[String]) -> Result<i32, CaeError> {

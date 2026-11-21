@@ -79,11 +79,11 @@ fn create_edit_solve_export_matches_the_cli_path() {
     let written = fs::read_to_string(&report_path).expect("report.json");
     assert!(written.contains("open-cae-truss-report"));
 
-    // `export --format csv --out <dir>` writes both tables.
+    // `export --format csv --out <dir>` writes node, element and reaction tables.
     let csv_directory = directory.join("csv");
     let csv_report = session.export(ExportFormat::Csv, &csv_directory).expect("csv export");
     assert_eq!(csv_report.format, "csv");
-    assert_eq!(csv_report.files.len(), 2);
+    assert_eq!(csv_report.files.len(), 3);
     for file in &csv_report.files {
         assert!(std::path::Path::new(file).is_file(), "missing export file {file}");
     }

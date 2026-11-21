@@ -200,6 +200,43 @@ export interface MaxMoment {
     readonly moment: number;
 }
 
+/** Reaction at one supported node. */
+export interface SupportReaction {
+    readonly node: string;
+    readonly fx: number;
+    readonly fy: number;
+    readonly fz: number;
+    /** Reaction moment about Z. */
+    readonly mz: number;
+}
+
+/** Translational resultant `(fx, fy, fz)`. */
+export interface ForceResultant {
+    readonly fx: number;
+    readonly fy: number;
+    readonly fz: number;
+}
+
+/**
+ * Support reactions and the global force equilibrium check.
+ * `unbalanced = reaction + applied` and `balanced` is true when every
+ * component is within `tolerance`.
+ */
+export interface ReactionSummary {
+    readonly supports: readonly SupportReaction[];
+    readonly reaction: ForceResultant;
+    readonly applied: ForceResultant;
+    readonly unbalanced: ForceResultant;
+    readonly tolerance: number;
+    readonly balanced: boolean;
+}
+
+/** Options of `reactions()`. */
+export interface ReactionOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Complete linear-static solution. */
 export interface Solution {
     readonly format: string;
@@ -207,6 +244,7 @@ export interface Solution {
     readonly units: string;
     readonly nodes: readonly NodeDisplacement[];
     readonly reactions: readonly NodeReaction[];
+    readonly reactionSummary: ReactionSummary;
     readonly elements: readonly ElementResult[];
     readonly strainEnergy: number;
     readonly maxDisplacement: NodeDisplacement;
