@@ -573,12 +573,21 @@ impl Model {
                         ),
                     ));
                 }
-                if !positive_finite_option(inertia) && !self.section_inertia().is_some_and(positive_finite) {
+                let usable_inertia = match inertia {
+                    Some(value) => positive_finite(value),
+                    None => self.section_inertia().is_some_and(positive_finite),
+                };
+                if !usable_inertia {
                     return Err(CaeError::new(
                         "element/invalid-inertia",
-                        format!(
-                            "beam element `{id}` requires a positive finite inertia, or a material section that provides one (currently {inertia:?})"
-                        ),
+                        match inertia {
+                            Some(value) => {
+                                format!("beam element `{id}` inertia must be positive and finite (currently {value})")
+                            }
+                            None => format!(
+                                "beam element `{id}` requires an explicit positive inertia or a material section that provides one"
+                            ),
+                        },
                     ));
                 }
             }
@@ -948,10 +957,6 @@ impl Default for Model {
 
 fn dimension_mismatch(message: impl Into<String>) -> CaeError {
     CaeError::new("document/dimension-mismatch", message)
-}
-
-fn positive_finite_option(value: Option<f64>) -> bool {
-    value.is_some_and(|value| value.is_finite() && value > 0.0)
 }
 
 fn positive_finite(value: f64) -> bool {

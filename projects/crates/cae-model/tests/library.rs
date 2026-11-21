@@ -189,4 +189,10 @@ fn invalid_sections_and_allowable_stress_are_rejected() {
         .add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, None, None)
         .expect_err("beam needs inertia or a section");
     assert_eq!(error.code, "element/invalid-inertia");
+
+    let mut with_section = cantilever_with_section();
+    let error = with_section
+        .add_element_kind("b2", "n1", "n2", None, ElementKind::Beam, Some(-1.0), None)
+        .expect_err("an explicit negative inertia is always invalid");
+    assert_eq!(error.code, "element/invalid-inertia");
 }

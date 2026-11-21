@@ -216,13 +216,23 @@ impl Model {
                         ),
                     ));
                 }
-                if !element.inertia.is_some_and(positive_finite) && !section_inertia.is_some_and(positive_finite) {
+                let usable_inertia = match element.inertia {
+                    Some(value) => positive_finite(value),
+                    None => section_inertia.is_some_and(positive_finite),
+                };
+                if !usable_inertia {
                     report.push(check_error(
                         "element/invalid-inertia",
-                        format!(
-                            "beam element `{}` requires a positive finite inertia, or a material section that provides one",
-                            element.id
-                        ),
+                        match element.inertia {
+                            Some(value) => format!(
+                                "beam element `{}` inertia must be positive and finite (currently {value})",
+                                element.id
+                            ),
+                            None => format!(
+                                "beam element `{}` requires an explicit positive inertia or a material section that provides one",
+                                element.id
+                            ),
+                        },
                     ));
                 }
             }
