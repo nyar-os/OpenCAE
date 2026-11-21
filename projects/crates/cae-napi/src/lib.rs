@@ -283,6 +283,50 @@ fn element_kind_field(request: &Value) -> Result<ElementKind> {
     }
 }
 
+/// Adds or replaces a linear load combination and saves the document.
+///
+/// The request accepts `name`, `loads` (default 1) and `gravity` (default 0).
+#[function]
+fn combination_add(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let name = text_field(&request, "name")?;
+    let loads = number_field(&request, "loads")?.unwrap_or(1.0);
+    let gravity = number_field(&request, "gravity")?.unwrap_or(0.0);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.add_combination(&name, loads, gravity).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Removes a load combination by name and saves the document.
+#[function]
+fn combination_remove(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let name = text_field(&request, "name")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let removed = session.remove_combination(&name).map_err(fail)?;
+    if !removed {
+        return Err(Error::new(format!("combination/unknown-name: no load combination named `{name}` exists")));
+    }
+    respond(&ctx, &removed)
+}
+
+/// Solves every load combination and returns the solutions plus their
+/// envelope. The request accepts an optional `out` path.
+#[function]
+fn solve_combinations(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.solve_combinations(out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Validates a document and returns `{ ok, issues }`.
 #[function]
 fn validate(ctx: CallContext) -> Result<JsValue> {
@@ -380,6 +424,9 @@ register_module![
     support_add,
     load_add,
     gravity_set,
+    combination_add,
+    combination_remove,
+    solve_combinations,
     validate,
     solve,
     internal_forces,

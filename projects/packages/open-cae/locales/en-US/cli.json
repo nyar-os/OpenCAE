@@ -12,6 +12,9 @@
             "  ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]",
             "  ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]",
             "  ocae self-weight <file> --g <g> [--axis x|y|z]",
+            "  ocae combination add <file> --name <name> [--loads <f>] [--gravity <f>]",
+            "  ocae combination remove <file> --name <name>",
+            "  ocae combinations <file> [--out report.json]",
             "  ocae validate <file>",
             "  ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]",
             "  ocae modal <file> [--modes N] [--out report.json]",
@@ -30,6 +33,8 @@
             "supportAdded": "support `{node}` added (dx={dx}, dy={dy}, dz={dz}, rz={rz}, revision {revision})",
             "loadAdded": "load `{node}` added (revision {revision})",
             "gravitySet": "gravity set: gx={gx} gy={gy} gz={gz} (revision {revision})",
+            "combinationSet": "combination `{name}` set: loads={loads} gravity={gravity} (revision {revision})",
+            "combinationRemoved": "combination `{name}` removed",
             "exported": "exported {format} to {path}"
         },
         "error": {

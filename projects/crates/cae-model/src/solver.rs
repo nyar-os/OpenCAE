@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CaeError, Severity,
-    model::{Element, ElementKind, Model, Units, beam_nodes},
+    model::{Element, ElementKind, LoadCombination, Model, Units, beam_nodes},
 };
 
 /// Version of the JSON result report produced by [`solve`].
@@ -30,6 +30,12 @@ pub const INTERNAL_FORCE_REPORT_VERSION: u32 = 1;
 
 /// Format tag of the internal force diagram JSON report.
 pub const INTERNAL_FORCE_REPORT_FORMAT: &str = "open-cae-internal-force-report";
+
+/// Version of the JSON report produced by [`solve_combinations`].
+pub const COMBINATION_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the load combination JSON report.
+pub const COMBINATION_REPORT_FORMAT: &str = "open-cae-combination-report";
 
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -359,6 +365,92 @@ pub struct InternalForceSolution {
     pub stations: usize,
     /// Diagrams in model element order.
     pub elements: Vec<ElementDiagram>,
+}
+
+/// One solved load combination.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinationCase {
+    /// Combination name.
+    pub name: String,
+    /// Factor applied to nodal and element applied loads.
+    pub loads: f64,
+    /// Factor applied to the gravity vector.
+    pub gravity: f64,
+    /// Static solution of the scaled model.
+    pub solution: Solution,
+}
+
+/// Governing value of one envelope entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvelopeValue {
+    /// Combination that produced the governing value.
+    pub combination: String,
+    /// Node or element identifier the value belongs to.
+    pub entity: String,
+    /// Signed value; the comparison used its absolute magnitude.
+    pub value: f64,
+}
+
+/// Displacement envelope of one node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeEnvelope {
+    /// Node identifier.
+    pub node: String,
+    /// Largest displacement magnitude across all combinations.
+    pub max_abs_displacement: f64,
+    /// Combination that produced it.
+    pub combination: String,
+}
+
+/// Force envelope of one element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementEnvelope {
+    /// Element identifier.
+    pub element: String,
+    /// Most compressive signed axial force across all combinations.
+    pub min_axial_force: f64,
+    /// Most tensile signed axial force across all combinations.
+    pub max_axial_force: f64,
+    /// Largest absolute bending moment across all combinations.
+    pub max_abs_moment: f64,
+    /// Combination that produced `max_abs_moment`.
+    pub moment_combination: String,
+}
+
+/// Envelope of several load combinations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinationEnvelope {
+    /// Governing nodal displacement magnitude.
+    pub max_displacement: EnvelopeValue,
+    /// Governing signed axial force, compared by absolute value.
+    pub max_abs_axial_force: EnvelopeValue,
+    /// Governing signed bending moment, compared by absolute value.
+    pub max_abs_moment: EnvelopeValue,
+    /// Per-node displacement envelope.
+    pub nodes: Vec<NodeEnvelope>,
+    /// Per-element force envelope.
+    pub elements: Vec<ElementEnvelope>,
+}
+
+/// Result of [`solve_combinations`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinationSolution {
+    /// Report format tag, always `open-cae-combination-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Solved combinations in the requested order.
+    pub combinations: Vec<CombinationCase>,
+    /// Envelope of all solved combinations.
+    pub envelope: CombinationEnvelope,
 }
 
 /// Two-dimensional field layout with explicit degree-of-freedom activation.
@@ -972,6 +1064,160 @@ impl InternalForceSolution {
             stations,
             elements: Vec::new(),
         }
+    }
+}
+
+/// Solves every provided load combination and returns each solution plus an
+/// envelope of the governing values.
+///
+/// Each combination scales the applied nodal and element loads by `loads` and
+/// the gravity vector by `gravity`; prescribed displacements are boundary
+/// conditions and stay unchanged. An empty list is rejected with
+/// `combination/none`. Every combination is validated by the static solver, so
+/// invalid factors, mechanisms or a missing density surface with their usual
+/// codes.
+pub fn solve_combinations(model: &Model, combinations: &[LoadCombination]) -> Result<CombinationSolution, CaeError> {
+    if combinations.is_empty() {
+        return Err(CaeError::new(
+            "combination/none",
+            "no load combinations are defined; add at least one combination before solving",
+        ));
+    }
+    let mut cases = Vec::with_capacity(combinations.len());
+    for combination in combinations {
+        if combination.name.trim().is_empty() {
+            return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
+        }
+        if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+            return Err(CaeError::new(
+                "combination/invalid-factor",
+                format!("load combination `{}` factors must be finite", combination.name),
+            ));
+        }
+        let scaled = scaled_model(model, combination.loads, combination.gravity);
+        let solution = solve(&scaled)?;
+        cases.push(CombinationCase {
+            name: combination.name.clone(),
+            loads: combination.loads,
+            gravity: combination.gravity,
+            solution,
+        });
+    }
+
+    let envelope = build_envelope(&cases);
+    Ok(CombinationSolution {
+        format: COMBINATION_REPORT_FORMAT.to_string(),
+        version: COMBINATION_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        combinations: cases,
+        envelope,
+    })
+}
+
+fn scaled_model(model: &Model, loads: f64, gravity: f64) -> Model {
+    let mut scaled = model.clone();
+    for load in &mut scaled.loads {
+        load.fx *= loads;
+        load.fy *= loads;
+        load.fz *= loads;
+        load.mz *= loads;
+    }
+    for element in &mut scaled.elements {
+        if let Some(value) = &mut element.distributed_load {
+            *value *= loads;
+        }
+        if let Some(value) = &mut element.distributed_load_end {
+            *value *= loads;
+        }
+    }
+    if let Some(vector) = &mut scaled.gravity {
+        for component in vector.iter_mut() {
+            *component *= gravity;
+        }
+        if vector.iter().all(|component| *component == 0.0) {
+            scaled.gravity = None;
+        }
+    }
+    scaled
+}
+
+fn build_envelope(cases: &[CombinationCase]) -> CombinationEnvelope {
+    let first = &cases[0].solution;
+    let mut node_max = vec![0.0_f64; first.nodes.len()];
+    let mut node_combination = vec![String::new(); first.nodes.len()];
+    let mut maximum_displacement = EnvelopeValue { combination: String::new(), entity: String::new(), value: 0.0 };
+    let mut maximum_axial = EnvelopeValue { combination: String::new(), entity: String::new(), value: 0.0 };
+    let mut maximum_moment = EnvelopeValue { combination: String::new(), entity: String::new(), value: 0.0 };
+
+    let mut min_axial = vec![f64::INFINITY; first.elements.len()];
+    let mut max_axial = vec![f64::NEG_INFINITY; first.elements.len()];
+    let mut max_abs_moment = vec![0.0_f64; first.elements.len()];
+    let mut moment_combination = vec![String::new(); first.elements.len()];
+
+    for case in cases {
+        for (index, node) in case.solution.nodes.iter().enumerate() {
+            if node.magnitude > node_max[index] {
+                node_max[index] = node.magnitude;
+                node_combination[index] = case.name.clone();
+            }
+        }
+        let displacement = &case.solution.max_displacement;
+        if displacement.magnitude > maximum_displacement.value {
+            maximum_displacement = EnvelopeValue {
+                combination: case.name.clone(),
+                entity: displacement.id.clone(),
+                value: displacement.magnitude,
+            };
+        }
+        let axial = &case.solution.max_axial_force;
+        if axial.axial_force.abs() > maximum_axial.value.abs() {
+            maximum_axial =
+                EnvelopeValue { combination: case.name.clone(), entity: axial.element.clone(), value: axial.axial_force };
+        }
+        let moment = &case.solution.max_moment;
+        if moment.moment.abs() > maximum_moment.value.abs() {
+            maximum_moment =
+                EnvelopeValue { combination: case.name.clone(), entity: moment.element.clone(), value: moment.moment };
+        }
+        for (index, element) in case.solution.elements.iter().enumerate() {
+            min_axial[index] = min_axial[index].min(element.axial_force);
+            max_axial[index] = max_axial[index].max(element.axial_force);
+            if element.max_abs_moment > max_abs_moment[index] {
+                max_abs_moment[index] = element.max_abs_moment;
+                moment_combination[index] = case.name.clone();
+            }
+        }
+    }
+
+    let nodes = first
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| NodeEnvelope {
+            node: node.id.clone(),
+            max_abs_displacement: node_max[index],
+            combination: node_combination[index].clone(),
+        })
+        .collect();
+    let elements = first
+        .elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| ElementEnvelope {
+            element: element.id.clone(),
+            min_axial_force: min_axial[index],
+            max_axial_force: max_axial[index],
+            max_abs_moment: max_abs_moment[index],
+            moment_combination: moment_combination[index].clone(),
+        })
+        .collect();
+
+    CombinationEnvelope {
+        max_displacement: maximum_displacement,
+        max_abs_axial_force: maximum_axial,
+        max_abs_moment: maximum_moment,
+        nodes,
+        elements,
     }
 }
 

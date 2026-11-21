@@ -205,6 +205,80 @@ export interface InternalForceOptions {
     readonly out?: string;
 }
 
+/** Linear combination of applied loads and self-weight. */
+export interface LoadCombination {
+    readonly name: string;
+    /** Factor applied to nodal and element applied loads. */
+    readonly loads: number;
+    /** Factor applied to the gravity vector. */
+    readonly gravity: number;
+}
+
+/** One solved load combination. */
+export interface CombinationCase {
+    readonly name: string;
+    readonly loads: number;
+    readonly gravity: number;
+    readonly solution: Solution;
+}
+
+/** Governing value of one envelope entry. */
+export interface EnvelopeValue {
+    readonly combination: string;
+    readonly entity: string;
+    /** Signed value; the comparison used its absolute magnitude. */
+    readonly value: number;
+}
+
+/** Displacement envelope of one node. */
+export interface NodeEnvelope {
+    readonly node: string;
+    readonly maxAbsDisplacement: number;
+    readonly combination: string;
+}
+
+/** Force envelope of one element. */
+export interface ElementEnvelope {
+    readonly element: string;
+    readonly minAxialForce: number;
+    readonly maxAxialForce: number;
+    readonly maxAbsMoment: number;
+    readonly momentCombination: string;
+}
+
+/** Envelope of several load combinations. */
+export interface CombinationEnvelope {
+    readonly maxDisplacement: EnvelopeValue;
+    readonly maxAbsAxialForce: EnvelopeValue;
+    readonly maxAbsMoment: EnvelopeValue;
+    readonly nodes: readonly NodeEnvelope[];
+    readonly elements: readonly ElementEnvelope[];
+}
+
+/** Result of `solveCombinations()`. */
+export interface CombinationSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly combinations: readonly CombinationCase[];
+    readonly envelope: CombinationEnvelope;
+}
+
+/** Request of `addCombination()`. */
+export interface CombinationAddRequest {
+    readonly name: string;
+    /** Factor applied to nodal and element applied loads; defaults to 1. */
+    readonly loads?: number;
+    /** Factor applied to the gravity vector; defaults to 0. */
+    readonly gravity?: number;
+}
+
+/** Options of `solveCombinations()`. */
+export interface CombinationSolveOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Nodal value of one mass-normalized mode shape. */
 export interface ModeShape {
     readonly node: string;

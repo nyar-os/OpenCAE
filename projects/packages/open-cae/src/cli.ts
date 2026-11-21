@@ -197,6 +197,10 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return modelCommand(args.slice(1));
         case 'self-weight':
             return selfWeight(args.slice(1));
+        case 'combination':
+            return combinationCommand(args.slice(1));
+        case 'combinations':
+            return combinationsCommand(args.slice(1));
         case 'validate':
             return validate(args.slice(1));
         case 'solve':
@@ -469,6 +473,68 @@ async function selfWeight(args: readonly string[]): Promise<number> {
                 revision: String(summary.revision),
             }),
         );
+        return 0;
+    });
+}
+
+async function combinationCommand(args: readonly string[]): Promise<number> {
+    const action = args[0];
+    if (action === undefined) {
+        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'combination', expected: 'add' });
+    }
+    if (action === 'add') {
+        return combinationAdd(args.slice(1));
+    }
+    if (action === 'remove') {
+        return combinationRemove(args.slice(1));
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', {
+        group: 'combination',
+        action,
+        expected: 'add',
+    });
+}
+
+async function combinationAdd(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--name', '--loads', '--gravity'], []);
+    const file = positional(parsed, 0, 'combination add <file> --name <name> [--loads <f>] [--gravity <f>]');
+    const name = required(parsed, '--name');
+    const loads = number(parsed, '--loads') ?? 1;
+    const gravity = number(parsed, '--gravity') ?? 0;
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.addCombination({ name, loads, gravity });
+        console.log(
+            message('combinationSet', {
+                name,
+                loads: String(loads),
+                gravity: String(gravity),
+                revision: String(summary.revision),
+            }),
+        );
+        return 0;
+    });
+}
+
+async function combinationRemove(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--name'], []);
+    const file = positional(parsed, 0, 'combination remove <file> --name <name>');
+    const name = required(parsed, '--name');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        document.removeCombination(name);
+        console.log(message('combinationRemoved', { name }));
+        return 0;
+    });
+}
+
+async function combinationsCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--out'], []);
+    const file = positional(parsed, 0, 'combinations <file> [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.solveCombinations({ out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
         return 0;
     });
 }

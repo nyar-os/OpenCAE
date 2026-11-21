@@ -24,6 +24,9 @@ export interface NativeBinding {
     support_add(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;
     gravity_set(path: string, requestJson: string): string;
+    combination_add(path: string, requestJson: string): string;
+    combination_remove(path: string, requestJson: string): string;
+    solve_combinations(path: string, requestJson?: string): string;
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
     internal_forces(path: string, requestJson?: string): string;

@@ -11,6 +11,9 @@ import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
     BucklingSolution,
+    CombinationAddRequest,
+    CombinationSolveOptions,
+    CombinationSolution,
     Dimension,
     DocumentSummary,
     ElementAddRequest,
@@ -159,6 +162,24 @@ export class CaeDocument {
             return service.solve(this.path, { ...options, analysis: 'buckling' });
         }
         return service.solve(this.path, options as SolveOptions & { analysis?: 'static' });
+    }
+
+    /** Adds or replaces a linear load combination and saves the file. */
+    addCombination(request: CombinationAddRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.addCombination(this.path, request));
+    }
+
+    /** Removes a load combination and returns the updated summary. */
+    removeCombination(name: string): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.removeCombination(this.path, name));
+    }
+
+    /** Solves every load combination and returns the solutions plus envelope. */
+    solveCombinations(options: CombinationSolveOptions = {}): CombinationSolution {
+        this.assertOpen();
+        return service.solveCombinations(this.path, options);
     }
 
     /** Samples internal forces at equally spaced stations along each element. */

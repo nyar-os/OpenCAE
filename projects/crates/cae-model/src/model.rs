@@ -262,6 +262,30 @@ pub struct Load {
     pub mz: f64,
 }
 
+/// Linear combination of the applied load case and self-weight.
+///
+/// `loads` multiplies every nodal force/moment and every element distributed
+/// load; `gravity` multiplies the gravity vector. Prescribed displacements are
+/// boundary conditions and are never scaled. A combination named `D+L` with
+/// `loads = 1` and `gravity = 1` therefore means `1.0·(live loads) +
+/// 1.0·(dead weight)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadCombination {
+    /// Unique human readable combination name.
+    pub name: String,
+    /// Factor applied to nodal loads and element distributed loads.
+    #[serde(default = "default_load_factor")]
+    pub loads: f64,
+    /// Factor applied to the gravity vector (self-weight).
+    #[serde(default)]
+    pub gravity: f64,
+}
+
+fn default_load_factor() -> f64 {
+    1.0
+}
+
 /// In-memory representation of an `.ocae` document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -299,6 +323,11 @@ pub struct Model {
     /// responsibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gravity: Option<[f64; 3]>,
+    /// Optional linear load combinations used by the combination solver.
+    ///
+    /// An empty list keeps existing documents unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub combinations: Vec<LoadCombination>,
     /// Monotonically increasing edit counter maintained by the CLI helpers.
     #[serde(default)]
     pub revision: u32,
@@ -336,6 +365,7 @@ impl Model {
             supports: Vec::new(),
             loads: Vec::new(),
             gravity: None,
+            combinations: Vec::new(),
             revision: 0,
         }
     }
@@ -542,6 +572,43 @@ impl Model {
         self.gravity = if gx == 0.0 && gy == 0.0 && gz == 0.0 { None } else { Some([gx, gy, gz]) };
         self.bump_revision();
         Ok(())
+    }
+
+    /// Adds or replaces a linear load combination.
+    ///
+    /// The name must be non-empty and both factors must be finite. Supplying an
+    /// existing name updates its factors in place.
+    pub fn add_combination(&mut self, name: impl Into<String>, loads: f64, gravity: f64) -> Result<(), CaeError> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
+        }
+        if !loads.is_finite() || !gravity.is_finite() {
+            return Err(CaeError::new(
+                "combination/invalid-factor",
+                format!("load combination `{name}` factors must be finite (loads={loads}, gravity={gravity})"),
+            ));
+        }
+        if let Some(existing) = self.combinations.iter_mut().find(|combination| combination.name == name) {
+            existing.loads = loads;
+            existing.gravity = gravity;
+        }
+        else {
+            self.combinations.push(LoadCombination { name, loads, gravity });
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Removes a load combination by name, returning whether it existed.
+    pub fn remove_combination(&mut self, name: &str) -> bool {
+        let before = self.combinations.len();
+        self.combinations.retain(|combination| combination.name != name);
+        let removed = self.combinations.len() != before;
+        if removed {
+            self.bump_revision();
+        }
+        removed
     }
 
     /// Adds or merges a support entry for a node without a Z constraint.

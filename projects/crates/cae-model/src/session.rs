@@ -19,8 +19,8 @@ use crate::{
     export::{export_csv, export_md, export_vtk, write_atomic},
     model::{ElementKind, Material, Model, Units},
     solver::{
-        BucklingSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution, solve, solve_buckling,
-        solve_internal_forces, solve_modal,
+        BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution,
+        solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
     },
     validate::{Issue, Severity},
 };
@@ -434,6 +434,29 @@ impl OpenCae {
         self.edit(|model| model.prescribe_displacement(node, ux, uy, uz, rz))
     }
 
+    /// Adds or replaces a linear load combination and saves the document.
+    ///
+    /// `loads` scales nodal and element applied loads and `gravity` scales the
+    /// gravity vector. An existing combination with the same name is updated in
+    /// place.
+    pub fn add_combination(&mut self, name: &str, loads: f64, gravity: f64) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.add_combination(name, loads, gravity))
+    }
+
+    /// Removes a load combination by name and saves the document.
+    ///
+    /// Returns `false` when no combination has that name.
+    pub fn remove_combination(&mut self, name: &str) -> Result<bool, CaeError> {
+        let removed = self.current()?.model.combinations.iter().any(|combination| combination.name == name);
+        if removed {
+            self.edit(|model| {
+                model.remove_combination(name);
+                Ok(())
+            })?;
+        }
+        Ok(removed)
+    }
+
     /// Adds or updates a concentrated load and saves the document.
     pub fn add_load(
         &mut self,
@@ -523,6 +546,22 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(forces)
+    }
+
+    /// Solves every load combination stored in the open document and returns
+    /// the individual solutions plus their envelope.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn solve_combinations(&self, out: Option<&Path>) -> Result<CombinationSolution, CaeError> {
+        let model = &self.current()?.model;
+        let combinations = solve_combinations(model, &model.combinations)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&combinations).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize combination result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(combinations)
     }
 
     /// Solves the open document and exports the result.

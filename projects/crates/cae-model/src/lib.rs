@@ -38,18 +38,19 @@ pub use crate::{
     error::CaeError,
     export::{export_csv, export_md, export_vtk, write_atomic},
     model::{
-        Element, ElementKind, ElementMaterial, FORMAT, Load, Material, Model, Node, PrescribedDisplacement, Support, Units,
-        VERSION,
+        Element, ElementKind, ElementMaterial, FORMAT, Load, LoadCombination, Material, Model, Node, PrescribedDisplacement,
+        Support, Units, VERSION,
     },
     session::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
     },
     solver::{
-        BUCKLING_REPORT_FORMAT, BUCKLING_REPORT_VERSION, BucklingMode, BucklingSolution, ElementDiagram, ElementResult,
-        EndForces, ForceResultant, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution,
-        MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape, NodeDisplacement,
-        NodeReaction, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, SectionForces, Solution, SupportReaction, solve,
-        solve_buckling, solve_internal_forces, solve_modal,
+        BUCKLING_REPORT_FORMAT, BUCKLING_REPORT_VERSION, BucklingMode, BucklingSolution, COMBINATION_REPORT_FORMAT,
+        COMBINATION_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution, ElementDiagram, ElementEnvelope,
+        ElementResult, EndForces, EnvelopeValue, ForceResultant, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION,
+        InternalForceSolution, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce, MaxMoment, ModalSolution, Mode,
+        ModeShape, NodeDisplacement, NodeEnvelope, NodeReaction, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, SectionForces,
+        Solution, SupportReaction, solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
     },
     validate::{Issue, Severity},
 };
@@ -72,6 +73,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "nonlinear": "unsupported",
     "buckling": "supported",
     "internalForces": "supported",
+    "loadCombinations": "supported",
     "thermal": "unsupported"
   },
   "io": {

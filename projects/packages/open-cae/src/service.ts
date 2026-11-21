@@ -11,6 +11,9 @@ import { NotImplementedError, OpenCAEError, errorCodes, type OpenCAEErrorCode } 
 import { nativeBinding } from './native.js';
 import type {
     BucklingSolution,
+    CombinationAddRequest,
+    CombinationSolveOptions,
+    CombinationSolution,
     CreateOptions,
     DocumentSummary,
     ElementAddRequest,
@@ -145,6 +148,30 @@ export function solve(path: string, options: SolveOptions = {}): Solution | Moda
             : JSON.stringify({ out: options.out, analysis: options.analysis, modes: options.modes });
     return decode<Solution | ModalSolution | BucklingSolution>(() =>
         request === undefined ? binding('solve').solve(path) : binding('solve').solve(path, request),
+    );
+}
+
+/** Adds or replaces a linear load combination. */
+export function addCombination(path: string, request: CombinationAddRequest): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        binding('combination.add').combination_add(path, JSON.stringify(request)),
+    );
+}
+
+/** Removes a load combination and returns the updated summary. */
+export function removeCombination(path: string, name: string): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        binding('combination.remove').combination_remove(path, JSON.stringify({ name })),
+    );
+}
+
+/** Solves every load combination and returns the solutions plus envelope. */
+export function solveCombinations(path: string, options: CombinationSolveOptions = {}): CombinationSolution {
+    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    return decode<CombinationSolution>(() =>
+        request === undefined
+            ? binding('combination.solve').solve_combinations(path)
+            : binding('combination.solve').solve_combinations(path, request),
     );
 }
 

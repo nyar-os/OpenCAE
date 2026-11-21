@@ -27,6 +27,9 @@ Usage:
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
   ocae self-weight <file> --g <g> [--axis x|y|z]
+  ocae combination add <file> --name <name> [--loads <f>] [--gravity <f>]
+  ocae combination remove <file> --name <name>
+  ocae combinations <file> [--out report.json]
   ocae validate <file>
   ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N]
                    [--element truss|beam] [--dimension 2|3]
@@ -76,6 +79,8 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "load" => subcommand(args, "add", "load"),
         "model" => model_command(&args[1..]),
         "self-weight" => self_weight(&args[1..]),
+        "combination" => combination_command(&args[1..]),
+        "combinations" => combinations_command(&args[1..]),
         "validate" => validate(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "modal" => modal_command(&args[1..]),
@@ -305,6 +310,58 @@ fn self_weight(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.set_gravity(gravity.0, gravity.1, gravity.2)?;
     println!("self-weight gravity set to ({}, {}, {}) (revision {})", gravity.0, gravity.1, gravity.2, summary.revision);
+    Ok(0)
+}
+
+fn combination_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("add") => combination_add(&args[1..]),
+        Some("remove") => combination_remove(&args[1..]),
+        Some(other) => Err(CaeError::new(
+            "cli/unknown-command",
+            format!("subcommand `{other}` of `combination` does not exist; only `add` or `remove` is supported"),
+        )),
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`combination` is missing a subcommand; only `add` or `remove` is supported",
+        )),
+    }
+}
+
+fn combination_add(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--name", "--loads", "--gravity"], &[])?;
+    let file = positional(&parsed, 0, "combination add <file> --name <name> [--loads <f>] [--gravity <f>]")?;
+    let name = required(&parsed, "--name")?;
+    let loads = number(&parsed, "--loads")?.unwrap_or(1.0);
+    let gravity = number(&parsed, "--gravity")?.unwrap_or(0.0);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.add_combination(name, loads, gravity)?;
+    println!("combination `{name}` set (loads={loads}, gravity={gravity}, revision {})", summary.revision);
+    Ok(0)
+}
+
+fn combination_remove(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--name"], &[])?;
+    let file = positional(&parsed, 0, "combination remove <file> --name <name>")?;
+    let name = required(&parsed, "--name")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    if !session.remove_combination(name)? {
+        return Err(CaeError::new("combination/unknown-name", format!("no load combination named `{name}` exists")));
+    }
+    println!("combination `{name}` removed");
+    Ok(0)
+}
+
+fn combinations_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--out"], &[])?;
+    let file = positional(&parsed, 0, "combinations <file> [--out report.json]")?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let result = session.solve_combinations(out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(0)
 }
 

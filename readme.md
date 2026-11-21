@@ -61,7 +61,7 @@ document.export('md', 'out/report.md');              // deterministic Markdown r
 ```
 
 - Sessions: `capabilities()`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/validate/solve/internalForces/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/internalForces/export/report/save/close`; every edit operation writes atomically to the file.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
@@ -158,6 +158,9 @@ For a propped cantilever with a 2 mm roller settlement the roller reaction is `3
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
 | `ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]` | Set the gravity acceleration; the zero vector clears it |
 | `ocae self-weight <file> --g <g> [--axis x\|y\|z]` | Set the gravity acceleration along the given axis |
+| `ocae combination add <file> --name <name> [--loads <f>] [--gravity <f>]` | Add or replace a linear load combination; `--loads` (default 1) scales nodal/element loads and `--gravity` (default 0) scales self-weight |
+| `ocae combination remove <file> --name <name>` | Remove a load combination |
+| `ocae combinations <file> [--out report.json]` | Solve every stored combination and print the individual solutions plus the envelope |
 | `ocae validate <file>` | Print JSON validation results; exit code 1 when errors exist |
 | `ocae solve <file> [--out report.json] [--analysis static\|modal\|buckling] [--modes N] [--dimension 2\|3]` | Run a static, modal or linear buckling solve and print JSON; `--modes` is modal/buckling-only and defaults to 5 |
 | `ocae modal <file> [--modes N] [--out report.json]` | Shortcut for a modal solve |
@@ -199,6 +202,9 @@ The file is UTF-8 JSON with camelCase fields:
     { "node": "n2", "fx": 0.0, "fy": -1000.0, "fz": 0.0, "mz": 0.0 }
   ],
   "gravity": [0.0, -9810.0, 0.0],
+  "combinations": [
+    { "name": "D+L", "loads": 1.0, "gravity": 1.0 }
+  ],
   "revision": 0
 }
 ```
@@ -214,6 +220,7 @@ The file is UTF-8 JSON with camelCase fields:
 | `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
 | `gravity` | Optional `[gx, gy, gz]`; when set, self-weight is applied from the density |
+| `combinations` | Optional list of `{ name, loads, gravity }` linear combinations; `loads` multiplies nodal and element applied loads (default 1), `gravity` multiplies self-weight (default 0). Names must be unique and factors finite |
 | `revision` | Edit counter incremented by CLI modifications; may be 0 |
 
 **Dimension consistency**: if a `dimension: 2` document contains a non-zero `z`, `dz: true`, a non-zero `fz` or a non-zero `gz`, validation returns a `document/dimension-mismatch` error (edit commands also reject it before writing) instead of silently ignoring those values. 3D documents do not allow `beam` elements, `rz: true` or a non-zero `mz` (returning `capability/not-implemented` or `document/dimension-mismatch`). `rz`/`mz` may only be used on nodes connected by beam elements; otherwise `support/inactive-dof` / `load/inactive-dof` is reported. A `prescribed` value must be finite and its matching flag must be `true`, otherwise `support/invalid-prescribed` or `support/prescribed-unconstrained` is reported; a non-zero `prescribed.uz` in 2D or `prescribed.rz` in 3D is a `document/dimension-mismatch`.
@@ -234,6 +241,7 @@ The file is UTF-8 JSON with camelCase fields:
 | modal analysis (`modal`, lumped mass + Jacobi) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
+| load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown report export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -264,6 +272,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 7. **Modal analysis**: uses the same `K` as the original problem and a diagonal lumped mass matrix — `ρAL/2` for translational degrees of freedom and `ρIL/2` (rotary inertia) for beam rotational degrees of freedom. It forms the symmetric matrix `A = M^(−1/2)·K·M^(−1/2)`, computes eigenvalues with symmetric Jacobi iterations (off-diagonal tolerance `1e-12·max|A|`, at most 100 sweeps) and frequencies `f = √λ/(2π)`. Zero, negative or non-finite eigenvalues are skipped and counted in `skipped`; NaN is never emitted.
 8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Two-dimensional beams and two- or three-dimensional trusses are assembled.
 9. **Mechanism detection**: every solve performs a numerical rank check on the free-degree-of-freedom stiffness matrix (whether `K_ff` has full rank); on failure it reports `model/mechanism` and lists as many unconstrained nodes as possible.
+10. **Load combinations**: each combination clones the model, multiplies every nodal load and element distributed load by `loads`, multiplies the gravity vector by `gravity` (clearing it when the result is the zero vector), solves the scaled model and keeps the full static solution. The envelope reports the governing nodal displacement, signed axial force/moment maxima and per-node/per-element extremes with the combination names that produced them. Prescribed displacements are not scaled.
 
 ## Validation and tests
 
@@ -302,6 +311,13 @@ pnpm --filter @wae/open-cae run typecheck
 - rejection of empty prescriptions, unknown nodes, `uz` in 2D and `rz` in 3D, plus the `support/prescribed-unconstrained` validation finding;
 - `.ocae` round trips that preserve the `prescribed` block.
 
+`projects/crates/cae-model/tests/combinations.rs` asserts load-combination behaviour:
+
+- dead (`gravity` only) and live (`loads` only) combinations reproduce the self-weight `wL⁴/(8EI)` and tip-load `PL³/(3EI)` cantilever deflections (`1e-9`);
+- the `D+L` solution is exactly the linear superposition of the dead and live solutions, including the fixed-end reaction moment (`1e-12`);
+- the envelope selects `D+L`, reports the governing node/element and matches the individual solutions;
+- empty lists (`combination/none`), non-finite factors (`combination/invalid-factor`), empty and duplicate names are rejected, combinations round-trip through `.ocae`, and the session writes the JSON report.
+
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
 ## Repository structure
@@ -319,6 +335,7 @@ projects/
     tests/cae_model.rs   truss model solve and export tests
     tests/beam_modal.rs  analytical beam, self-weight, modal and buckling tests
     tests/prescribed.rs  analytical prescribed-displacement and settlement tests
+    tests/combinations.rs linear load-combination and envelope tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -338,6 +355,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, thermal, contact and prestress are not supported. Prescribed displacements are supported as a single static kinematic boundary condition, not as a time-dependent or multi-step loading history.
 - Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects. Three-dimensional beams remain unsupported, so three-dimensional buckling is limited to truss models.
 - Loads are limited to **nodal concentrated forces/moments** and **element transverse loads that are uniform or linear along the member in the local `+y` direction**; arbitrary curved distributed loads, loads in a global direction and temperature loads are not supported.
+- Load combinations only scale the **single applied load set and self-weight**; independent named load patterns (separate live-load cases) are not modelled, so a combination cannot mix two different nodal load layouts.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.
 - The solver is **dense**: memory `O(n²)` and time `O(n³)`, suitable for small models but not for large engineering models.

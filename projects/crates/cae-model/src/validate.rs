@@ -349,6 +349,34 @@ impl Model {
             }
         }
 
+        let mut combination_names = HashSet::new();
+        for combination in &self.combinations {
+            if combination.name.trim().is_empty() {
+                report.push(check_error("combination/invalid-name", "a load combination requires a non-empty name"));
+            }
+            else if !combination_names.insert(combination.name.as_str()) {
+                report.push(check_error(
+                    "combination/duplicate-name",
+                    format!("load combination name `{}` is duplicated", combination.name),
+                ));
+            }
+            if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+                report.push(check_error(
+                    "combination/invalid-factor",
+                    format!("load combination `{}` factors must be finite", combination.name),
+                ));
+            }
+            else if combination.gravity != 0.0 && self.gravity.is_none() {
+                report.push(check_notice(
+                    "combination/no-gravity",
+                    format!(
+                        "load combination `{}` scales gravity by {}, but the document does not define a gravity vector",
+                        combination.name, combination.gravity
+                    ),
+                ));
+            }
+        }
+
         if report.has_errors() {
             return into_issues(report);
         }
