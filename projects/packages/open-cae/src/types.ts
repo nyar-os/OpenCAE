@@ -70,6 +70,8 @@ export interface Material {
     readonly density: number;
     /** Permissible stress for utilisation checks, in the document stress unit. */
     readonly allowableStress?: number;
+    /** Coefficient of thermal expansion in `1/K`; required by thermal loads. */
+    readonly alpha?: number;
     /** Parametric section geometry, when declared. */
     readonly section?: Section;
 }
@@ -586,6 +588,12 @@ export interface ElementAddRequest {
      * it keeps the load uniform.
      */
     readonly distributedLoadEnd?: number;
+    /**
+     * Uniform temperature change of the member in kelvin (or °C difference).
+     * Requires the material `alpha`; a uniform change produces axial strain
+     * only and never bends the member.
+     */
+    readonly temperature?: number;
 }
 
 /** Request of `setMaterial()`. */
@@ -597,6 +605,8 @@ export interface MaterialSetRequest {
     readonly name?: string;
     /** Permissible stress for utilisation checks. */
     readonly allowableStress?: number;
+    /** Coefficient of thermal expansion in `1/K`. */
+    readonly alpha?: number;
     /** Parametric section geometry. */
     readonly section?: Section;
 }

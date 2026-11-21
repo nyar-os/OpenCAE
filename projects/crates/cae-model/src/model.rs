@@ -125,6 +125,12 @@ pub struct Material {
     /// analysis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowable_stress: Option<f64>,
+    /// Coefficient of thermal expansion `alpha` in `1/K`.
+    ///
+    /// It is required only when an element declares a uniform temperature
+    /// change, and is never used by analyses without thermal loads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha: Option<f64>,
     /// Parametric section geometry.
     ///
     /// Supplying a section lets beams omit their own `inertia` and enables
@@ -248,6 +254,14 @@ pub struct Element {
     /// Only valid on beam elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distributed_load_end: Option<f64>,
+    /// Uniform temperature change `ΔT` of the member (kelvin or degrees
+    /// Celsius difference).
+    ///
+    /// The solver converts it into a thermal axial strain `alpha·ΔT` and an
+    /// equivalent nodal load. A uniform change never produces bending. The
+    /// material must declare [`Material::alpha`] when this value is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
 }
 
 /// Enforced (prescribed) values of the constrained degrees of freedom of a
@@ -469,6 +483,7 @@ impl Model {
                 area,
                 density: 0.0,
                 allowable_stress: None,
+                alpha: None,
                 section: None,
             },
             nodes: Vec::new(),
@@ -652,7 +667,17 @@ impl Model {
                 format!("distributed load w of element `{id}` must be finite"),
             ));
         }
-        self.elements.push(Element { id, from, to, material, kind, inertia, distributed_load, distributed_load_end });
+        self.elements.push(Element {
+            id,
+            from,
+            to,
+            material,
+            kind,
+            inertia,
+            distributed_load,
+            distributed_load_end,
+            temperature: None,
+        });
         self.bump_revision();
         Ok(())
     }
@@ -704,6 +729,12 @@ impl Model {
                 format!("allowable stress must be positive and finite (currently {:?})", material.allowable_stress),
             ));
         }
+        if material.alpha.is_some_and(|value| !value.is_finite()) {
+            return Err(CaeError::new(
+                "material/invalid-alpha",
+                format!("coefficient of thermal expansion alpha must be finite (currently {:?})", material.alpha),
+            ));
+        }
         if let Some(section) = material.section {
             section.properties()?;
         }
@@ -727,6 +758,28 @@ impl Model {
     /// Strong-axis second moment of area supplied by the material section.
     fn section_inertia(&self) -> Option<f64> {
         self.material.section.and_then(|section| section.properties().ok()).map(|properties| properties.inertia_strong)
+    }
+
+    /// Sets or clears the uniform temperature change of an existing element.
+    ///
+    /// A non-finite value is rejected with `element/invalid-temperature` and an
+    /// unknown element identifier with `element/unknown-id`. `None` removes the
+    /// thermal load again, so the element returns to the isothermal state.
+    pub fn set_element_temperature(&mut self, id: &str, temperature: Option<f64>) -> Result<(), CaeError> {
+        if temperature.is_some_and(|value| !value.is_finite()) {
+            return Err(CaeError::new(
+                "element/invalid-temperature",
+                format!("temperature change of element `{id}` must be finite"),
+            ));
+        }
+        let element = self
+            .elements
+            .iter_mut()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        element.temperature = temperature;
+        self.bump_revision();
+        Ok(())
     }
 
     /// Sets the gravity acceleration vector, replacing any previous value.

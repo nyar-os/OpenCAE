@@ -111,6 +111,7 @@ fn cantilever_with_section() -> Model {
             area: properties.area,
             density: 7.85e-9,
             allowable_stress: Some(235.0),
+            alpha: None,
             section: Some(section),
         })
         .expect("material");
@@ -180,6 +181,7 @@ fn invalid_sections_and_allowable_stress_are_rejected() {
             area: 100.0,
             density: 0.0,
             allowable_stress: Some(-1.0),
+            alpha: None,
             section: None,
         })
         .expect_err("negative allowable stress");

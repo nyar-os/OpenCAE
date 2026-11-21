@@ -652,7 +652,13 @@ struct AssemblyElement {
 }
 
 enum ElementModel {
-    Truss { direction: [f64; 3], axial_stiffness: f64, components: usize },
+    Truss {
+        direction: [f64; 3],
+        axial_stiffness: f64,
+        components: usize,
+        /// Equivalent thermal axial force `E·A·alpha·ΔT`.
+        thermal: f64,
+    },
     Beam(Box<BeamLocal>),
 }
 
@@ -755,17 +761,21 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
     for element in &system.elements {
         let local_displacement: Vec<f64> = element.displacement_dofs.iter().map(|&dof| displacement[dof]).collect();
         let (axial_force, end_forces, energy) = match &element.model {
-            ElementModel::Truss { direction, axial_stiffness, components } => {
+            ElementModel::Truss { direction, axial_stiffness, components, thermal } => {
                 let mut axial = 0.0;
                 for component in 0..*components {
                     axial +=
                         (local_displacement[*components + component] - local_displacement[component]) * direction[component];
                 }
-                let force = axial_stiffness * axial;
+                // The equivalent nodal thermal load is `E·A·alpha·ΔT·[-1, +1]`,
+                // so the physical axial force is the stiffness elongation minus
+                // that thermal force and a free member expands without stress.
+                let mechanical = axial - thermal / axial_stiffness;
+                let force = axial_stiffness * mechanical;
                 (
                     force,
                     EndForces { n1: -force, v1: 0.0, m1: 0.0, n2: force, v2: 0.0, m2: 0.0 },
-                    0.5 * axial_stiffness * axial * axial,
+                    0.5 * axial_stiffness * mechanical * mechanical,
                 )
             }
             ElementModel::Beam(beam) => {
@@ -1699,6 +1709,21 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
             return Err(CaeError::new("element/zero-length", format!("element `{}` has zero length", element.id)));
         }
         let (youngs_modulus, area) = resolve_material(model, element)?;
+        let thermal = match element.temperature {
+            Some(delta) => {
+                let alpha = model.material.alpha.filter(|value| value.is_finite()).ok_or_else(|| {
+                    CaeError::new(
+                        "material/missing-alpha",
+                        format!(
+                            "element `{}` declares a temperature change but the material does not define a finite coefficient of thermal expansion (alpha)",
+                            element.id
+                        ),
+                    )
+                })?;
+                youngs_modulus * area * alpha * delta
+            }
+            None => 0.0,
+        };
 
         match element.kind {
             ElementKind::Beam => {
@@ -1756,6 +1781,12 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                 }
                 if load_start != 0.0 || load_end != 0.0 {
                     add_linear_transverse(&mut local_load, load_start, load_end, length);
+                }
+                // Uniform thermal expansion enters as the consistent axial
+                // load `E·A·alpha·ΔT·[-1, +1]` in local coordinates.
+                if thermal != 0.0 {
+                    local_load[0] -= thermal;
+                    local_load[3] += thermal;
                 }
                 let local_stiffness = beam_stiffness(youngs_modulus, area, inertia, length);
                 let transform = beam_transform(c, s);
@@ -1846,6 +1877,13 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         }
                     }
                 }
+                if thermal != 0.0 {
+                    for component in 0..translation_components {
+                        let value = thermal * direction[component];
+                        forces[layout.dof(from * layout.slots + component)?] -= value;
+                        forces[layout.dof(to * layout.slots + component)?] += value;
+                    }
+                }
                 elements.push(AssemblyElement {
                     id: element.id.clone(),
                     from,
@@ -1855,7 +1893,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     youngs_modulus,
                     area,
                     displacement_dofs,
-                    model: ElementModel::Truss { direction, axial_stiffness, components: translation_components },
+                    model: ElementModel::Truss { direction, axial_stiffness, components: translation_components, thermal },
                 });
             }
         }

@@ -313,11 +313,11 @@ function elementKindOption(parsed: Parsed): ElementKind | undefined {
 }
 
 async function elementAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2'], []);
+    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt'], []);
     const file = positional(
         parsed,
         0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]',
+        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]',
     );
     const id = required(parsed, '--id');
     const from = required(parsed, '--from');
@@ -328,6 +328,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     const inertia = number(parsed, '--I');
     const distributedLoad = number(parsed, '--w');
     const distributedLoadEnd = number(parsed, '--w2');
+    const temperature = number(parsed, '--dt');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const summary = document.addElement({
@@ -340,6 +341,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             inertia,
             distributedLoad,
             distributedLoadEnd,
+            temperature,
         });
         console.log(message('elementAdded', { id, revision: String(summary.revision) }));
         return 0;
@@ -372,6 +374,7 @@ async function materialSet(args: readonly string[]): Promise<number> {
             '--density',
             '--name',
             '--allowable',
+            '--alpha',
             '--section',
             '--width',
             '--height',
@@ -389,10 +392,11 @@ async function materialSet(args: readonly string[]): Promise<number> {
     const density = number(parsed, '--density');
     const name = parsed.options.get('--name');
     const allowableStress = number(parsed, '--allowable');
+    const alpha = number(parsed, '--alpha');
     const section = sectionOption(parsed);
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.setMaterial({ youngsModulus, area, density, name, allowableStress, section });
+        const summary = document.setMaterial({ youngsModulus, area, density, name, allowableStress, alpha, section });
         console.log(
             message('materialSet', {
                 youngsModulus: String(summary.material.youngsModulus),

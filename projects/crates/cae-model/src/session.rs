@@ -339,6 +339,40 @@ impl OpenCae {
         distributed_load: Option<f64>,
         distributed_load_end: Option<f64>,
     ) -> Result<DocumentSummary, CaeError> {
+        self.add_element_thermal(
+            id,
+            from,
+            to,
+            youngs_modulus,
+            area,
+            kind,
+            inertia,
+            distributed_load,
+            distributed_load_end,
+            None,
+        )
+    }
+
+    /// Appends a truss or beam element with a uniform temperature change and
+    /// saves the document.
+    ///
+    /// `temperature` is the uniform temperature change `ΔT` of the member; the
+    /// material must declare `alpha` when it is supplied. All other arguments
+    /// match [`OpenCae::add_element_tapered`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_element_thermal(
+        &mut self,
+        id: &str,
+        from: &str,
+        to: &str,
+        youngs_modulus: Option<f64>,
+        area: Option<f64>,
+        kind: ElementKind,
+        inertia: Option<f64>,
+        distributed_load: Option<f64>,
+        distributed_load_end: Option<f64>,
+        temperature: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| {
             let material = if youngs_modulus.is_some() || area.is_some() {
                 Some(crate::ElementMaterial { youngs_modulus, area })
@@ -346,8 +380,20 @@ impl OpenCae {
             else {
                 None
             };
-            model.add_element_with_loads(id, from, to, material, kind, inertia, distributed_load, distributed_load_end)
+            model.add_element_with_loads(id, from, to, material, kind, inertia, distributed_load, distributed_load_end)?;
+            if temperature.is_some() {
+                model.set_element_temperature(id, temperature)?;
+            }
+            Ok(())
         })
+    }
+
+    /// Sets or clears the uniform temperature change of an existing element and
+    /// saves the document.
+    ///
+    /// `None` removes the thermal load again.
+    pub fn set_element_temperature(&mut self, id: &str, temperature: Option<f64>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_element_temperature(id, temperature))
     }
 
     /// Replaces the global material and section data and saves the document.
@@ -410,6 +456,7 @@ impl OpenCae {
                 },
             };
             let mut material = preset.material(units, area, section);
+            material.alpha = document.model.material.alpha;
             if let Some(stress) = allowable_stress {
                 material.allowable_stress = Some(stress);
             }

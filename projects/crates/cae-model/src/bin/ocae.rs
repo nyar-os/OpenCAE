@@ -170,11 +170,11 @@ fn node_add(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn element_add(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w", "--w2"], &[])?;
+    let parsed = parse(args, &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w", "--w2", "--dt"], &[])?;
     let file = positional(
         &parsed,
         0,
-        "element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]",
+        "element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]",
     )?;
     let id = required(&parsed, "--id")?;
     let from = required(&parsed, "--from")?;
@@ -188,9 +188,10 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
     let inertia = number(&parsed, "--I")?;
     let distributed_load = number(&parsed, "--w")?;
     let distributed_load_end = number(&parsed, "--w2")?;
+    let temperature = number(&parsed, "--dt")?;
     let mut session = session();
     session.open(Path::new(file))?;
-    let summary = session.add_element_tapered(
+    let summary = session.add_element_thermal(
         id,
         from,
         to,
@@ -200,6 +201,7 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
         inertia,
         distributed_load,
         distributed_load_end,
+        temperature,
     )?;
     println!("element `{id}` added as {} (revision {})", kind.as_str(), summary.revision);
     Ok(0)
@@ -313,6 +315,7 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
             "--density",
             "--name",
             "--allowable",
+            "--alpha",
             "--section",
             "--width",
             "--height",
@@ -329,6 +332,7 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
     let area = required_number(&parsed, "--A")?;
     let density = number(&parsed, "--density")?;
     let allowable = number(&parsed, "--allowable")?;
+    let alpha = number(&parsed, "--alpha")?;
     let section = optional_section(&parsed)?;
     let name = parsed.options.get("--name").cloned();
     let mut session = session();
@@ -339,6 +343,7 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
         area,
         density: density.unwrap_or(current.material.density),
         allowable_stress: allowable.or(current.material.allowable_stress),
+        alpha: alpha.or(current.material.alpha),
         section: section.or(current.material.section),
     };
     let summary = session.set_material_data(material)?;

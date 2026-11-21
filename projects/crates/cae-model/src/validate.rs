@@ -130,6 +130,15 @@ impl Model {
                 ),
             ));
         }
+        if self.material.alpha.is_some_and(|value| !value.is_finite()) {
+            report.push(check_error(
+                "material/invalid-alpha",
+                format!(
+                    "coefficient of thermal expansion alpha of material `{}` must be finite (currently {:?})",
+                    self.material.name, self.material.alpha
+                ),
+            ));
+        }
         let section_inertia = match self.material.section {
             Some(section) => match section.properties() {
                 Ok(properties) => Some(properties.inertia_strong),
@@ -286,6 +295,32 @@ impl Model {
                     report.push(check_error(
                         "element/invalid-distributed-load",
                         format!("distributed load w of element `{}` must be finite", element.id),
+                    ));
+                }
+            }
+            if let Some(delta) = element.temperature {
+                if !delta.is_finite() {
+                    report.push(check_error(
+                        "element/invalid-temperature",
+                        format!("temperature change of element `{}` must be finite", element.id),
+                    ));
+                }
+                else if self.material.alpha.is_none() {
+                    report.push(check_error(
+                        "material/missing-alpha",
+                        format!(
+                            "element `{}` declares a temperature change but the material does not define a coefficient of thermal expansion (alpha)",
+                            element.id
+                        ),
+                    ));
+                }
+                else if self.material.alpha == Some(0.0) && delta != 0.0 {
+                    report.push(check_warning(
+                        "element/inactive-temperature",
+                        format!(
+                            "element `{}` declares a temperature change but alpha is zero, so no thermal strain is produced",
+                            element.id
+                        ),
                     ));
                 }
             }

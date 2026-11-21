@@ -169,8 +169,9 @@ fn node_add(ctx: CallContext) -> Result<JsValue> {
 ///
 /// The request accepts `kind` (`"truss"` or `"beam"`, default `"truss"`),
 /// `inertia` (required for beams), `distributedLoad` (beam transverse load per
-/// unit length in local `+y` at the start node) and `distributedLoadEnd` (the
-/// value at the end node, forming a linearly varying load).
+/// unit length in local `+y` at the start node), `distributedLoadEnd` (the
+/// value at the end node, forming a linearly varying load) and `temperature`
+/// (uniform temperature change in kelvin).
 #[function]
 fn element_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -184,10 +185,22 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let inertia = number_field(&request, "inertia")?;
     let distributed_load = number_field(&request, "distributedLoad")?;
     let distributed_load_end = number_field(&request, "distributedLoadEnd")?;
+    let temperature = number_field(&request, "temperature")?;
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session
-        .add_element_tapered(&id, &from, &to, youngs_modulus, area, kind, inertia, distributed_load, distributed_load_end)
+        .add_element_thermal(
+            &id,
+            &from,
+            &to,
+            youngs_modulus,
+            area,
+            kind,
+            inertia,
+            distributed_load,
+            distributed_load_end,
+            temperature,
+        )
         .map_err(fail)?;
     respond(&ctx, &summary)
 }
@@ -205,6 +218,7 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
     let area = required_number_field(&request, "area")?;
     let density = number_field(&request, "density")?;
     let allowable_stress = number_field(&request, "allowableStress")?;
+    let alpha = number_field(&request, "alpha")?;
     let section = section_field(&request)?;
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
     let mut session = OpenCae::new(OpenCaeOptions::default());
@@ -215,6 +229,7 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
         area,
         density: density.unwrap_or(summary.material.density),
         allowable_stress: allowable_stress.or(summary.material.allowable_stress),
+        alpha: alpha.or(summary.material.alpha),
         section: section.or(summary.material.section),
     };
     let summary = session.set_material_data(material).map_err(fail)?;

@@ -91,6 +91,7 @@ impl MaterialPreset {
             area,
             density: self.density(units),
             allowable_stress: self.allowable_stress(units),
+            alpha: None,
             section,
         }
     }

@@ -9,6 +9,8 @@
 //!   stiffness, uniform transverse loads and endpoint moments;
 //! * linear elastic material behaviour and a single static load case;
 //! * self-weight body loads;
+//! * uniform member temperature changes with linear thermal expansion
+//!   (`α·ΔT`) and the matching equivalent nodal loads;
 //! * prescribed (enforced) nodal displacements and support settlements;
 //! * modal analysis with a diagonal (lumped) mass matrix and a symmetric
 //!   Jacobi eigen-solver;
@@ -22,11 +24,11 @@
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
-//! Three-dimensional beams, frames, nonlinear analysis, thermal effects,
-//! contact and solver-specific import formats (Abaqus `.inp`, STEP, ...) are
-//! **not** implemented. See [`CAPABILITIES_JSON`] for the machine-readable
-//! capability matrix and the repository Readme for the user facing
-//! description.
+//! Three-dimensional beams, frames, nonlinear analysis, temperature gradients,
+//! heat transfer, contact and solver-specific import formats (Abaqus `.inp`,
+//! STEP, ...) are **not** implemented. See [`CAPABILITIES_JSON`] for the
+//! machine-readable capability matrix and the repository Readme for the user
+//! facing description.
 
 #![deny(missing_docs)]
 
@@ -86,6 +88,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "loadCombinations": "supported",
     "materialLibrary": "supported",
     "elasticSupports": "supported",
+    "thermalExpansion": "supported",
     "thermal": "unsupported"
   },
   "io": {
