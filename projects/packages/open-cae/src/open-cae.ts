@@ -13,7 +13,7 @@
 import { CaeDocument } from './document.js';
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
-import type { CreateOptions, Dimension, OpenCAECapabilities, OpenCAEOptions, Units } from './types.js';
+import type { CreateOptions, Dimension, MaterialLibrary, OpenCAECapabilities, OpenCAEOptions, Units } from './types.js';
 
 /** Analysis session. One instance owns the documents it opens. */
 export class OpenCAE {
@@ -54,6 +54,16 @@ export class OpenCAE {
     async capabilities(): Promise<OpenCAECapabilities> {
         this.assertActive();
         return service.capabilities();
+    }
+
+    /**
+     * Built-in material presets and supported section shapes.
+     * `units` defaults to the session unit system.
+     */
+    async library(units: Units = this.units): Promise<MaterialLibrary> {
+        this.assertActive();
+        assertUnits(units);
+        return service.library(units);
     }
 
     /** Creates an empty document at `path` and returns it. */

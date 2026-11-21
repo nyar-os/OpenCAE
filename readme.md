@@ -1,6 +1,6 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, load combinations, modal (with effective mass) and linear buckling analysis. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, load combinations, modal (with effective mass) and linear buckling analysis, plus a built-in material and parametric-section library. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
@@ -64,8 +64,9 @@ const combinations = document.solveCombinations();   // solutions + envelope
 const forces = document.internalForces({ stations: 11 }); // N/V/M diagrams
 ```
 
-- Sessions: `capabilities()`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/internalForces/export/report/save/close`; every edit operation writes atomically to the file.
+- Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/internalForces/export/report/save/close`; every edit operation writes atomically to the file.
+- `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
@@ -88,6 +89,8 @@ The commands below are thin wrappers around the SDK, convenient for reproducing 
 ```shell
 cargo run -p cae-model --bin ocae --offline -- create demo.ocae --units mm
 cargo run -p cae-model --bin ocae --offline -- material set demo.ocae --E 210000 --A 100 --name steel
+cargo run -p cae-model --bin ocae --offline -- material preset demo.ocae --preset steel --section rectangle --width 10 --height 20
+cargo run -p cae-model --bin ocae --offline -- library --units mm
 
 cargo run -p cae-model --bin ocae --offline -- node add demo.ocae --id n1 --x -500 --y 0
 cargo run -p cae-model --bin ocae --offline -- node add demo.ocae --id n2 --x  500 --y 0
@@ -157,7 +160,9 @@ For a propped cantilever with a 2 mm roller settlement the roller reaction is `3
 | `ocae create <file.ocae> [--units mm\|m] [--dimension 2\|3]` | Create a document; the default dimension is 2 and consistent steel defaults are written (millimetre system E=210000 MPa, A=100 mm²; metre system E=2.1e11 Pa, A=1e-4 m²) |
 | `ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]` | Add a node; duplicate ids are rejected; `--z` defaults to 0 and may be non-zero only in 3D documents |
 | `ocae element add <file> --id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>]` | Add a truss/beam element; `beam` is 2D-only and requires a positive `--I`; `--w`/`--w2` are the local `+y` transverse intensities at the start/end node (uniform when `--w2` is omitted) |
-| `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`) |
+| `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--section ...]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`) |
+| `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
+| `ocae library [--units mm\|m]` | Print the built-in material presets and supported section shapes as JSON |
 | `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]` | Add/merge support constraints; `--rz` is available only on beam nodes and `--dz` only in 3D documents. A supplied displacement clamps that degree of freedom to the given value and implies its flag |
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
 | `ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]` | Set the gravity acceleration; the zero vector clears it |
@@ -190,7 +195,14 @@ The file is UTF-8 JSON with camelCase fields:
   "version": 1,
   "units": "mm",
   "dimension": 2,
-  "material": { "name": "steel", "youngsModulus": 210000.0, "area": 100.0, "density": 7.85e-9 },
+  "material": {
+    "name": "steel",
+    "youngsModulus": 210000.0,
+    "area": 200.0,
+    "density": 7.85e-9,
+    "allowableStress": 235.0,
+    "section": { "shape": "rectangle", "width": 10.0, "height": 20.0 }
+  },
   "nodes": [
     { "id": "n1", "x": 0.0, "y": 0.0, "z": 0.0 },
     { "id": "n2", "x": 1000.0, "y": 0.0, "z": 0.0 }
@@ -218,9 +230,9 @@ The file is UTF-8 JSON with camelCase fields:
 | `format` / `version` | Fixed to `open-cae-truss` / `1`; a mismatch fails validation |
 | `units` | `"mm"` or `"m"`. When missing, `mm` is assumed and a `document/assumed-units` notice is produced |
 | `dimension` | Spatial dimension, `2` or `3`. When missing, `2` is assumed so old documents load without changes; other values raise `document/dimension` |
-| `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name` |
+| `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name`, `allowableStress` (for utilisation) and `section` (parametric geometry). A section is `{ "shape": "rectangle", "width", "height" }`, `{ "shape": "circle", "diameter" }` or `{ "shape": "i", "depth", "flangeWidth", "flangeThickness", "webThickness" }`; when present it supplies the strong-axis inertia for beams that omit `inertia` |
 | `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
-| `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying) |
+| `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` or a material `section` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying) |
 | `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
 | `gravity` | Optional `[gx, gy, gz]`; when set, self-weight is applied from the density |
@@ -246,6 +258,7 @@ The file is UTF-8 JSON with camelCase fields:
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
+| material presets and section library (`materialLibrary`, rectangle/circle/I-section properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown report export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -277,6 +290,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Two-dimensional beams and two- or three-dimensional trusses are assembled.
 9. **Mechanism detection**: every solve performs a numerical rank check on the free-degree-of-freedom stiffness matrix (whether `K_ff` has full rank); on failure it reports `model/mechanism` and lists as many unconstrained nodes as possible.
 10. **Load combinations**: each combination clones the model, multiplies every nodal load and element distributed load by `loads`, multiplies the gravity vector by `gravity` (clearing it when the result is the zero vector), solves the scaled model and keeps the full static solution. The envelope reports the governing nodal displacement, signed axial force/moment maxima and per-node/per-element extremes with the combination names that produced them. Prescribed displacements are not scaled.
+11. **Material and section library**: presets store Young's modulus and density in `mm` units and convert by `1e6` (Pa) and `1e12` (kg/m³). Sections compute `A`, `I_strong = b h³/12` (rectangle), `I_weak`, the extreme-fibre distance `c` and a Saint-Venant torsion constant (`J ≈ a b³/3·(1 − 0.63 b/a + 0.052 (b/a)⁵)` for rectangles, `π d⁴/32` for circles and a thin-walled sum for I-sections). The elastic section modulus is `I_strong / c`; a beam may omit `inertia` and inherit `I_strong` from the section.
 
 ## Validation and tests
 
@@ -323,6 +337,14 @@ pnpm --filter @wae/open-cae run typecheck
 - the envelope selects `D+L`, reports the governing node/element and matches the individual solutions;
 - empty lists (`combination/none`), non-finite factors (`combination/invalid-factor`), empty and duplicate names are rejected, combinations round-trip through `.ocae`, and the session writes the JSON report.
 
+`projects/crates/cae-model/tests/library.rs` asserts the material and section library:
+
+- rectangular, circular and I-section area, strong/weak inertia, torsion constant, extreme fibre and section modulus match the closed-form formulas (`1e-12`);
+- presets convert between `mm` (`210000 MPa`, `7.85e-9 t/mm³`) and `m` (`2.1e11 Pa`, `7850 kg/m³`);
+- a cantilever beam that omits `inertia` uses the stored section and reproduces `PL³/(3EI)` (`1e-9`);
+- a preset plus section round-trips through the document, validation accepts the model and the session solves it;
+- invalid section dimensions, non-positive allowable stress and a beam without inertia or section are rejected with stable codes.
+
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
 ## Repository structure
@@ -333,6 +355,7 @@ projects/
   crates/cae-model/      OpenCAE core library + `ocae` CLI
     src/session.rs       OpenCae session API (all editing/validation/solving/export)
     src/model.rs         data model and document I/O
+    src/library.rs       built-in material presets and section properties
     src/validate.rs      validation rules and mechanism detection
     src/solver.rs        truss/beam stiffness, DOF activation, Gaussian elimination, Jacobi modal/buckling solvers
     src/export.rs        CSV / VTK / Markdown export and atomic writes
@@ -341,6 +364,7 @@ projects/
     tests/beam_modal.rs  analytical beam, self-weight, modal and buckling tests
     tests/prescribed.rs  analytical prescribed-displacement and settlement tests
     tests/combinations.rs linear load-combination and envelope tests
+    tests/library.rs     material-preset and section-property tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -361,6 +385,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects. Three-dimensional beams remain unsupported, so three-dimensional buckling is limited to truss models.
 - Loads are limited to **nodal concentrated forces/moments** and **element transverse loads that are uniform or linear along the member in the local `+y` direction**; arbitrary curved distributed loads, loads in a global direction and temperature loads are not supported.
 - Load combinations only scale the **single applied load set and self-weight**; independent named load patterns (separate live-load cases) are not modelled, so a combination cannot mix two different nodal load layouts.
+- The material and section are **global**: all elements share one material and one parametric section. Per-element `E`/`A` overrides still exist, but there is no per-element section library yet.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.
 - The solver is **dense**: memory `O(n²)` and time `O(n³)`, suitable for small models but not for large engineering models.

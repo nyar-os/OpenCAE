@@ -23,6 +23,8 @@ import type {
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
+    MaterialLibrary,
+    MaterialPresetRequest,
     MaterialSetRequest,
     ModalSolution,
     NodeAddRequest,
@@ -112,6 +114,16 @@ export function elementAdd(path: string, request: ElementAddRequest): DocumentSu
 /** Replaces the global material and returns the updated summary. */
 export function materialSet(path: string, request: MaterialSetRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('material.set').material_set(path, JSON.stringify(request)));
+}
+
+/** Applies a built-in material preset and returns the updated summary. */
+export function materialPreset(path: string, request: MaterialPresetRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('material.preset').material_preset(path, JSON.stringify(request)));
+}
+
+/** Reads the built-in material and section library in the requested units. */
+export function library(units: 'mm' | 'm'): MaterialLibrary {
+    return decode<MaterialLibrary>(() => binding('library').library(JSON.stringify({ units })));
 }
 
 /** Adds or merges a support entry and returns the updated summary. */

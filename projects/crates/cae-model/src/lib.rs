@@ -16,6 +16,8 @@
 //!   two-dimensional beam models using a geometric stiffness assembled from
 //!   the static axial forces;
 //! * support reaction summaries with a global force equilibrium check;
+//! * built-in material presets and parametric rectangular, circular and
+//!   I-section properties;
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
@@ -29,6 +31,7 @@
 
 mod error;
 mod export;
+mod library;
 mod model;
 mod session;
 mod solver;
@@ -37,9 +40,10 @@ mod validate;
 pub use crate::{
     error::CaeError,
     export::{export_csv, export_md, export_vtk, write_atomic},
+    library::{MATERIAL_PRESETS, MaterialPreset, SectionProperties, library_json, material_preset},
     model::{
         Element, ElementKind, ElementMaterial, FORMAT, Load, LoadCombination, Material, Model, Node, PrescribedDisplacement,
-        Support, Units, VERSION,
+        Section, Support, Units, VERSION,
     },
     session::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
@@ -74,6 +78,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "buckling": "supported",
     "internalForces": "supported",
     "loadCombinations": "supported",
+    "materialLibrary": "supported",
     "thermal": "unsupported"
   },
   "io": {

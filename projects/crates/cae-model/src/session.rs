@@ -17,7 +17,8 @@ use serde::Serialize;
 use crate::{
     CAPABILITIES_JSON, CaeError,
     export::{export_csv, export_md, export_vtk, write_atomic},
-    model::{ElementKind, Material, Model, Units},
+    library::material_preset,
+    model::{ElementKind, Material, Model, Section, Units},
     solver::{
         BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution,
         solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
@@ -368,6 +369,52 @@ impl OpenCae {
             model.set_material_full(name, youngs_modulus, area, density);
             Ok(())
         })
+    }
+
+    /// Replaces the complete global material, section and allowable-stress data.
+    ///
+    /// The material is validated before the document is written.
+    pub fn set_material_data(&mut self, material: Material) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_material_data(material))
+    }
+
+    /// Replaces or clears the parametric cross-section of the global material.
+    pub fn set_section(&mut self, section: Option<Section>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_section(section))
+    }
+
+    /// Applies a built-in material preset and saves the document.
+    ///
+    /// The area comes from `area` when supplied, otherwise from the section
+    /// geometry, otherwise the existing document area is kept. A section is
+    /// written when supplied and otherwise preserved. `allowable_stress`
+    /// overrides the preset's permissible stress.
+    pub fn apply_material_preset(
+        &mut self,
+        name: &str,
+        area: Option<f64>,
+        section: Option<Section>,
+        allowable_stress: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        let preset = material_preset(name)?;
+        let material = {
+            let document = self.current()?;
+            let units = document.model.units.unwrap_or(Units::Millimeter);
+            let section = section.or(document.model.material.section);
+            let area = match area {
+                Some(area) => area,
+                None => match section {
+                    Some(section) => section.properties()?.area,
+                    None => document.model.material.area,
+                },
+            };
+            let mut material = preset.material(units, area, section);
+            if let Some(stress) = allowable_stress {
+                material.allowable_stress = Some(stress);
+            }
+            material
+        };
+        self.edit(|model| model.set_material_data(material))
     }
 
     /// Sets the gravity acceleration vector and saves the document.

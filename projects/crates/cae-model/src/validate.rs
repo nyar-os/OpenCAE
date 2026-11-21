@@ -112,6 +112,25 @@ impl Model {
                 ),
             ));
         }
+        if self.material.allowable_stress.is_some_and(|value| !positive_finite(value)) {
+            report.push(check_error(
+                "material/invalid-allowable-stress",
+                format!(
+                    "allowable stress of global material `{}` must be positive (currently {:?})",
+                    self.material.name, self.material.allowable_stress
+                ),
+            ));
+        }
+        let section_inertia = match self.material.section {
+            Some(section) => match section.properties() {
+                Ok(properties) => Some(properties.inertia_strong),
+                Err(error) => {
+                    report.push(check_error(&error.code, error.message));
+                    None
+                }
+            },
+            None => None,
+        };
 
         let mut node_ids = HashSet::new();
         for node in &self.nodes {
@@ -197,10 +216,13 @@ impl Model {
                         ),
                     ));
                 }
-                if !element.inertia.is_some_and(positive_finite) {
+                if !element.inertia.is_some_and(positive_finite) && !section_inertia.is_some_and(positive_finite) {
                     report.push(check_error(
                         "element/invalid-inertia",
-                        format!("beam element `{}` requires a positive finite inertia", element.id),
+                        format!(
+                            "beam element `{}` requires a positive finite inertia, or a material section that provides one",
+                            element.id
+                        ),
                     ));
                 }
             }

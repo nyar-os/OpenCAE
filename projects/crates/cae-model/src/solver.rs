@@ -1365,12 +1365,25 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         ),
                     ));
                 }
-                let inertia = element.inertia.filter(|value| positive_finite(*value)).ok_or_else(|| {
-                    CaeError::new(
-                        "element/invalid-inertia",
-                        format!("beam element `{}` requires a positive finite inertia", element.id),
-                    )
-                })?;
+                let inertia = element
+                    .inertia
+                    .or_else(|| {
+                        model
+                            .material
+                            .section
+                            .and_then(|section| section.properties().ok())
+                            .map(|properties| properties.inertia_strong)
+                    })
+                    .filter(|value| positive_finite(*value))
+                    .ok_or_else(|| {
+                        CaeError::new(
+                            "element/invalid-inertia",
+                            format!(
+                                "beam element `{}` requires a positive finite inertia, or a material section that provides one",
+                                element.id
+                            ),
+                        )
+                    })?;
                 let c = delta[0] / length;
                 let s = delta[1] / length;
                 let mut local_load = [0.0; 6];

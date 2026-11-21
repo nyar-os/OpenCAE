@@ -44,6 +44,18 @@ export interface CreateOptions {
     readonly dimension?: Dimension;
 }
 
+/** Parametric cross-section geometry. Dimensions use the document units. */
+export type Section =
+    | { readonly shape: 'rectangle'; readonly width: number; readonly height: number }
+    | { readonly shape: 'circle'; readonly diameter: number }
+    | {
+          readonly shape: 'i';
+          readonly depth: number;
+          readonly flangeWidth: number;
+          readonly flangeThickness: number;
+          readonly webThickness: number;
+      };
+
 /** Global isotropic linear elastic material and section data. */
 export interface Material {
     readonly name: string;
@@ -56,6 +68,43 @@ export interface Material {
      * with the declared units, for example `7.85e-9 t/mm³` in `mm`.
      */
     readonly density: number;
+    /** Permissible stress for utilisation checks, in the document stress unit. */
+    readonly allowableStress?: number;
+    /** Parametric section geometry, when declared. */
+    readonly section?: Section;
+}
+
+/** One built-in material preset, expressed in the requested units. */
+export interface MaterialPreset {
+    readonly name: string;
+    readonly youngsModulus: number;
+    readonly density: number;
+    readonly allowableStress: number | null;
+}
+
+/** One supported parametric section shape. */
+export interface SectionShape {
+    readonly shape: 'rectangle' | 'circle' | 'i';
+    readonly parameters: readonly string[];
+}
+
+/** Built-in material and section library. */
+export interface MaterialLibrary {
+    readonly units: Units;
+    readonly materials: readonly MaterialPreset[];
+    readonly sections: readonly SectionShape[];
+}
+
+/** Request of `applyMaterialPreset()`. */
+export interface MaterialPresetRequest {
+    /** Built-in preset name, for example `steel` or `aluminum`. */
+    readonly preset: string;
+    /** Area override; derived from the section when omitted. */
+    readonly area?: number;
+    /** Parametric section to store with the material. */
+    readonly section?: Section;
+    /** Permissible-stress override. */
+    readonly allowableStress?: number;
 }
 
 /** Summary of one document as written to disk. */
@@ -388,7 +437,10 @@ export interface ElementAddRequest {
     readonly youngsModulus?: number;
     /** Optional per-element area override. */
     readonly area?: number;
-    /** Second moment of area; required and positive for beams. */
+    /**
+     * Second moment of area. Required for beams unless the material section
+     * provides one; when present it overrides the section value.
+     */
     readonly inertia?: number;
     /**
      * Distributed load per unit length at the start node in the element's
@@ -410,6 +462,10 @@ export interface MaterialSetRequest {
     /** Mass density, required by modal analysis and self-weight. */
     readonly density?: number;
     readonly name?: string;
+    /** Permissible stress for utilisation checks. */
+    readonly allowableStress?: number;
+    /** Parametric section geometry. */
+    readonly section?: Section;
 }
 
 /**

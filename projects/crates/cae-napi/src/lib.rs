@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use cae_model::{CaeError, ElementKind, ExportFormat, OpenCae, OpenCaeOptions, Units};
+use cae_model::{CaeError, ElementKind, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, library_json};
 use serde::Serialize;
 use serde_json::Value;
 use wae::{CallContext, Error, JsValue, Result, function, register_module};
@@ -193,6 +193,10 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
 }
 
 /// Replaces the global material of a document and saves it.
+///
+/// The request accepts `youngsModulus`, `area`, optional `density`, `name`,
+/// `allowableStress` and a parametric `section` object. Values that are omitted
+/// keep their current document value.
 #[function]
 fn material_set(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -200,14 +204,63 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
     let youngs_modulus = required_number_field(&request, "youngsModulus")?;
     let area = required_number_field(&request, "area")?;
     let density = number_field(&request, "density")?;
+    let allowable_stress = number_field(&request, "allowableStress")?;
+    let section = section_field(&request)?;
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
     let mut session = OpenCae::new(OpenCaeOptions::default());
-    session.open(Path::new(&path)).map_err(fail)?;
-    let summary = match density {
-        Some(density) => session.set_material_full(youngs_modulus, area, density, name).map_err(fail)?,
-        None => session.set_material(youngs_modulus, area, name).map_err(fail)?,
+    let summary = session.open(Path::new(&path)).map_err(fail)?;
+    let material = Material {
+        name: name.unwrap_or(summary.material.name.clone()),
+        youngs_modulus,
+        area,
+        density: density.unwrap_or(summary.material.density),
+        allowable_stress: allowable_stress.or(summary.material.allowable_stress),
+        section: section.or(summary.material.section),
     };
+    let summary = session.set_material_data(material).map_err(fail)?;
     respond(&ctx, &summary)
+}
+
+/// Applies a built-in material preset to a document and saves it.
+///
+/// The request accepts `preset` (required), optional `area`, `allowableStress`
+/// and a parametric `section`. A supplied section provides the area when
+/// `area` is omitted.
+#[function]
+fn material_preset(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let preset = text_field(&request, "preset")?;
+    let area = number_field(&request, "area")?;
+    let allowable_stress = number_field(&request, "allowableStress")?;
+    let section = section_field(&request)?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.apply_material_preset(&preset, area, section, allowable_stress).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Returns the built-in material and section library as JSON.
+///
+/// The request accepts an optional `units` value (`mm` or `m`).
+#[function]
+fn library(ctx: CallContext) -> Result<JsValue> {
+    let request = optional_object(&ctx, 0)?;
+    let units = match request.as_ref().and_then(|request| request.get("units")).and_then(Value::as_str) {
+        Some(raw) => raw.parse::<Units>().map_err(fail)?,
+        None => Units::Millimeter,
+    };
+    let text = library_json(units).map_err(fail)?;
+    ctx.env().string(&text)
+}
+
+fn section_field(request: &Value) -> Result<Option<Section>> {
+    match request.get("section") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|error| argument_error(&format!("`section` is invalid: {error}"))),
+    }
 }
 
 /// Adds or merges a support entry of a document and saves it.
@@ -422,6 +475,8 @@ register_module![
     node_add,
     element_add,
     material_set,
+    material_preset,
+    library,
     support_add,
     load_add,
     gravity_set,

@@ -50,6 +50,55 @@ impl FromStr for Units {
     }
 }
 
+/// Parametric cross-section geometry stored with the global material.
+///
+/// The section is optional so existing documents load unchanged. When present
+/// it supplies the second moment of area used by beams that omit their own
+/// `inertia` and the extreme-fibre distance used by stress recovery. All
+/// dimensions use the document units.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape")]
+pub enum Section {
+    /// Solid rectangle with `width` along the local x axis and `height` along
+    /// the local y axis.
+    #[serde(rename = "rectangle", rename_all = "camelCase")]
+    Rectangle {
+        /// Section width.
+        width: f64,
+        /// Section height (bending depth).
+        height: f64,
+    },
+    /// Solid circular section.
+    #[serde(rename = "circle", rename_all = "camelCase")]
+    Circle {
+        /// Diameter.
+        diameter: f64,
+    },
+    /// Doubly symmetric I-section.
+    #[serde(rename = "i", rename_all = "camelCase")]
+    ISection {
+        /// Total depth.
+        depth: f64,
+        /// Flange width.
+        flange_width: f64,
+        /// Flange thickness.
+        flange_thickness: f64,
+        /// Web thickness.
+        web_thickness: f64,
+    },
+}
+
+impl Section {
+    /// Returns the short shape identifier (`rectangle`, `circle` or `i`).
+    pub fn shape_name(self) -> &'static str {
+        match self {
+            Self::Rectangle { .. } => "rectangle",
+            Self::Circle { .. } => "circle",
+            Self::ISection { .. } => "i",
+        }
+    }
+}
+
 /// Global isotropic linear elastic material and section data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +118,19 @@ pub struct Material {
     /// requested.
     #[serde(default)]
     pub density: f64,
+    /// Permissible stress used by stress-recovery utilisation checks.
+    ///
+    /// The value uses the document stress unit (MPa for millimetres, Pa for
+    /// metres). It is optional and never required by static, modal or buckling
+    /// analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowable_stress: Option<f64>,
+    /// Parametric section geometry.
+    ///
+    /// Supplying a section lets beams omit their own `inertia` and enables
+    /// beam stress recovery through the extreme-fibre distance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<Section>,
 }
 
 fn default_material_name() -> String {
@@ -359,7 +421,14 @@ impl Model {
             version: VERSION,
             units: Some(units),
             dimension,
-            material: Material { name: default_material_name(), youngs_modulus, area, density: 0.0 },
+            material: Material {
+                name: default_material_name(),
+                youngs_modulus,
+                area,
+                density: 0.0,
+                allowable_stress: None,
+                section: None,
+            },
             nodes: Vec::new(),
             elements: Vec::new(),
             supports: Vec::new(),
@@ -504,10 +573,12 @@ impl Model {
                         ),
                     ));
                 }
-                if !positive_finite_option(inertia) {
+                if !positive_finite_option(inertia) && !self.section_inertia().is_some_and(positive_finite) {
                     return Err(CaeError::new(
                         "element/invalid-inertia",
-                        format!("beam element `{id}` requires a positive finite inertia (currently {inertia:?})"),
+                        format!(
+                            "beam element `{id}` requires a positive finite inertia, or a material section that provides one (currently {inertia:?})"
+                        ),
                     ));
                 }
             }
@@ -554,6 +625,57 @@ impl Model {
         self.material.area = area;
         self.material.density = density;
         self.bump_revision();
+    }
+
+    /// Replaces the global material, section and allowable-stress data.
+    ///
+    /// Section geometry and allowable stress are validated before the document
+    /// is touched, so an invalid section never reaches the file.
+    pub fn set_material_data(&mut self, material: Material) -> Result<(), CaeError> {
+        if !positive_finite(material.youngs_modulus) || !positive_finite(material.area) {
+            return Err(CaeError::new(
+                "material/invalid",
+                format!(
+                    "E and A of material `{}` must be positive (currently E={}, A={})",
+                    material.name, material.youngs_modulus, material.area
+                ),
+            ));
+        }
+        if !material.density.is_finite() || material.density < 0.0 {
+            return Err(CaeError::new(
+                "material/invalid-density",
+                format!("material density must be finite and non-negative (currently {})", material.density),
+            ));
+        }
+        if material.allowable_stress.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "material/invalid-allowable-stress",
+                format!("allowable stress must be positive and finite (currently {:?})", material.allowable_stress),
+            ));
+        }
+        if let Some(section) = material.section {
+            section.properties()?;
+        }
+        self.material = material;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Replaces or clears the parametric cross-section of the global material.
+    ///
+    /// The section geometry is validated before the document is touched.
+    pub fn set_section(&mut self, section: Option<Section>) -> Result<(), CaeError> {
+        if let Some(section) = section {
+            section.properties()?;
+        }
+        self.material.section = section;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Strong-axis second moment of area supplied by the material section.
+    fn section_inertia(&self) -> Option<f64> {
+        self.material.section.and_then(|section| section.properties().ok()).map(|properties| properties.inertia_strong)
     }
 
     /// Sets the gravity acceleration vector, replacing any previous value.
@@ -830,6 +952,10 @@ fn dimension_mismatch(message: impl Into<String>) -> CaeError {
 
 fn positive_finite_option(value: Option<f64>) -> bool {
     value.is_some_and(|value| value.is_finite() && value > 0.0)
+}
+
+fn positive_finite(value: f64) -> bool {
+    value.is_finite() && value > 0.0
 }
 
 /// Identifiers of nodes touched by at least one beam element.

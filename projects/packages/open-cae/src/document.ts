@@ -24,6 +24,7 @@ import type {
     InternalForceSolution,
     LoadAddRequest,
     Material,
+    MaterialPresetRequest,
     MaterialSetRequest,
     ModalSolution,
     NodeAddRequest,
@@ -120,6 +121,12 @@ export class CaeDocument {
     setMaterial(request: MaterialSetRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.materialSet(this.path, request));
+    }
+
+    /** Applies a built-in material preset and saves the file. */
+    applyMaterialPreset(request: MaterialPresetRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.materialPreset(this.path, request));
     }
 
     /** Adds or merges a support entry and saves the file. */

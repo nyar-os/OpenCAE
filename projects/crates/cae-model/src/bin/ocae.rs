@@ -11,7 +11,7 @@ use std::{
     process,
 };
 
-use cae_model::{CaeError, ElementKind, ExportFormat, OpenCae, OpenCaeOptions, Units, not_implemented};
+use cae_model::{CaeError, ElementKind, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, not_implemented};
 
 const USAGE: &str = "\
 ocae - OpenCAE truss/beam linear-static, modal and buckling solver (2D/3D)
@@ -22,6 +22,11 @@ Usage:
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>]
   ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]
+  ocae material preset <file> --preset <name> [--section rectangle|circle|i]
+                        [--width <w>] [--height <h>] [--diameter <d>] [--depth <d>]
+                        [--flange-width <b>] [--flange-thickness <t>] [--web-thickness <t>]
+                        [--area <A>] [--allowable <s>]
+  ocae library [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
@@ -74,7 +79,8 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "create" => create(&args[1..]),
         "node" => subcommand(args, "add", "node"),
         "element" => subcommand(args, "add", "element"),
-        "material" => subcommand(args, "set", "material"),
+        "material" => material_command(&args[1..]),
+        "library" => library_command(&args[1..]),
         "support" => subcommand(args, "add", "support"),
         "load" => subcommand(args, "add", "load"),
         "model" => model_command(&args[1..]),
@@ -109,7 +115,6 @@ fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CaeEr
         Some(action) if action == expected => match (group, action) {
             ("node", "add") => node_add(&args[2..]),
             ("element", "add") => element_add(&args[2..]),
-            ("material", "set") => material_set(&args[2..]),
             ("support", "add") => support_add(&args[2..]),
             ("load", "add") => load_add(&args[2..]),
             _ => Err(CaeError::new("cli/unknown-command", format!("unknown command `{group} {action}`"))),
@@ -193,22 +198,151 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn material_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("set") => material_set(&args[1..]),
+        Some("preset") => material_preset(&args[1..]),
+        Some(other) => Err(CaeError::new(
+            "cli/unknown-command",
+            format!("subcommand `{other}` of `material` does not exist; only `set` or `preset` is supported"),
+        )),
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`material` is missing a subcommand; only `set` or `preset` is supported",
+        )),
+    }
+}
+
+fn material_preset(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(
+        args,
+        &[
+            "--preset",
+            "--area",
+            "--allowable",
+            "--section",
+            "--width",
+            "--height",
+            "--diameter",
+            "--depth",
+            "--flange-width",
+            "--flange-thickness",
+            "--web-thickness",
+        ],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "material preset <file> --preset <name> [--section rectangle|circle|i] [--area A] [--allowable S]",
+    )?;
+    let preset = required(&parsed, "--preset")?;
+    let area = number(&parsed, "--area")?;
+    let allowable = number(&parsed, "--allowable")?;
+    let section = optional_section(&parsed)?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.apply_material_preset(preset, area, section, allowable)?;
+    println!(
+        "material preset `{preset}` applied: E={} A={} density={} allowable={:?} section={} (revision {})",
+        summary.material.youngs_modulus,
+        summary.material.area,
+        summary.material.density,
+        summary.material.allowable_stress,
+        summary.material.section.map(Section::shape_name).unwrap_or("none"),
+        summary.revision
+    );
+    Ok(0)
+}
+
+fn optional_section(parsed: &Parsed) -> Result<Option<Section>, CaeError> {
+    let Some(shape) = parsed.options.get("--section")
+    else {
+        let geometry =
+            ["--width", "--height", "--diameter", "--depth", "--flange-width", "--flange-thickness", "--web-thickness"];
+        if geometry.iter().any(|option| parsed.options.contains_key(*option)) {
+            return Err(CaeError::new(
+                "cli/missing-option",
+                "section dimensions require `--section rectangle`, `--section circle` or `--section i`",
+            ));
+        }
+        return Ok(None);
+    };
+    let section = match shape.as_str() {
+        "rectangle" => Section::rectangle(required_number(parsed, "--width")?, required_number(parsed, "--height")?)?,
+        "circle" => Section::circle(required_number(parsed, "--diameter")?)?,
+        "i" | "i-section" => Section::i_section(
+            required_number(parsed, "--depth")?,
+            required_number(parsed, "--flange-width")?,
+            required_number(parsed, "--flange-thickness")?,
+            required_number(parsed, "--web-thickness")?,
+        )?,
+        other => {
+            return Err(CaeError::new(
+                "cli/invalid-option",
+                format!("unknown section shape `{other}`; valid values are `rectangle`, `circle` or `i`"),
+            ));
+        }
+    };
+    Ok(Some(section))
+}
+
+fn library_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--units"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    println!("{}", cae_model::library_json(units)?);
+    Ok(0)
+}
+
 fn material_set(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--E", "--A", "--density", "--name"], &[])?;
+    let parsed = parse(
+        args,
+        &[
+            "--E",
+            "--A",
+            "--density",
+            "--name",
+            "--allowable",
+            "--section",
+            "--width",
+            "--height",
+            "--diameter",
+            "--depth",
+            "--flange-width",
+            "--flange-thickness",
+            "--web-thickness",
+        ],
+        &[],
+    )?;
     let file = positional(&parsed, 0, "material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]")?;
     let youngs_modulus = required_number(&parsed, "--E")?;
     let area = required_number(&parsed, "--A")?;
     let density = number(&parsed, "--density")?;
+    let allowable = number(&parsed, "--allowable")?;
+    let section = optional_section(&parsed)?;
     let name = parsed.options.get("--name").cloned();
     let mut session = session();
-    session.open(Path::new(file))?;
-    let summary = match density {
-        Some(density) => session.set_material_full(youngs_modulus, area, density, name)?,
-        None => session.set_material(youngs_modulus, area, name)?,
+    let current = session.open(Path::new(file))?;
+    let material = Material {
+        name: name.unwrap_or(current.material.name.clone()),
+        youngs_modulus,
+        area,
+        density: density.unwrap_or(current.material.density),
+        allowable_stress: allowable.or(current.material.allowable_stress),
+        section: section.or(current.material.section),
     };
+    let summary = session.set_material_data(material)?;
     println!(
-        "material set: E={} A={} density={} (revision {})",
-        summary.material.youngs_modulus, summary.material.area, summary.material.density, summary.revision
+        "material set: E={} A={} density={} allowable={:?} section={} (revision {})",
+        summary.material.youngs_modulus,
+        summary.material.area,
+        summary.material.density,
+        summary.material.allowable_stress,
+        summary.material.section.map(Section::shape_name).unwrap_or("none"),
+        summary.revision
     );
     Ok(0)
 }

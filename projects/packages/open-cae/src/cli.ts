@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import type { CaeDocument } from './document.js';
 import { NotImplementedError, OpenCAEError, type OpenCAEErrorCode } from './errors.js';
 import { OpenCAE } from './open-cae.js';
-import type { Analysis, Dimension, ElementKind, ExportFormat, Units } from './types.js';
+import type { Analysis, Dimension, ElementKind, ExportFormat, Section, Units } from './types.js';
 
 interface CliLocale {
     readonly cli: {
@@ -188,7 +188,9 @@ async function dispatch(args: readonly string[]): Promise<number> {
         case 'element':
             return subcommand(args, 'add', 'element');
         case 'material':
-            return subcommand(args, 'set', 'material');
+            return materialCommand(args.slice(1));
+        case 'library':
+            return libraryCommand(args.slice(1));
         case 'support':
             return subcommand(args, 'add', 'support');
         case 'load':
@@ -247,8 +249,6 @@ async function subcommand(args: readonly string[], expected: string, group: stri
             return nodeAdd(args.slice(2));
         case 'element':
             return elementAdd(args.slice(2));
-        case 'material':
-            return materialSet(args.slice(2));
         case 'support':
             return supportAdd(args.slice(2));
         case 'load':
@@ -340,16 +340,53 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     });
 }
 
+async function materialCommand(args: readonly string[]): Promise<number> {
+    if (args[0] === 'set') {
+        return materialSet(args.slice(1));
+    }
+    if (args[0] === 'preset') {
+        return materialPreset(args.slice(1));
+    }
+    if (args[0] === undefined) {
+        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'material', expected: 'set or preset' });
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', {
+        group: 'material',
+        action: args[0],
+        expected: 'set or preset',
+    });
+}
+
 async function materialSet(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--E', '--A', '--density', '--name'], []);
+    const parsed = parse(
+        args,
+        [
+            '--E',
+            '--A',
+            '--density',
+            '--name',
+            '--allowable',
+            '--section',
+            '--width',
+            '--height',
+            '--diameter',
+            '--depth',
+            '--flange-width',
+            '--flange-thickness',
+            '--web-thickness',
+        ],
+        [],
+    );
     const file = positional(parsed, 0, 'material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]');
     const youngsModulus = requiredNumber(parsed, '--E');
     const area = requiredNumber(parsed, '--A');
     const density = number(parsed, '--density');
     const name = parsed.options.get('--name');
+    const allowableStress = number(parsed, '--allowable');
+    const section = sectionOption(parsed);
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.setMaterial({ youngsModulus, area, density, name });
+        const summary = document.setMaterial({ youngsModulus, area, density, name, allowableStress, section });
         console.log(
             message('materialSet', {
                 youngsModulus: String(summary.material.youngsModulus),
@@ -358,6 +395,97 @@ async function materialSet(args: readonly string[]): Promise<number> {
                 revision: String(summary.revision),
             }),
         );
+        return 0;
+    });
+}
+
+async function materialPreset(args: readonly string[]): Promise<number> {
+    const parsed = parse(
+        args,
+        [
+            '--preset',
+            '--area',
+            '--allowable',
+            '--section',
+            '--width',
+            '--height',
+            '--diameter',
+            '--depth',
+            '--flange-width',
+            '--flange-thickness',
+            '--web-thickness',
+        ],
+        [],
+    );
+    const file = positional(
+        parsed,
+        0,
+        'material preset <file> --preset <name> [--section rectangle|circle|i] [--area A] [--allowable S]',
+    );
+    const preset = required(parsed, '--preset');
+    const area = number(parsed, '--area');
+    const allowableStress = number(parsed, '--allowable');
+    const section = sectionOption(parsed);
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.applyMaterialPreset({ preset, area, allowableStress, section });
+        console.log(
+            message('materialPreset', {
+                preset,
+                youngsModulus: String(summary.material.youngsModulus),
+                area: String(summary.material.area),
+                revision: String(summary.revision),
+            }),
+        );
+        return 0;
+    });
+}
+
+function sectionOption(parsed: Parsed): Section | undefined {
+    const shape = parsed.options.get('--section');
+    if (shape === undefined) {
+        const geometry = [
+            '--width',
+            '--height',
+            '--diameter',
+            '--depth',
+            '--flange-width',
+            '--flange-thickness',
+            '--web-thickness',
+        ];
+        if (geometry.some((option) => parsed.options.has(option))) {
+            throw failure('cli/missing-option', 'sectionShape');
+        }
+        return undefined;
+    }
+    if (shape === 'rectangle') {
+        return {
+            shape: 'rectangle',
+            width: requiredNumber(parsed, '--width'),
+            height: requiredNumber(parsed, '--height'),
+        };
+    }
+    if (shape === 'circle') {
+        return { shape: 'circle', diameter: requiredNumber(parsed, '--diameter') };
+    }
+    if (shape === 'i' || shape === 'i-section') {
+        return {
+            shape: 'i',
+            depth: requiredNumber(parsed, '--depth'),
+            flangeWidth: requiredNumber(parsed, '--flange-width'),
+            flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+            webThickness: requiredNumber(parsed, '--web-thickness'),
+        };
+    }
+    throw failure('cli/invalid-option', 'unknownSection', { value: shape });
+}
+
+async function libraryCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units'], []);
+    const units = unitsOption(parsed);
+    return withSession(async (session) => {
+        const library = await session.library(units);
+        console.log(JSON.stringify(library, null, 2));
         return 0;
     });
 }

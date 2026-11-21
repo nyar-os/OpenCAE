@@ -21,6 +21,8 @@ export interface NativeBinding {
     node_add(path: string, requestJson: string): string;
     element_add(path: string, requestJson: string): string;
     material_set(path: string, requestJson: string): string;
+    material_preset(path: string, requestJson: string): string;
+    library(requestJson?: string): string;
     support_add(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;
     gravity_set(path: string, requestJson: string): string;
