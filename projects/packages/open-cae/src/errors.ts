@@ -67,6 +67,7 @@ export const errorCodes = [
     'cli/invalid-units',
     'cli/unknown-format',
     'cli/dimension-mismatch',
+    'cli/direction-conflict',
     'cli/invalid-spectrum',
     'capability/not-implemented',
 ] as const;

@@ -554,16 +554,25 @@ async function libraryCommand(args: readonly string[]): Promise<number> {
     });
 }
 
+function directionOption(parsed: Parsed): readonly [number, number] {
+    const raw = parsed.options.get('--direction') ?? '';
+    const parts = raw.split(',').map((entry) => Number(entry.trim()));
+    if (parts.length !== 2 || !parts.every((value) => Number.isFinite(value))) {
+        throw failure('cli/invalid-option', 'invalidDirection', { value: raw });
+    }
+    return [parts[0], parts[1]];
+}
+
 async function supportAdd(args: readonly string[]): Promise<number> {
     const parsed = parse(
         args,
-        ['--node', '--ux', '--uy', '--uz', '--rotation', '--kx', '--ky', '--kz', '--kr'],
+        ['--node', '--ux', '--uy', '--uz', '--rotation', '--kx', '--ky', '--kz', '--kr', '--direction'],
         ['--dx', '--dy', '--dz', '--rz'],
     );
     const file = positional(
         parsed,
         0,
-        'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
+        'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
     );
     const node = required(parsed, '--node');
     const dx = parsed.flags.has('--dx');
@@ -578,13 +587,31 @@ async function supportAdd(args: readonly string[]): Promise<number> {
     const ky = number(parsed, '--ky');
     const kz = number(parsed, '--kz');
     const kr = number(parsed, '--kr');
+    const direction = parsed.options.get('--direction') === undefined ? undefined : directionOption(parsed);
     const spring = kx !== undefined || ky !== undefined || kz !== undefined || kr !== undefined;
-    if (!dx && !dy && !dz && !rz && ux === undefined && uy === undefined && uz === undefined && rotation === undefined && !spring) {
+    if (
+        direction !== undefined &&
+        (dx || dy || dz || rz || ux !== undefined || uy !== undefined || uz !== undefined || rotation !== undefined || spring)
+    ) {
+        throw failure('cli/direction-conflict', 'directionConflict', {});
+    }
+    if (
+        direction === undefined &&
+        !dx &&
+        !dy &&
+        !dz &&
+        !rz &&
+        ux === undefined &&
+        uy === undefined &&
+        uz === undefined &&
+        rotation === undefined &&
+        !spring
+    ) {
         throw failure('cli/missing-option', 'noFreedom');
     }
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.addSupport({ node, dx, dy, dz, rz, ux, uy, uz, rotation, kx, ky, kz, kr });
+        const summary = document.addSupport({ node, dx, dy, dz, rz, ux, uy, uz, rotation, kx, ky, kz, kr, direction });
         console.log(
             message('supportAdded', {
                 node,

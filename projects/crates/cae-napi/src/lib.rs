@@ -342,10 +342,27 @@ fn support_add(ctx: CallContext) -> Result<JsValue> {
     let ky = number_field(&request, "ky")?;
     let kz = number_field(&request, "kz")?;
     let kr = number_field(&request, "kr")?;
+    let direction = match request.get("direction") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(values)) if values.len() == 2 => match (values[0].as_f64(), values[1].as_f64()) {
+            (Some(nx), Some(ny)) => Some((nx, ny)),
+            _ => return Err(argument_error("`direction` must be an array of two numbers `[nx, ny]`")),
+        },
+        Some(_) => return Err(argument_error("`direction` must be an array of two numbers `[nx, ny]`")),
+    };
     let prescribed = ux.is_some() || uy.is_some() || uz.is_some() || rotation.is_some();
     let spring = kx.is_some() || ky.is_some() || kz.is_some() || kr.is_some();
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
+    if let Some((nx, ny)) = direction {
+        if dx || dy || dz || rz || prescribed || spring {
+            return Err(argument_error(
+                "`direction` is an independent inclined-support constraint and cannot be combined with `dx`, `dy`, `dz`, `rz`, a prescribed displacement or a spring",
+            ));
+        }
+        let summary = session.add_support_direction(&node, nx, ny).map_err(fail)?;
+        return respond(&ctx, &summary);
+    }
     if dx || dy || dz || rz {
         session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?;
     }

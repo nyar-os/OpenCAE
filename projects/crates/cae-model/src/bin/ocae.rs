@@ -34,7 +34,7 @@ Usage:
                         [--area <A>] [--allowable <s>]
   ocae library [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
-                    [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
+                    [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
@@ -456,16 +456,33 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn parse_direction(value: &str) -> Result<(f64, f64), CaeError> {
+    let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+    if parts.len() != 2 {
+        return Err(CaeError::new(
+            "cli/invalid-option",
+            format!("`--direction` must be two comma-separated numbers `nx,ny`, not `{value}`"),
+        ));
+    }
+    let nx = parts[0].parse::<f64>().map_err(|_| {
+        CaeError::new("cli/invalid-option", format!("`--direction` X component `{}` is not a number", parts[0]))
+    })?;
+    let ny = parts[1].parse::<f64>().map_err(|_| {
+        CaeError::new("cli/invalid-option", format!("`--direction` Y component `{}` is not a number", parts[1]))
+    })?;
+    Ok((nx, ny))
+}
+
 fn support_add(args: &[String]) -> Result<i32, CaeError> {
     let parsed = parse(
         args,
-        &["--node", "--ux", "--uy", "--uz", "--rotation", "--kx", "--ky", "--kz", "--kr"],
+        &["--node", "--ux", "--uy", "--uz", "--rotation", "--kx", "--ky", "--kz", "--kr", "--direction"],
         &["--dx", "--dy", "--dz", "--rz"],
     )?;
     let file = positional(
         &parsed,
         0,
-        "support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]",
+        "support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]",
     )?;
     let node = required(&parsed, "--node")?;
     let dx = parsed.flags.contains("--dx");
@@ -480,16 +497,28 @@ fn support_add(args: &[String]) -> Result<i32, CaeError> {
     let ky = number(&parsed, "--ky")?;
     let kz = number(&parsed, "--kz")?;
     let kr = number(&parsed, "--kr")?;
+    let direction = parsed.options.get("--direction").map(|value| parse_direction(value)).transpose()?;
     let prescribed = ux.is_some() || uy.is_some() || uz.is_some() || rotation.is_some();
     let spring = kx.is_some() || ky.is_some() || kz.is_some() || kr.is_some();
-    if !dx && !dy && !dz && !rz && !prescribed && !spring {
+    if direction.is_some() && (dx || dy || dz || rz || prescribed || spring) {
+        return Err(CaeError::new(
+            "cli/direction-conflict",
+            "`--direction` is an independent inclined-support constraint; do not combine it with `--dx`, `--dy`, `--dz`, `--rz`, a prescribed displacement or a spring",
+        ));
+    }
+    if direction.is_none() && !dx && !dy && !dz && !rz && !prescribed && !spring {
         return Err(CaeError::new(
             "cli/missing-option",
-            "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz`, `--rotation`, `--kx`, `--ky`, `--kz` or `--kr`; otherwise the support has no effect",
+            "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--direction`, `--ux`, `--uy`, `--uz`, `--rotation`, `--kx`, `--ky`, `--kz` or `--kr`; otherwise the support has no effect",
         ));
     }
     let mut session = session();
     session.open(Path::new(file))?;
+    if let Some((nx, ny)) = direction {
+        let summary = session.add_support_direction(node, nx, ny)?;
+        println!("support `{node}` added (direction=({nx}, {ny}), revision {})", summary.revision);
+        return Ok(0);
+    }
     if dx || dy || dz || rz {
         session.add_support_full(node, dx, dy, dz, rz)?;
     }

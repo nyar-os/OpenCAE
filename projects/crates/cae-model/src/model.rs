@@ -410,6 +410,16 @@ pub struct Support {
     /// documents load unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spring: Option<SpringStiffness>,
+    /// Inclined (roller) constraint direction in the X–Y plane.
+    ///
+    /// When present, the displacement component along this vector is
+    /// constrained instead of the global X and Y translations, so an inclined
+    /// or rotated support can be modelled directly. The vector is normalised
+    /// by the solver and must be finite and non-zero. It is only valid in
+    /// two-dimensional documents and cannot be combined with `dx`, `dy`, a
+    /// prescribed displacement or a spring on the same entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<[f64; 2]>,
 }
 
 /// Concentrated nodal load.
@@ -1050,7 +1060,62 @@ impl Model {
             support.rz |= rz;
         }
         else {
-            self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None, spring: None });
+            self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None, spring: None, direction: None });
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Adds or merges an inclined roller support at a node.
+    ///
+    /// `direction = (nx, ny)` is the constrained displacement direction in the
+    /// X–Y plane; the vector is normalised by the solver, so an inclined roller
+    /// normal at 30° is `(cos 30°, sin 30°)`. The document must be
+    /// two-dimensional (`document/dimension-mismatch` otherwise), the node must
+    /// exist, and the vector must be finite and non-zero
+    /// (`support/invalid-direction`). An existing `dx`, `dy`, prescribed
+    /// displacement or spring on the same entry is rejected, because those
+    /// describe a different constraint frame.
+    pub fn add_support_direction(&mut self, node: impl Into<String>, nx: f64, ny: f64) -> Result<(), CaeError> {
+        let node = node.into();
+        if self.node(&node).is_none() {
+            return Err(CaeError::new("support/unknown-node", format!("support references unknown node `{node}`")));
+        }
+        if self.dimension != 2 {
+            return Err(dimension_mismatch(format!(
+                "an inclined support direction is only available in two-dimensional documents; node `{node}` cannot use it in this document"
+            )));
+        }
+        if !nx.is_finite() || !ny.is_finite() || (nx * nx + ny * ny).sqrt() <= 0.0 {
+            return Err(CaeError::new(
+                "support/invalid-direction",
+                format!(
+                    "inclined support direction of node `{node}` must be a finite non-zero vector (currently ({nx}, {ny}))"
+                ),
+            ));
+        }
+        if let Some(support) = self.supports.iter_mut().find(|support| support.node == node) {
+            if support.dx || support.dy || support.prescribed.is_some() || support.spring.is_some() {
+                return Err(CaeError::new(
+                    "support/invalid-direction",
+                    format!(
+                        "node `{node}` already has a global constraint, prescribed displacement or spring; an inclined direction is a separate constraint frame"
+                    ),
+                ));
+            }
+            support.direction = Some([nx, ny]);
+        }
+        else {
+            self.supports.push(Support {
+                node,
+                dx: false,
+                dy: false,
+                dz: false,
+                rz: false,
+                prescribed: None,
+                spring: None,
+                direction: Some([nx, ny]),
+            });
         }
         self.bump_revision();
         Ok(())
@@ -1126,6 +1191,7 @@ impl Model {
                     rz: false,
                     prescribed: None,
                     spring: None,
+                    direction: None,
                 });
                 self.supports.len() - 1
             }
@@ -1187,6 +1253,7 @@ impl Model {
                     rz: false,
                     prescribed: None,
                     spring: None,
+                    direction: None,
                 });
                 self.supports.len() - 1
             }

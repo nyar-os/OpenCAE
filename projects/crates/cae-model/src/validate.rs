@@ -435,6 +435,38 @@ impl Model {
                     ),
                 ));
             }
+            if let Some(direction) = support.direction {
+                if self.dimension != 2 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!(
+                            "node `{}` uses an inclined support direction, which is only available in two-dimensional documents",
+                            support.node
+                        ),
+                    ));
+                }
+                else {
+                    let norm = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
+                    if !norm.is_finite() || norm <= 0.0 {
+                        report.push(check_error(
+                            "support/invalid-direction",
+                            format!(
+                                "inclined support direction of node `{}` must be a finite non-zero vector (currently ({}, {}))",
+                                support.node, direction[0], direction[1]
+                            ),
+                        ));
+                    }
+                }
+                if support.dx || support.dy || support.prescribed.is_some() || support.spring.is_some() {
+                    report.push(check_error(
+                        "support/invalid-direction",
+                        format!(
+                            "node `{}` combines an inclined direction with a global constraint, prescribed displacement or spring; use one constraint frame per support entry",
+                            support.node
+                        ),
+                    ));
+                }
+            }
             if support.rz {
                 if self.dimension == 3 {
                     report.push(check_error(

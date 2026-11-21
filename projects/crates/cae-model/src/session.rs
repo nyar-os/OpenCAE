@@ -541,6 +541,16 @@ impl OpenCae {
         self.edit(|model| model.add_support_full(node, dx, dy, dz, rz))
     }
 
+    /// Adds or merges an inclined roller support and saves the document.
+    ///
+    /// `direction = (nx, ny)` is the constrained displacement direction in the
+    /// X–Y plane and is normalised by the solver; the document must be
+    /// two-dimensional. It cannot be combined with a global constraint,
+    /// prescribed displacement or spring on the same entry.
+    pub fn add_support_direction(&mut self, node: &str, nx: f64, ny: f64) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.add_support_direction(node, nx, ny))
+    }
+
     /// Sets or merges linear elastic spring stiffness at a support node and
     /// saves the document.
     ///

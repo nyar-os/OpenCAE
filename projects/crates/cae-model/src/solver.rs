@@ -1006,6 +1006,140 @@ struct System {
     /// ordinary homogeneous supports.
     prescribed: Vec<f64>,
     elements: Vec<AssemblyElement>,
+    /// Per-node rotation into the local frame of an inclined support.
+    ///
+    /// `stiffness`, `forces` and `prescribed` follow this frame; the helpers
+    /// [`System::to_global_vector`] and [`System::to_global_matrix`] convert
+    /// results back to the global X–Y axes.
+    rotations: Vec<Option<[[f64; 2]; 2]>>,
+}
+
+impl System {
+    /// Maps a vector from the assembled (possibly rotated) frame to global
+    /// coordinates.
+    fn to_global_vector(&self, values: &[f64]) -> Vec<f64> {
+        let mut global = values.to_vec();
+        for (node, rotation) in self.rotations.iter().enumerate() {
+            let Some(rotation) = rotation
+            else {
+                continue;
+            };
+            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten()
+            else {
+                continue;
+            };
+            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten()
+            else {
+                continue;
+            };
+            let a = values[first];
+            let b = values[second];
+            global[first] = rotation[0][0] * a + rotation[0][1] * b;
+            global[second] = rotation[1][0] * a + rotation[1][1] * b;
+        }
+        global
+    }
+
+    /// Maps a square matrix from the assembled frame to global coordinates.
+    fn to_global_matrix(&self, matrix: &[f64]) -> Vec<f64> {
+        let size = self.layout.size;
+        let mut global = matrix.to_vec();
+        for (node, rotation) in self.rotations.iter().enumerate() {
+            let Some(rotation) = rotation
+            else {
+                continue;
+            };
+            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten()
+            else {
+                continue;
+            };
+            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten()
+            else {
+                continue;
+            };
+            for row in 0..size {
+                let a = global[row * size + first];
+                let b = global[row * size + second];
+                global[row * size + first] = a * rotation[0][0] + b * rotation[0][1];
+                global[row * size + second] = a * rotation[1][0] + b * rotation[1][1];
+            }
+            for column in 0..size {
+                let a = global[first * size + column];
+                let b = global[second * size + column];
+                global[first * size + column] = rotation[0][0] * a + rotation[0][1] * b;
+                global[second * size + column] = rotation[1][0] * a + rotation[1][1] * b;
+            }
+        }
+        global
+    }
+    /// Maps a square matrix from global coordinates into the assembled frame.
+    fn to_local_matrix(&self, matrix: &[f64]) -> Vec<f64> {
+        let size = self.layout.size;
+        let mut local = matrix.to_vec();
+        for (node, rotation) in self.rotations.iter().enumerate() {
+            let Some(rotation) = rotation
+            else {
+                continue;
+            };
+            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten()
+            else {
+                continue;
+            };
+            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten()
+            else {
+                continue;
+            };
+            for row in 0..size {
+                let a = local[row * size + first];
+                let b = local[row * size + second];
+                local[row * size + first] = a * rotation[0][0] + b * rotation[1][0];
+                local[row * size + second] = a * rotation[0][1] + b * rotation[1][1];
+            }
+            for column in 0..size {
+                let a = local[first * size + column];
+                let b = local[second * size + column];
+                local[first * size + column] = rotation[0][0] * a + rotation[1][0] * b;
+                local[second * size + column] = rotation[0][1] * a + rotation[1][1] * b;
+            }
+        }
+        local
+    }
+}
+
+/// Rotates the two translational degrees of freedom of every inclined support
+/// node into its local frame: `K ← Qᵀ·K·Q` and `F ← Qᵀ·F`.
+fn apply_node_rotation(stiffness: &mut [f64], forces: &mut [f64], layout: &Layout, rotations: &[Option<[[f64; 2]; 2]>]) {
+    let size = layout.size;
+    for (node, rotation) in rotations.iter().enumerate() {
+        let Some(rotation) = rotation
+        else {
+            continue;
+        };
+        let Some(first) = layout.index.get(node * layout.slots).copied().flatten()
+        else {
+            continue;
+        };
+        let Some(second) = layout.index.get(node * layout.slots + 1).copied().flatten()
+        else {
+            continue;
+        };
+        for row in 0..size {
+            let a = stiffness[row * size + first];
+            let b = stiffness[row * size + second];
+            stiffness[row * size + first] = a * rotation[0][0] + b * rotation[1][0];
+            stiffness[row * size + second] = a * rotation[0][1] + b * rotation[1][1];
+        }
+        for column in 0..size {
+            let a = stiffness[first * size + column];
+            let b = stiffness[second * size + column];
+            stiffness[first * size + column] = rotation[0][0] * a + rotation[1][0] * b;
+            stiffness[second * size + column] = rotation[0][1] * a + rotation[1][1] * b;
+        }
+        let a = forces[first];
+        let b = forces[second];
+        forces[first] = rotation[0][0] * a + rotation[1][0] * b;
+        forces[second] = rotation[0][1] * a + rotation[1][1] * b;
+    }
 }
 
 /// Solves a two- or three-dimensional model for a single linear-static load
@@ -1051,17 +1185,18 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
         ));
     }
 
-    let residual = residual(&system, &displacement);
+    let global_displacement = system.to_global_vector(&displacement);
+    let global_residual = system.to_global_vector(&residual(&system, &displacement));
     let layout = &system.layout;
     let nodes: Vec<NodeDisplacement> = model
         .nodes
         .iter()
         .enumerate()
         .map(|(index, node)| {
-            let ux = node_value(layout, &displacement, index, 0);
-            let uy = node_value(layout, &displacement, index, 1);
-            let uz = if model.dimension == 3 { node_value(layout, &displacement, index, 2) } else { 0.0 };
-            let rz = if layout.uses_rotation { node_value(layout, &displacement, index, 2) } else { 0.0 };
+            let ux = node_value(layout, &global_displacement, index, 0);
+            let uy = node_value(layout, &global_displacement, index, 1);
+            let uz = if model.dimension == 3 { node_value(layout, &global_displacement, index, 2) } else { 0.0 };
+            let rz = if layout.uses_rotation { node_value(layout, &global_displacement, index, 2) } else { 0.0 };
             NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
         })
         .collect();
@@ -1070,14 +1205,14 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
         .iter()
         .enumerate()
         .map(|(index, node)| {
-            let fx = node_value(layout, &residual, index, 0);
-            let fy = node_value(layout, &residual, index, 1);
-            let fz = if model.dimension == 3 { node_value(layout, &residual, index, 2) } else { 0.0 };
-            let mz = if layout.uses_rotation { node_value(layout, &residual, index, 2) } else { 0.0 };
+            let fx = node_value(layout, &global_residual, index, 0);
+            let fy = node_value(layout, &global_residual, index, 1);
+            let fz = if model.dimension == 3 { node_value(layout, &global_residual, index, 2) } else { 0.0 };
+            let mz = if layout.uses_rotation { node_value(layout, &global_residual, index, 2) } else { 0.0 };
             NodeReaction { node: node.id.clone(), fx, fy, fz, mz }
         })
         .collect();
-    let reaction_summary = summarize_reactions(model, &system, &residual, &displacement);
+    let reaction_summary = summarize_reactions(model, &system, &global_residual, &global_displacement);
 
     let mut elements = Vec::with_capacity(system.elements.len());
     let mut strain_energy = 0.0;
@@ -1212,7 +1347,8 @@ pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
             });
         }
     }
-    let stiffness = (0..size).map(|row| system.stiffness[row * size..(row + 1) * size].to_vec()).collect();
+    let stiffness = system.to_global_matrix(&system.stiffness);
+    let stiffness = (0..size).map(|row| stiffness[row * size..(row + 1) * size].to_vec()).collect();
     let mut mass_rows = vec![vec![0.0; size]; size];
     for (index, value) in mass.iter().enumerate().take(size) {
         mass_rows[index][index] = *value;
@@ -1315,6 +1451,7 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
         for (row, &dof) in free.iter().enumerate() {
             shape_values[dof] = eigenvectors[row * count + index] / mass[dof].sqrt();
         }
+        let shape_values = system.to_global_vector(&shape_values);
         let mut participation_factor = [0.0_f64; 3];
         for node in 0..model.nodes.len() {
             for (component, value) in participation_factor.iter_mut().enumerate().take(translations) {
@@ -1594,6 +1731,7 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
         }
     }
 
+    let geometric = system.to_local_matrix(&geometric);
     let (stiffness_reduced, _) = reduce(&system, &free);
     let count = free.len();
     let mut geometric_reduced = vec![0.0; count * count];
@@ -1663,6 +1801,7 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
         for (row, &dof) in free.iter().enumerate() {
             shape_values[dof] = free_values[row];
         }
+        let mut shape_values = system.to_global_vector(&shape_values);
         let mut max_amplitude = 0.0_f64;
         for &dof in &free {
             max_amplitude = max_amplitude.max(shape_values[dof].abs());
@@ -2490,10 +2629,9 @@ pub(crate) fn unconstrained_nodes(model: &Model) -> Vec<String> {
         .nodes
         .iter()
         .filter(|node| {
-            !model
-                .supports
-                .iter()
-                .any(|support| support.node == node.id && (support.dx || support.dy || support.dz || support.rz))
+            !model.supports.iter().any(|support| {
+                support.node == node.id && (support.dx || support.dy || support.dz || support.rz || support.direction.is_some())
+            })
         })
         .map(|node| node.id.clone())
         .collect()
@@ -2893,6 +3031,11 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
         if layout.uses_rotation && support.rz {
             mark(base + 2);
         }
+        if support.direction.is_some() {
+            // The node frame is rotated below, so the constrained component is
+            // the local first translational degree of freedom.
+            mark(base);
+        }
         if let Some(values) = &support.prescribed {
             let mut assign = |slot: usize, value: f64| {
                 if let Some(dof) = layout.index.get(slot).copied().flatten() {
@@ -2941,7 +3084,35 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
         }
     }
 
-    Ok(System { layout, stiffness, forces, constrained, prescribed, elements })
+    let mut rotations: Vec<Option<[[f64; 2]; 2]>> = vec![None; model.nodes.len()];
+    for support in &model.supports {
+        let (Some(&node), Some(direction)) = (index.get(support.node.as_str()), support.direction)
+        else {
+            continue;
+        };
+        if model.dimension != 2 {
+            return Err(CaeError::new(
+                "capability/not-implemented",
+                format!(
+                    "an inclined support direction on node `{}` is only available in two-dimensional documents",
+                    support.node
+                ),
+            ));
+        }
+        let norm = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
+        if !norm.is_finite() || norm <= 0.0 {
+            return Err(CaeError::new(
+                "support/invalid-direction",
+                format!("inclined support direction of node `{}` must be a finite non-zero vector", support.node),
+            ));
+        }
+        let (nx, ny) = (direction[0] / norm, direction[1] / norm);
+        // Columns are the local axes `n = (nx, ny)` and `t = (-ny, nx)`.
+        rotations[node] = Some([[nx, -ny], [ny, nx]]);
+    }
+    apply_node_rotation(&mut stiffness, &mut forces, &layout, &rotations);
+
+    Ok(System { layout, stiffness, forces, constrained, prescribed, elements, rotations })
 }
 
 fn reduce(system: &System, free: &[usize]) -> (Vec<f64>, Vec<f64>) {
@@ -3404,11 +3575,12 @@ fn solve_dense(mut matrix: Vec<f64>, mut rhs: Vec<f64>, size: usize) -> Result<V
 fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displacement: &[f64]) -> ReactionSummary {
     let layout = &system.layout;
     let translation_components = if model.dimension == 3 { 3 } else { 2 };
+    let applied_forces = system.to_global_vector(&system.forces);
     let mut applied = ForceResultant::default();
     for node in 0..model.nodes.len() {
         let mut loads = [0.0_f64; 3];
         for (component, value) in loads.iter_mut().enumerate().take(translation_components) {
-            *value = node_value(layout, &system.forces, node, component);
+            *value = node_value(layout, &applied_forces, node, component);
         }
         applied.fx += loads[0];
         applied.fy += loads[1];
@@ -3431,10 +3603,19 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
                     0.0
                 }
             };
+            let (fx, fy) = if support.direction.is_some() {
+                // An inclined support reacts along an arbitrary direction, so
+                // both global components are reported from the equilibrium
+                // residual instead of splitting local and global constraints.
+                (node_value(layout, residual, node, 0), node_value(layout, residual, node, 1))
+            }
+            else {
+                (component(support.dx, spring.kx, 0), component(support.dy, spring.ky, 1))
+            };
             Some(SupportReaction {
                 node: support.node.clone(),
-                fx: component(support.dx, spring.kx, 0),
-                fy: component(support.dy, spring.ky, 1),
+                fx,
+                fy,
                 fz: if model.dimension == 3 { component(support.dz, spring.kz, 2) } else { 0.0 },
                 mz: if layout.uses_rotation { component(support.rz, spring.kr, 2) } else { 0.0 },
             })

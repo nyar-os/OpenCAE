@@ -80,7 +80,9 @@
             "noFreedom": "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz`, `--rotation`, `--kx`, `--ky`, `--kz` or `--kr`, otherwise the support has no effect",
             "invalidSpectrumPoint": "spectrum point `{point}` must use the form `period:acceleration`",
             "emptySpectrum": "provide at least one `period:acceleration` spectrum point",
-            "unknownSpectrumAxis": "unknown spectrum axis `{value}`; use `x`, `y` or `z`"
+            "unknownSpectrumAxis": "unknown spectrum axis `{value}`; use `x`, `y` or `z`",
+            "directionConflict": "`--direction` is an independent inclined-support constraint; do not combine it with `--dx`, `--dy`, `--dz`, `--rz`, a prescribed displacement or a spring",
+            "invalidDirection": "`--direction` must be two comma-separated numbers `nx,ny`, not `{value}`"
         }
     }
 }

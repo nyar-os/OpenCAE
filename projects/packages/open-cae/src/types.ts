@@ -900,6 +900,13 @@ export interface SupportAddRequest {
     readonly kz?: number;
     /** Linear elastic rotational spring stiffness about Z (2D beam nodes only). */
     readonly kr?: number;
+    /**
+     * Inclined roller constraint direction `[nx, ny]` in the X–Y plane (2D
+     * documents only). It constrains displacement along the normalised vector
+     * and cannot be combined with `dx`, `dy`, a prescribed displacement or a
+     * spring on the same support.
+     */
+    readonly direction?: readonly [number, number];
 }
 
 /** Request of `addLoad()`. */
