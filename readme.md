@@ -284,7 +284,7 @@ The file is UTF-8 JSON with camelCase fields:
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | uniform member temperature change (`thermalExpansion`, `α·ΔT` thermal strain + equivalent nodal loads) | ✅ supported |
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
-| modal analysis (`modal`, lumped mass + Jacobi, effective modal mass) | ✅ supported |
+| modal analysis (`modal`, lumped mass + Jacobi, signed participation factors and effective modal mass) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | buckling under load combinations (`bucklingCombinations`, scaled cases + governing envelope) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
@@ -364,7 +364,8 @@ pnpm --filter @wae/open-cae run typecheck
 - cantilever beam with a triangular load of peak `q0` at the fixed end: end deflection `q0L⁴/(30EI)` and fixed-end reaction moment `q0L²/6` (`1e-9`);
 - simply supported beam with a midspan concentrated force: midspan deflection `PL³/(48EI)` and maximum bending moment `PL/4` (`1e-9`);
 - fixed-free axial bar (10 elements): first frequency within `< 3%` of `(1/(4L))√(E/ρ)`, and its first-mode effective mass fraction within `< 5%` of the analytical `8/π²`;
-- single free translational degree of freedom: effective mass equals the free nodal mass `ρAL/2` and `totalMass` equals `ρAL` (`1e-12`);
+- single free translational degree of freedom: effective mass equals the free nodal mass `ρAL/2`, its signed participation factor equals `√(ρAL/2)` and `totalMass` equals `ρAL` (`1e-12`);
+- every reported mode satisfies `participationFactor² = effectiveMass` in all directions, with the cumulative translational mass fraction staying below one (`1e-12`);
 - cantilever beam (40 elements): first bending frequency within `< 5%` of `1.875104²·√(EI/(ρAL⁴))/(2π)`;
 - pinned-pinned beam column (20 elements): first linear buckling factor within `0.1%` of the Euler load `P_cr = π²EI/L²`;
 - three-dimensional tetrahedron truss: the two lateral buckling factors match the closed-form geometric-stiffness eigenvalue `E·A·R²/(N·(R²+2H²))` (relative error `1e-8`);

@@ -318,8 +318,40 @@ fn modal_effective_mass_of_a_single_free_dof_matches_the_free_nodal_mass() {
     assert_close(mode.effective_mass[0], free_mass, 1e-12);
     assert_close(mode.effective_mass[1], 0.0, 1e-12);
     assert_close(mode.effective_mass[2], 0.0, 1e-12);
+    // A mass-normalized single-degree-of-freedom shape has unit generalized
+    // mass, so the participation factor is the square root of the free mass.
+    assert_close(mode.participation_factor[0], free_mass.sqrt(), 1e-12);
+    assert_close(mode.participation_factor[1], 0.0, 1e-12);
+    for direction in 0..3 {
+        assert_close(
+            mode.participation_factor[direction] * mode.participation_factor[direction],
+            mode.effective_mass[direction],
+            1e-12,
+        );
+    }
     let expected_frequency = (E * A / (L * free_mass)).sqrt() / (2.0 * std::f64::consts::PI);
     assert_close(mode.frequency_hz, expected_frequency, 1e-9);
+}
+
+#[test]
+fn modal_participation_factors_are_the_square_roots_of_the_effective_masses() {
+    let mut model = beam_model(20);
+    model.set_material_full(Some("steel".to_string()), E, A, RHO);
+
+    let modal = solve_modal(&model, 3).expect("modal");
+    let mut cumulative = 0.0;
+    for mode in &modal.modes {
+        for direction in 0..3 {
+            assert_close(
+                mode.participation_factor[direction] * mode.participation_factor[direction],
+                mode.effective_mass[direction],
+                1e-12,
+            );
+        }
+        cumulative += mode.effective_mass[1] / modal.total_mass[1];
+    }
+    assert!(cumulative > 0.5, "cumulative modal mass fraction: {cumulative}");
+    assert!(cumulative <= 1.0 + 1e-9, "cumulative modal mass fraction: {cumulative}");
 }
 
 #[test]

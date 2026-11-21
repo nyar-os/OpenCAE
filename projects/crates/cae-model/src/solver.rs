@@ -284,11 +284,18 @@ pub struct Mode {
     pub eigenvalue: f64,
     /// Largest absolute nodal shape value.
     pub max_amplitude: f64,
+    /// Signed modal participation factor `φᵀ·M·r` in the global X, Y and Z
+    /// directions.
+    ///
+    /// The shape is mass-normalized, so the factor already carries the units of
+    /// `sqrt(mass)` and its square is [`Mode::effective_mass`]. The sign follows
+    /// the dominant translation of the mode and is therefore useful for
+    /// combining modal responses that add or subtract.
+    pub participation_factor: [f64; 3],
     /// Effective modal mass `(φᵀ·M·r)²` in the global X, Y and Z directions.
     ///
-    /// The shape is mass-normalized, so the participation factor is
-    /// `φᵀ·M·r` and its square is the mass excited by this mode. The ratio to
-    /// `ModalSolution::total_mass` is the effective mass fraction.
+    /// The ratio to `ModalSolution::total_mass` is the effective mass fraction
+    /// of the mode.
     pub effective_mass: [f64; 3],
     /// Mass-normalized mode shape in model node order.
     pub shape: Vec<ModeShape>,
@@ -1133,14 +1140,15 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
         for (row, &dof) in free.iter().enumerate() {
             shape_values[dof] = eigenvectors[row * count + index] / mass[dof].sqrt();
         }
-        let mut effective_mass = [0.0_f64; 3];
+        let mut participation_factor = [0.0_f64; 3];
         for node in 0..model.nodes.len() {
-            for (component, value) in effective_mass.iter_mut().enumerate().take(translations) {
+            for (component, value) in participation_factor.iter_mut().enumerate().take(translations) {
                 if let Some(dof) = system.layout.index.get(node * system.layout.slots + component).copied().flatten() {
                     *value += mass[dof] * shape_values[dof];
                 }
             }
         }
+        let mut effective_mass = participation_factor;
         for value in &mut effective_mass {
             *value *= *value;
         }
@@ -1162,6 +1170,7 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
             frequency_hz: eigenvalue.sqrt() / (2.0 * std::f64::consts::PI),
             eigenvalue,
             max_amplitude,
+            participation_factor,
             effective_mass,
             shape,
         });

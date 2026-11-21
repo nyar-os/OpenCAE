@@ -585,6 +585,11 @@ export interface Mode {
     readonly eigenvalue: number;
     readonly maxAmplitude: number;
     /**
+     * Signed modal participation factor `φᵀ·M·r` in the global X, Y and Z
+     * directions. Its square is `effectiveMass`.
+     */
+    readonly participationFactor: readonly [number, number, number];
+    /**
      * Effective modal mass `(φᵀ·M·r)²` in the global X, Y and Z directions.
      * Divide by `totalMass` for the effective mass fraction.
      */
