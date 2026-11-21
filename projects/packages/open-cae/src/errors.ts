@@ -28,6 +28,8 @@ export const errorCodes = [
     'model/no-nodes',
     'model/no-elements',
     'model/mechanism',
+    'analysis/invalid-modes',
+    'buckling/non-finite',
     'node/duplicate-id',
     'element/duplicate-id',
     'element/duplicate',

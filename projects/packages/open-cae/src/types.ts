@@ -17,7 +17,7 @@ export type Dimension = 2 | 3;
 export type ElementKind = 'truss' | 'beam';
 
 /** Analysis performed by `solve()`. */
-export type Analysis = 'static' | 'modal';
+export type Analysis = 'static' | 'modal' | 'buckling';
 
 /** Disclosure level of one capability entry. */
 export type SupportLevel = 'supported' | 'unsupported';
@@ -194,6 +194,32 @@ export interface ModalSolution {
     readonly modes: readonly Mode[];
 }
 
+/** One linear buckling mode. */
+export interface BucklingMode {
+    /**
+     * Load factor `λ` that multiplies the static reference axial forces at the
+     * onset of instability. The critical load is `λ` times the static load case.
+     */
+    readonly factor: number;
+    /** Largest absolute nodal shape value after normalization to one. */
+    readonly maxAmplitude: number;
+    /** Mode shape in model node order. */
+    readonly shape: readonly ModeShape[];
+}
+
+/** Buckling solution returned by `solve({ analysis: 'buckling' })`. */
+export interface BucklingSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Requested number of modes. */
+    readonly requested: number;
+    /** Eigenpairs skipped because they did not yield a finite positive factor. */
+    readonly skipped: number;
+    /** Modes in ascending load-factor order. */
+    readonly modes: readonly BucklingMode[];
+}
+
 /** Full report returned by `report()`. */
 export interface Report {
     readonly format: string;
@@ -290,8 +316,8 @@ export interface GravitySetRequest {
 export interface SolveOptions {
     /** When given, the JSON report is written atomically to this path. */
     readonly out?: string;
-    /** `static` (default) or `modal`. */
+    /** `static` (default), `modal` or `buckling`. */
     readonly analysis?: Analysis;
-    /** Number of modes for modal analysis; defaults to 5. */
+    /** Number of modes for modal or buckling analysis; defaults to 5. */
     readonly modes?: number;
 }

@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ExportFormat, OpenCae, OpenCaeOptions, Severity, Units};
+use cae_model::{ElementKind, ExportFormat, OpenCae, OpenCaeOptions, Severity, Units};
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock").as_nanos();
@@ -112,6 +112,46 @@ fn create_edit_solve_export_matches_the_cli_path() {
     let mut reopened = OpenCae::new(OpenCaeOptions::default());
     let opened = reopened.open(&path).expect("reopen");
     assert_eq!(opened, saved);
+}
+
+#[test]
+fn session_solves_buckling_and_writes_the_json_report() {
+    let directory = temporary_dir("buckling");
+    let path = directory.join("column.ocae");
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.create(&path, OpenCaeOptions { units: Some(Units::Millimeter), dimension: Some(2) }).expect("create");
+    session.set_material(210_000.0, 100.0, Some("steel".to_string())).expect("material");
+
+    let elements = 10;
+    for index in 0..=elements {
+        let x = 1000.0 * index as f64 / elements as f64;
+        session.add_node(&format!("n{}", index + 1), x, 0.0, None).expect("node");
+    }
+    for index in 0..elements {
+        session
+            .add_element_full(
+                &format!("e{}", index + 1),
+                &format!("n{}", index + 1),
+                &format!("n{}", index + 2),
+                None,
+                None,
+                ElementKind::Beam,
+                Some(1.0e6),
+                None,
+            )
+            .expect("beam element");
+    }
+    session.add_support("n1", true, true, false).expect("pin");
+    session.add_support(&format!("n{}", elements + 1), false, true, false).expect("lateral support");
+    session.add_load(&format!("n{}", elements + 1), Some(-1000.0), None, None).expect("axial load");
+
+    let out = directory.join("buckling.json");
+    let result = session.solve_buckling(1, Some(&out)).expect("buckling");
+    assert_eq!(result.format, "open-cae-buckling-report");
+    assert_eq!(result.requested, 1);
+    assert!(!result.modes.is_empty());
+    let written = fs::read_to_string(&out).expect("buckling.json");
+    assert!(written.contains("open-cae-buckling-report"));
 }
 
 #[test]

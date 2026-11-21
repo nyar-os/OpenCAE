@@ -10,6 +10,7 @@
 import { NotImplementedError, OpenCAEError, errorCodes, type OpenCAEErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    BucklingSolution,
     CreateOptions,
     DocumentSummary,
     ElementAddRequest,
@@ -132,13 +133,15 @@ export function validate(path: string): ValidationReport {
 export function solve(path: string, options?: SolveOptions & { analysis?: 'static' }): Solution;
 /** Solves a document for `options.modes` natural frequencies. */
 export function solve(path: string, options: SolveOptions & { analysis: 'modal' }): ModalSolution;
+/** Solves a document for `options.modes` linear buckling load factors. */
+export function solve(path: string, options: SolveOptions & { analysis: 'buckling' }): BucklingSolution;
 /** Solves a document, optionally writing the JSON report to `options.out`. */
-export function solve(path: string, options: SolveOptions = {}): Solution | ModalSolution {
+export function solve(path: string, options: SolveOptions = {}): Solution | ModalSolution | BucklingSolution {
     const request =
         options.out === undefined && options.analysis === undefined && options.modes === undefined
             ? undefined
             : JSON.stringify({ out: options.out, analysis: options.analysis, modes: options.modes });
-    return decode<Solution | ModalSolution>(() =>
+    return decode<Solution | ModalSolution | BucklingSolution>(() =>
         request === undefined ? binding('solve').solve(path) : binding('solve').solve(path, request),
     );
 }

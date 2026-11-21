@@ -27,9 +27,10 @@ Usage:
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
   ocae self-weight <file> --g <g> [--axis x|y|z]
   ocae validate <file>
-  ocae solve <file> [--out report.json] [--analysis static|modal] [--modes N]
+  ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N]
                    [--element truss|beam] [--dimension 2|3]
   ocae modal <file> [--modes N] [--out report.json]
+  ocae buckling <file> [--modes N] [--out report.json]
   ocae export <file> --format csv|vtk|md --out <dir|file>
   ocae report <file>
   ocae capabilities
@@ -76,6 +77,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "validate" => validate(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "modal" => modal_command(&args[1..]),
+        "buckling" => buckling_command(&args[1..]),
         "export" => export(&args[1..]),
         "report" => report(&args[1..]),
         "import" => Err(not_implemented("Abaqus .inp import")),
@@ -287,7 +289,7 @@ fn solve_command(args: &[String]) -> Result<i32, CaeError> {
     let file = positional(
         &parsed,
         0,
-        "solve <file> [--out report.json] [--analysis static|modal] [--modes N] [--element truss|beam] [--dimension 2|3]",
+        "solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]",
     )?;
     let mut session = session();
     let summary = session.open(Path::new(file))?;
@@ -299,9 +301,17 @@ fn solve_command(args: &[String]) -> Result<i32, CaeError> {
             let modal = session.solve_modal(modes, out.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&modal).unwrap_or_default());
         }
+        "buckling" => {
+            let modes = parse_modes(&parsed)?;
+            let buckling = session.solve_buckling(modes, out.as_deref())?;
+            println!("{}", serde_json::to_string_pretty(&buckling).unwrap_or_default());
+        }
         _ => {
             if parsed.options.contains_key("--modes") {
-                return Err(CaeError::new("cli/invalid-option", "`--modes` can only be used with `--analysis modal`"));
+                return Err(CaeError::new(
+                    "cli/invalid-option",
+                    "`--modes` can only be used with `--analysis modal` or `--analysis buckling`",
+                ));
             }
             let solution = session.solve(out.as_deref())?;
             println!("{}", serde_json::to_string_pretty(&solution).unwrap_or_default());
@@ -319,6 +329,18 @@ fn modal_command(args: &[String]) -> Result<i32, CaeError> {
     let out = parsed.options.get("--out").map(PathBuf::from);
     let modal = session.solve_modal(modes, out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&modal).unwrap_or_default());
+    Ok(0)
+}
+
+fn buckling_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--modes", "--out"], &[])?;
+    let file = positional(&parsed, 0, "buckling <file> [--modes N] [--out report.json]")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let modes = parse_modes(&parsed)?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let buckling = session.solve_buckling(modes, out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&buckling).unwrap_or_default());
     Ok(0)
 }
 
@@ -357,14 +379,13 @@ fn export(args: &[String]) -> Result<i32, CaeError> {
 fn validate_analysis_options(parsed: &Parsed, model_dimension: u32) -> Result<String, CaeError> {
     let analysis = parsed.options.get("--analysis").cloned().unwrap_or_else(|| "static".to_string());
     match analysis.as_str() {
-        "static" | "modal" => {}
+        "static" | "modal" | "buckling" => {}
         "nonlinear" => return Err(not_implemented("nonlinear analysis")),
-        "buckling" => return Err(not_implemented("buckling analysis")),
         "thermal" => return Err(not_implemented("thermal analysis")),
         other => {
             return Err(CaeError::new(
                 "cli/invalid-option",
-                format!("unknown analysis type `{other}`; only `static` or `modal` is supported"),
+                format!("unknown analysis type `{other}`; only `static`, `modal` or `buckling` is supported"),
             ));
         }
     }

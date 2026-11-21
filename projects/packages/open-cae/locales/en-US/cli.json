@@ -1,6 +1,6 @@
 {
     "cli": {
-        "intro": "ocae - OpenCAE truss/beam linear-static and modal solver (2D/3D)",
+        "intro": "ocae - OpenCAE truss/beam linear-static, modal and buckling solver (2D/3D)",
         "usage": [
             "Usage:",
             "  ocae create <file.ocae> [--units mm|m] [--dimension 2|3]",
@@ -13,8 +13,9 @@
             "  ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]",
             "  ocae self-weight <file> --g <g> [--axis x|y|z]",
             "  ocae validate <file>",
-            "  ocae solve <file> [--out report.json] [--analysis static|modal] [--modes N] [--element truss|beam] [--dimension 2|3]",
+            "  ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]",
             "  ocae modal <file> [--modes N] [--out report.json]",
+            "  ocae buckling <file> [--modes N] [--out report.json]",
             "  ocae export <file> --format csv|vtk|md --out <dir|file>",
             "  ocae report <file>",
             "  ocae capabilities"
@@ -43,11 +44,11 @@
             "invalidUnits": "unsupported unit `{value}`; use `mm` or `m`",
             "invalidDimension": "unknown dimension `{value}`; only 2 or 3 is supported",
             "unknownFormat": "unknown export format `{format}`; only csv, vtk or md is supported",
-            "unknownAnalysis": "unknown analysis `{value}`; only static or modal is supported",
+            "unknownAnalysis": "unknown analysis `{value}`; only static, modal or buckling is supported",
             "unknownElement": "unknown element type `{value}`; only truss or beam is supported",
             "unknownAxis": "unknown gravity axis `{value}`; use `x`, `y` or `z`",
             "invalidModes": "`--modes` value `{value}` is not a positive integer",
-            "modesRequireModal": "`--modes` only applies to `--analysis modal`",
+            "modesRequireModal": "`--modes` only applies to `--analysis modal` or `--analysis buckling`",
             "dimensionMismatch": "`--dimension {requested}` does not match document dimension {dimension}; change the document or drop the option",
             "noFreedom": "specify at least one of `--dx`, `--dy`, `--dz` or `--rz`, otherwise the support constrains nothing"
         }

@@ -1,6 +1,6 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight and modal analysis. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, modal and linear buckling analysis. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
@@ -62,7 +62,7 @@ document.export('md', 'out/report.md');              // deterministic Markdown r
 
 - Sessions: `capabilities()`, `create(path, options?)`, `open(path)`, `dispose()`.
 - Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/validate/solve/export/report/save/close`; every edit operation writes atomically to the file.
-- `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution`.
+- `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
 
 Build the SDK and native addon:
@@ -130,6 +130,7 @@ cargo run -p cae-model --bin ocae --offline -- support add beam.ocae --node n1 -
 cargo run -p cae-model --bin ocae --offline -- load add beam.ocae --node n2 --fy -1000
 cargo run -p cae-model --bin ocae --offline -- model gravity beam.ocae --gy -9810
 cargo run -p cae-model --bin ocae --offline -- solve beam.ocae --analysis modal --modes 5
+cargo run -p cae-model --bin ocae --offline -- buckling beam.ocae --modes 2
 cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --out out/report.md
 ```
 
@@ -148,8 +149,9 @@ cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --ou
 | `ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]` | Set the gravity acceleration; the zero vector clears it |
 | `ocae self-weight <file> --g <g> [--axis x\|y\|z]` | Set the gravity acceleration along the given axis |
 | `ocae validate <file>` | Print JSON validation results; exit code 1 when errors exist |
-| `ocae solve <file> [--out report.json] [--analysis static\|modal] [--modes N] [--dimension 2\|3]` | Run a static or modal solve and print JSON; `--modes` is modal-only and defaults to 5 |
+| `ocae solve <file> [--out report.json] [--analysis static\|modal\|buckling] [--modes N] [--dimension 2\|3]` | Run a static, modal or linear buckling solve and print JSON; `--modes` is modal/buckling-only and defaults to 5 |
 | `ocae modal <file> [--modes N] [--out report.json]` | Shortcut for a modal solve |
+| `ocae buckling <file> [--modes N] [--out report.json]` | Shortcut for a linear buckling solve |
 | `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv` and `<dir>/elements.csv`; node columns include `x,y,z` and `ux,uy,uz` |
 | `ocae export <file> --format vtk --out <dir\|file.vtk>` | Write legacy ASCII VTK; points are 3D coordinates and displacements are 3D vectors |
 | `ocae export <file> --format md --out <dir\|file.md>` | Write a deterministic Markdown report; appends the first 5 modes when density is positive |
@@ -158,7 +160,7 @@ cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --ou
 
 Exit codes: `0` success, `1` input/validation/IO error, `2` capability not implemented. `pnpm exec open-cae ...` matches `ocae ...` in commands, arguments and exit codes.
 
-`solve` accepts `--analysis static|modal`, `--modes N`, `--element truss|beam` and `--dimension 2|3`. `--dimension` does not override the document setting: when it differs from the document `dimension`, `cli/dimension-mismatch` is returned (exit code 1). `--analysis nonlinear/buckling/thermal`, `--element frame`, and running `ocae import`, `ocae nonlinear`, `ocae frame`, `ocae thermal` or `ocae contact` still return `capability/not-implemented` with exit code `2`.
+`solve` accepts `--analysis static|modal|buckling`, `--modes N`, `--element truss|beam` and `--dimension 2|3`. `--dimension` does not override the document setting: when it differs from the document `dimension`, `cli/dimension-mismatch` is returned (exit code 1). `--analysis nonlinear/thermal`, `--element frame`, and running `ocae import`, `ocae nonlinear`, `ocae frame`, `ocae thermal` or `ocae contact` still return `capability/not-implemented` with exit code `2`. Linear buckling currently supports two-dimensional truss and beam models.
 
 ## `.ocae` document format
 
@@ -218,17 +220,18 @@ The file is UTF-8 JSON with camelCase fields:
 | 2D Euler-Bernoulli beam (`beam2d`, including axial force/shear/bending moment, distributed loads, end moments) | ✅ supported |
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi) | ✅ supported |
+| linear buckling (`buckling`, 2D truss/beam geometric stiffness + Jacobi) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown report export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
 | nonlinear analysis (`nonlinear`) | ❌ not implemented |
-| buckling analysis (`buckling`) | ❌ not implemented |
+| 3D buckling analysis (`buckling`, dimension=3) | ❌ not implemented |
 | thermal analysis (`thermal`) | ❌ not implemented |
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear`/`buckling` are rejected at every entry point.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` and three-dimensional `buckling` are rejected at every entry point, while two-dimensional `buckling` is available through the Rust API, the native addon and the TypeScript SDK/CLI.
 
 ## Numerical methods
 
@@ -246,7 +249,8 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
    - each element reports local end forces `endForces = {n1,v1,m1,n2,v2,m2} = K_local·d_local − f_eq` and `maxAbsMoment`; the axial force `axialForce` is reported separately with tension positive;
    - total strain energy `Σ ½·dᵀKd` is reported as `strainEnergy`.
 7. **Modal analysis**: uses the same `K` as the original problem and a diagonal lumped mass matrix — `ρAL/2` for translational degrees of freedom and `ρIL/2` (rotary inertia) for beam rotational degrees of freedom. It forms the symmetric matrix `A = M^(−1/2)·K·M^(−1/2)`, computes eigenvalues with symmetric Jacobi iterations (off-diagonal tolerance `1e-12·max|A|`, at most 100 sweeps) and frequencies `f = √λ/(2π)`. Zero, negative or non-finite eigenvalues are skipped and counted in `skipped`; NaN is never emitted.
-8. **Mechanism detection**: every solve performs a numerical rank check on the free-degree-of-freedom stiffness matrix (whether `K_ff` has full rank); on failure it reports `model/mechanism` and lists as many unconstrained nodes as possible.
+8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Only two-dimensional truss and beam models are assembled.
+9. **Mechanism detection**: every solve performs a numerical rank check on the free-degree-of-freedom stiffness matrix (whether `K_ff` has full rank); on failure it reports `model/mechanism` and lists as many unconstrained nodes as possible.
 
 ## Validation and tests
 
@@ -271,8 +275,9 @@ pnpm --filter @wae/open-cae run typecheck
 - simply supported beam with a midspan concentrated force: midspan deflection `PL³/(48EI)` and maximum bending moment `PL/4` (`1e-9`);
 - fixed-free axial bar (10 elements): first frequency within `< 3%` of `(1/(4L))√(E/ρ)`;
 - cantilever beam (40 elements): first bending frequency within `< 5%` of `1.875104²·√(EI/(ρAL⁴))/(2π)`;
+- pinned-pinned beam column (20 elements): first linear buckling factor within `0.1%` of the Euler load `P_cr = π²EI/L²`;
 - vertical bar self-weight: sum of reactions equals total weight (relative error `1e-9`);
-- rejection/behaviour tests for 3D beams, truss distributed loads, zero-density modal analysis and Markdown report determinism.
+- rejection/behaviour tests for 3D beams, truss distributed loads, zero-density modal analysis, three-dimensional buckling and Markdown report determinism.
 
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
@@ -285,11 +290,11 @@ projects/
     src/session.rs       OpenCae session API (all editing/validation/solving/export)
     src/model.rs         data model and document I/O
     src/validate.rs      validation rules and mechanism detection
-    src/solver.rs        truss/beam stiffness, DOF activation, Gaussian elimination, Jacobi modal solver
+    src/solver.rs        truss/beam stiffness, DOF activation, Gaussian elimination, Jacobi modal/buckling solvers
     src/export.rs        CSV / VTK / Markdown export and atomic writes
     src/bin/ocae.rs      thin CLI: argument parsing, API calls, printing and exit codes
     tests/cae_model.rs   truss model solve and export tests
-    tests/beam_modal.rs  analytical beam, self-weight and modal tests
+    tests/beam_modal.rs  analytical beam, self-weight, modal and buckling tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -306,7 +311,8 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 ## Limitations
 
 - Beams are **2D Euler-Bernoulli only** (no shear deformation, no axial-bending coupling, no moment releases); **3D beams/frames (beam3d / frame3d) are not implemented** and return `capability/not-implemented`.
-- Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, buckling, dynamic time history, thermal, contact, prestress and enforced displacement are not supported.
+- Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, thermal, contact, prestress and enforced displacement are not supported.
+- Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects, and three-dimensional truss buckling is not implemented.
 - Loads are limited to **nodal concentrated forces/moments** and **element distributed transverse loads `w`**; arbitrary distributed loads and temperature loads are not supported.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.

@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ElementKind, ExportFormat, Model, OpenCae, OpenCaeOptions, Units, solve, solve_modal};
+use cae_model::{ElementKind, ExportFormat, Model, OpenCae, OpenCaeOptions, Units, solve, solve_buckling, solve_modal};
 
 const E: f64 = 210_000.0;
 const A: f64 = 100.0;
@@ -57,6 +57,33 @@ fn cantilever_tip_load() -> Model {
 fn cantilever_uniform_load() -> Model {
     let mut model = beam_model(1);
     model.elements[0].distributed_load = Some(-2.0);
+    model
+}
+
+/// Pinned-pinned column loaded by an axial compressive force at the free
+/// translation of the far end.
+fn pinned_pinned_column(elements: usize) -> Model {
+    let mut model = Model::new(Units::Millimeter);
+    for index in 0..=elements {
+        let x = L * index as f64 / elements as f64;
+        model.add_node(format!("n{}", index + 1), x, 0.0).expect("node");
+    }
+    for index in 0..elements {
+        model
+            .add_element_kind(
+                format!("e{}", index + 1),
+                format!("n{}", index + 1),
+                format!("n{}", index + 2),
+                None,
+                ElementKind::Beam,
+                Some(I),
+                None,
+            )
+            .expect("beam element");
+    }
+    model.add_support("n1", true, true).expect("pinned support");
+    model.add_support(format!("n{}", elements + 1), false, true).expect("lateral support");
+    model.add_load(format!("n{}", elements + 1), Some(-1000.0), None).expect("axial load");
     model
 }
 
@@ -159,6 +186,40 @@ fn self_weight_reactions_sum_to_total_weight() {
     let reaction_sum: f64 = solution.reactions.iter().map(|reaction| reaction.fy).sum();
     let weight = RHO * A * L * gravity;
     assert_close(reaction_sum, weight, 1e-9);
+}
+
+#[test]
+fn pinned_pinned_column_buckling_matches_euler_load() {
+    let model = pinned_pinned_column(20);
+    let reference = solve(&model).expect("static reference");
+    for element in &reference.elements {
+        assert_close(element.axial_force, -1000.0, 1e-9);
+    }
+
+    let expected = std::f64::consts::PI.powi(2) * E * I / (L.powi(2) * 1000.0);
+    let buckling = solve_buckling(&model, 2).expect("buckling");
+    let first = buckling.modes.first().expect("first buckling mode");
+    assert_close(first.factor, expected, 1e-3);
+    assert!(
+        first.shape.iter().any(|node| node.uy.abs() > 0.1),
+        "the first buckling mode must bend laterally: {:?}",
+        first.shape
+    );
+}
+
+#[test]
+fn three_dimensional_buckling_is_not_implemented() {
+    let mut model = Model::new_with_dimension(Units::Millimeter, 3);
+    model.add_node_3d("n1", 0.0, 0.0, 0.0).expect("n1");
+    model.add_node_3d("n2", 0.0, 0.0, 1000.0).expect("n2");
+    model.add_element("e1", "n1", "n2", None).expect("e1");
+    model.add_support_3d("n1", true, true, true).expect("base");
+    model.add_support_3d("n2", true, true, false).expect("lateral guide");
+    model.add_load_3d("n2", None, None, Some(-1000.0)).expect("axial load");
+
+    let error = solve_buckling(&model, 1).expect_err("3D buckling must be rejected");
+    assert_eq!(error.code, "capability/not-implemented");
+    assert_eq!(error.exit_code(), 2);
 }
 
 #[test]

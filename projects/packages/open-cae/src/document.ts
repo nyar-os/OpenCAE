@@ -10,6 +10,7 @@
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
+    BucklingSolution,
     Dimension,
     DocumentSummary,
     ElementAddRequest,
@@ -144,11 +145,16 @@ export class CaeDocument {
     solve(options?: SolveOptions & { analysis?: 'static' }): Solution;
     /** Solves the document for `options.modes` natural frequencies. */
     solve(options: SolveOptions & { analysis: 'modal' }): ModalSolution;
+    /** Solves the document for `options.modes` linear buckling load factors. */
+    solve(options: SolveOptions & { analysis: 'buckling' }): BucklingSolution;
     /** Solves the document, optionally writing the JSON report to `out`. */
-    solve(options: SolveOptions = {}): Solution | ModalSolution {
+    solve(options: SolveOptions = {}): Solution | ModalSolution | BucklingSolution {
         this.assertOpen();
         if (options.analysis === 'modal') {
             return service.solve(this.path, { ...options, analysis: 'modal' });
+        }
+        if (options.analysis === 'buckling') {
+            return service.solve(this.path, { ...options, analysis: 'buckling' });
         }
         return service.solve(this.path, options as SolveOptions & { analysis?: 'static' });
     }

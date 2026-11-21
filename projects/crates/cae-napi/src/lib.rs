@@ -275,8 +275,8 @@ fn validate(ctx: CallContext) -> Result<JsValue> {
 
 /// Solves a document, optionally writing the JSON report to `out`.
 ///
-/// `analysis` is `"static"` (default) or `"modal"`; modal requests honour
-/// `modes` (default 5).
+/// `analysis` is `"static"` (default), `"modal"` or `"buckling"`; modal and
+/// buckling requests honour `modes` (default 5).
 #[function]
 fn solve(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -297,7 +297,13 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
             let modal = session.solve_modal(modes, out.map(Path::new)).map_err(fail)?;
             respond(&ctx, &modal)
         }
-        other => Err(argument_error(&format!("unsupported analysis `{other}`; use `static` or `modal`"))),
+        "buckling" => {
+            let modes =
+                usize::try_from(modes.unwrap_or(5)).map_err(|_| argument_error("`modes` must be a positive integer"))?;
+            let buckling = session.solve_buckling(modes, out.map(Path::new)).map_err(fail)?;
+            respond(&ctx, &buckling)
+        }
+        other => Err(argument_error(&format!("unsupported analysis `{other}`; use `static`, `modal` or `buckling`"))),
     }
 }
 

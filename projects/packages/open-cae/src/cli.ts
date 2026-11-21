@@ -203,6 +203,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return solveCommand(args.slice(1));
         case 'modal':
             return modalCommand(args.slice(1));
+        case 'buckling':
+            return bucklingCommand(args.slice(1));
         case 'export':
             return exportCommand(args.slice(1));
         case 'report':
@@ -477,11 +479,10 @@ function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
         case 'static':
             break;
         case 'modal':
+        case 'buckling':
             break;
         case 'nonlinear':
             throw new NotImplementedError('nonlinear analysis');
-        case 'buckling':
-            throw new NotImplementedError('buckling analysis');
         case 'thermal':
             throw new NotImplementedError('thermal analysis');
         default:
@@ -506,7 +507,7 @@ function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
             dimension: String(dimension),
         });
     }
-    return analysis === 'modal' ? 'modal' : 'static';
+    return analysis === 'modal' || analysis === 'buckling' ? analysis : 'static';
 }
 
 function modesOption(parsed: Parsed): number {
@@ -526,7 +527,7 @@ async function solveCommand(args: readonly string[]): Promise<number> {
     const file = positional(
         parsed,
         0,
-        'solve <file> [--out report.json] [--analysis static|modal] [--modes N] [--element truss|beam] [--dimension 2|3]',
+        'solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]',
     );
     return withSession(async (session) => {
         const document = await openDocument(session, file);
@@ -534,6 +535,9 @@ async function solveCommand(args: readonly string[]): Promise<number> {
         const out = parsed.options.get('--out');
         if (analysis === 'modal') {
             const result = document.solve({ analysis: 'modal', modes: modesOption(parsed), out });
+            console.log(JSON.stringify(result, null, 2));
+        } else if (analysis === 'buckling') {
+            const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out });
             console.log(JSON.stringify(result, null, 2));
         } else {
             if (parsed.options.has('--modes')) {
@@ -552,6 +556,17 @@ async function modalCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.solve({ analysis: 'modal', modes: modesOption(parsed), out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function bucklingCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--modes', '--out'], []);
+    const file = positional(parsed, 0, 'buckling <file> [--modes N] [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });
