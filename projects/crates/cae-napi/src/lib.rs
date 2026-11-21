@@ -172,8 +172,9 @@ fn node_add(ctx: CallContext) -> Result<JsValue> {
 /// The request accepts `kind` (`"truss"` or `"beam"`, default `"truss"`),
 /// `inertia` (required for beams), `distributedLoad` (beam transverse load per
 /// unit length in local `+y` at the start node), `distributedLoadEnd` (the
-/// value at the end node, forming a linearly varying load) and `temperature`
-/// (uniform temperature change in kelvin).
+/// value at the end node, forming a linearly varying load), `temperature`
+/// (uniform temperature change in kelvin) and `temperatureGradient` (linear
+/// difference between the local `+y` and `-y` extreme fibres).
 #[function]
 fn element_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -188,6 +189,7 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let distributed_load = number_field(&request, "distributedLoad")?;
     let distributed_load_end = number_field(&request, "distributedLoadEnd")?;
     let temperature = number_field(&request, "temperature")?;
+    let temperature_gradient = number_field(&request, "temperatureGradient")?;
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session
@@ -204,6 +206,9 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
             temperature,
         )
         .map_err(fail)?;
+    if temperature_gradient.is_some() {
+        session.set_element_temperature_gradient(&id, temperature_gradient).map_err(fail)?;
+    }
     respond(&ctx, &summary)
 }
 

@@ -24,6 +24,7 @@ Usage:
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
   ocae element release <file> --id <id> [--start] [--end]
+  ocae element gradient <file> --id <id> [--value <dT>]
   ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--alpha <a>]
   ocae material preset <file> --preset <name> [--section rectangle|circle|i]
                         [--width <w>] [--height <h>] [--diameter <d>] [--depth <d>]
@@ -220,13 +221,14 @@ fn element_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => element_add(&args[1..]),
         Some("release") => element_release(&args[1..]),
+        Some("gradient") => element_gradient(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `element` does not exist; only `add` or `release` is supported"),
+            format!("subcommand `{other}` of `element` does not exist; only `add`, `release` or `gradient` is supported"),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`element` is missing a subcommand; only `add` or `release` is supported",
+            "`element` is missing a subcommand; only `add`, `release` or `gradient` is supported",
         )),
     }
 }
@@ -247,6 +249,21 @@ fn element_release(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.set_element_release(id, Some(EndRelease { start, end }))?;
     println!("element `{id}` released (start={start}, end={end}, revision {})", summary.revision);
+    Ok(0)
+}
+
+fn element_gradient(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--value"], &[])?;
+    let file = positional(&parsed, 0, "element gradient <file> --id <id> [--value <dT>]")?;
+    let id = required(&parsed, "--id")?;
+    let value = number(&parsed, "--value")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_element_temperature_gradient(id, value)?;
+    match value {
+        Some(value) => println!("element `{id}` gradient set to {value} (revision {})", summary.revision),
+        None => println!("element `{id}` gradient cleared (revision {})", summary.revision),
+    }
     Ok(0)
 }
 

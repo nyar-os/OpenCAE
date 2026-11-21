@@ -401,6 +401,16 @@ impl OpenCae {
         self.edit(|model| model.set_element_temperature(id, temperature))
     }
 
+    /// Sets or clears the linear temperature gradient of an existing beam and
+    /// saves the document.
+    ///
+    /// `gradient` is the temperature difference between the local `+y` and `-y`
+    /// extreme fibres; `None` removes it again. The material must declare
+    /// `alpha` and a section depth before the model can be solved.
+    pub fn set_element_temperature_gradient(&mut self, id: &str, gradient: Option<f64>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_element_temperature_gradient(id, gradient))
+    }
+
     /// Sets or clears the bending-moment releases of an existing beam and saves
     /// the document.
     ///

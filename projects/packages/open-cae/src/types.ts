@@ -741,6 +741,13 @@ export interface ElementAddRequest {
      * only and never bends the member.
      */
     readonly temperature?: number;
+    /**
+     * Linear temperature difference between the local `+y` and `-y` extreme
+     * fibres in kelvin (or °C difference). A positive value heats the `+y`
+     * face. Requires the material `alpha` and a section that provides the
+     * depth; the gradient produces equivalent end moments.
+     */
+    readonly temperatureGradient?: number;
 }
 
 /** Bending-moment release (hinge) at the ends of a two-dimensional beam. */

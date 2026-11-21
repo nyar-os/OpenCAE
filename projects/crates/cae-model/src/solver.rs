@@ -2332,6 +2332,43 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     local_load[0] -= thermal;
                     local_load[3] += thermal;
                 }
+                // A through-depth gradient produces the free curvature
+                // `alpha·ΔT/h`; restraining it needs the equal and opposite end
+                // moments `E·I·alpha·ΔT/h`.
+                if let Some(gradient) = element.temperature_gradient {
+                    if !gradient.is_finite() {
+                        return Err(CaeError::new(
+                            "element/invalid-temperature-gradient",
+                            format!("temperature gradient of element `{}` must be finite", element.id),
+                        ));
+                    }
+                    let alpha = model.material.alpha.filter(|value| value.is_finite()).ok_or_else(|| {
+                        CaeError::new(
+                            "material/missing-alpha",
+                            format!(
+                                "element `{}` declares a temperature gradient but the material does not define a finite coefficient of thermal expansion (alpha)",
+                                element.id
+                            ),
+                        )
+                    })?;
+                    let depth = model
+                        .material
+                        .section
+                        .and_then(|section| section.properties().ok())
+                        .map(|properties| 2.0 * properties.extreme_fiber)
+                        .ok_or_else(|| {
+                            CaeError::new(
+                                "material/missing-section",
+                                format!(
+                                    "element `{}` declares a temperature gradient but the material does not define a section depth",
+                                    element.id
+                                ),
+                            )
+                        })?;
+                    let moment = youngs_modulus * inertia * alpha * gradient / depth;
+                    local_load[2] += moment;
+                    local_load[5] -= moment;
+                }
                 let local_stiffness = beam_stiffness(youngs_modulus, area, inertia, length);
                 let transform = beam_transform(c, s);
                 let release = element.release.unwrap_or_default();

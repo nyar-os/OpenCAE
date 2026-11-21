@@ -286,6 +286,16 @@ pub struct Element {
     /// material must declare [`Material::alpha`] when this value is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
+    /// Linear temperature difference between the local `+y` and `-y` extreme
+    /// fibres of the section.
+    ///
+    /// A positive value heats the `+y` face. The solver converts it into the
+    /// free thermal curvature `alpha·ΔT/h`, where `h` is the section depth
+    /// supplied by [`Material::section`], and adds the matching equivalent end
+    /// moments. A uniform [`Element::temperature`] and a gradient may be
+    /// combined. Only valid on beam elements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature_gradient: Option<f64>,
     /// Optional bending-moment releases at the beam ends.
     ///
     /// Only valid on beam elements; a member with both ends released carries no
@@ -707,6 +717,7 @@ impl Model {
             distributed_load,
             distributed_load_end,
             temperature: None,
+            temperature_gradient: None,
             release: None,
         });
         self.bump_revision();
@@ -809,6 +820,36 @@ impl Model {
             .find(|element| element.id == id)
             .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
         element.temperature = temperature;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the linear temperature gradient of an existing beam.
+    ///
+    /// `gradient` is the temperature difference between the local `+y` and `-y`
+    /// extreme fibres. A non-finite value is rejected with
+    /// `element/invalid-temperature-gradient`, a truss element with
+    /// `element/gradient-requires-beam` and an unknown identifier with
+    /// `element/unknown-id`. `None` removes the gradient again.
+    pub fn set_element_temperature_gradient(&mut self, id: &str, gradient: Option<f64>) -> Result<(), CaeError> {
+        if gradient.is_some_and(|value| !value.is_finite()) {
+            return Err(CaeError::new(
+                "element/invalid-temperature-gradient",
+                format!("temperature gradient of element `{id}` must be finite"),
+            ));
+        }
+        let element = self
+            .elements
+            .iter_mut()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        if element.kind != ElementKind::Beam && gradient.is_some() {
+            return Err(CaeError::new(
+                "element/gradient-requires-beam",
+                format!("element `{id}` is a truss element and cannot carry a temperature gradient; use a beam element"),
+            ));
+        }
+        element.temperature_gradient = gradient;
         self.bump_revision();
         Ok(())
     }

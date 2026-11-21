@@ -319,11 +319,11 @@ function elementKindOption(parsed: Parsed): ElementKind | undefined {
 }
 
 async function elementAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt'], []);
+    const parsed = parse(args, ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt', '--dt-grad'], []);
     const file = positional(
         parsed,
         0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]',
+        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>]',
     );
     const id = required(parsed, '--id');
     const from = required(parsed, '--from');
@@ -335,6 +335,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     const distributedLoad = number(parsed, '--w');
     const distributedLoadEnd = number(parsed, '--w2');
     const temperature = number(parsed, '--dt');
+    const temperatureGradient = number(parsed, '--dt-grad');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const summary = document.addElement({
@@ -348,6 +349,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             distributedLoad,
             distributedLoadEnd,
             temperature,
+            temperatureGradient,
         });
         console.log(message('elementAdded', { id, revision: String(summary.revision) }));
         return 0;

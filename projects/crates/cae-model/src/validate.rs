@@ -324,6 +324,50 @@ impl Model {
                     ));
                 }
             }
+            if let Some(gradient) = element.temperature_gradient {
+                if !gradient.is_finite() {
+                    report.push(check_error(
+                        "element/invalid-temperature-gradient",
+                        format!("temperature gradient of element `{}` must be finite", element.id),
+                    ));
+                }
+                else if element.kind != ElementKind::Beam {
+                    report.push(check_error(
+                        "element/gradient-requires-beam",
+                        format!(
+                            "element `{}` is a truss element and cannot carry a temperature gradient; use a beam element",
+                            element.id
+                        ),
+                    ));
+                }
+                else if self.material.alpha.is_none() {
+                    report.push(check_error(
+                        "material/missing-alpha",
+                        format!(
+                            "element `{}` declares a temperature gradient but the material does not define a coefficient of thermal expansion (alpha)",
+                            element.id
+                        ),
+                    ));
+                }
+                else if self.material.alpha == Some(0.0) && gradient != 0.0 {
+                    report.push(check_warning(
+                        "element/inactive-temperature",
+                        format!(
+                            "element `{}` declares a temperature gradient but alpha is zero, so no thermal curvature is produced",
+                            element.id
+                        ),
+                    ));
+                }
+                else if gradient != 0.0 && section_inertia.is_none() {
+                    report.push(check_error(
+                        "material/missing-section",
+                        format!(
+                            "element `{}` declares a temperature gradient but the material does not define a parametric section that provides the depth",
+                            element.id
+                        ),
+                    ));
+                }
+            }
             if let Some(release) = element.release {
                 if element.kind != ElementKind::Beam {
                     report.push(check_error(

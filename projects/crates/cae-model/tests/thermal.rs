@@ -10,7 +10,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ElementKind, Material, Model, OpenCae, OpenCaeOptions, Severity, Units};
+use cae_model::{
+    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Severity, Units, solve, solve_deflection,
+    solve_internal_forces,
+};
 
 const E: f64 = 210_000.0;
 const A: f64 = 100.0;
@@ -163,4 +166,120 @@ fn temperature_edits_reject_invalid_input_and_round_trip() {
     let text = fs::read_to_string(&path).expect("document");
     assert!(text.contains("\"temperature\": 50.0"), "document: {text}");
     assert!(text.contains("\"alpha\": 0.000012"), "document: {text}");
+}
+
+const DEPTH: f64 = 200.0;
+const GRADIENT: f64 = 40.0;
+
+fn gradient_material(alpha: Option<f64>, section: Option<Section>) -> Material {
+    Material { name: "steel".to_string(), youngs_modulus: E, area: A, density: 0.0, allowable_stress: None, alpha, section }
+}
+
+fn gradient_beam(fixed_both_ends: bool) -> Model {
+    let mut model = Model::new(Units::Millimeter);
+    let section = Some(Section::Rectangle { width: 100.0, height: DEPTH });
+    model.set_material_data(gradient_material(Some(ALPHA), section)).expect("material");
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", L, 0.0).expect("n2");
+    model.add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, Some(I), None).expect("beam");
+    model.set_element_temperature_gradient("b1", Some(GRADIENT)).expect("gradient");
+    model.add_support_full("n1", true, true, false, true).expect("fixed");
+    if fixed_both_ends {
+        model.add_support_full("n2", true, true, false, true).expect("fixed");
+    }
+    model
+}
+
+#[test]
+fn gradient_on_a_cantilever_bends_it_without_end_moments() {
+    let model = gradient_beam(false);
+    // Free curvature `kappa = -alpha·ΔT/h`, hot side at local `+y`.
+    let curvature = -ALPHA * GRADIENT / DEPTH;
+    let solution = solve(&model).expect("solve");
+    let tip = solution.nodes.iter().find(|node| node.id == "n2").expect("n2");
+    assert_close(tip.uy, curvature * L * L / 2.0, 1e-12);
+    assert_close(tip.rz, curvature * L, 1e-12);
+    assert_close(tip.ux, 0.0, 1e-12);
+    let moment_scale = E * I * ALPHA * GRADIENT / DEPTH;
+    assert!(solution.elements[0].end_forces.m1.abs() < 1e-9 * moment_scale);
+    assert!(solution.elements[0].end_forces.m2.abs() < 1e-9 * moment_scale);
+    assert!(solution.max_moment.moment.abs() < 1e-9 * moment_scale);
+    assert!(solution.reaction_summary.balanced);
+
+    let diagram = solve_internal_forces(&model, 5).expect("diagram");
+    for station in &diagram.elements[0].stations {
+        assert!(station.moment.abs() < 1e-9 * moment_scale);
+        assert!(station.shear.abs() < 1e-9 * moment_scale / L);
+    }
+
+    let deflection = solve_deflection(&model, 5).expect("deflection");
+    let tip_station = deflection.elements[0].stations.last().expect("tip");
+    assert_close(tip_station.transverse, curvature * L * L / 2.0, 1e-12);
+    assert_close(tip_station.rotation, curvature * L, 1e-12);
+}
+
+#[test]
+fn gradient_on_a_fixed_fixed_beam_produces_the_restraining_end_moments() {
+    let model = gradient_beam(true);
+    let moment = E * I * ALPHA * GRADIENT / DEPTH;
+    let solution = solve(&model).expect("solve");
+
+    for node in &solution.nodes {
+        assert_close(node.ux, 0.0, 1e-12);
+        assert_close(node.uy, 0.0, 1e-12);
+        assert_close(node.rz, 0.0, 1e-12);
+    }
+    assert_close(solution.elements[0].end_forces.m1, -moment, 1e-12);
+    assert_close(solution.elements[0].end_forces.m2, moment, 1e-12);
+    assert_close(solution.max_moment.moment.abs(), moment, 1e-12);
+    let start = solution.reactions.iter().find(|reaction| reaction.node == "n1").expect("n1");
+    let end = solution.reactions.iter().find(|reaction| reaction.node == "n2").expect("n2");
+    assert_close(start.mz, -moment, 1e-12);
+    assert_close(end.mz, moment, 1e-12);
+    assert_close(start.fy, 0.0, 1e-12);
+    assert!(solution.reaction_summary.balanced);
+
+    let diagram = solve_internal_forces(&model, 5).expect("diagram");
+    for station in &diagram.elements[0].stations {
+        assert_close(station.moment, moment, 1e-12);
+        assert_close(station.shear, 0.0, 1e-12);
+    }
+}
+
+#[test]
+fn gradient_without_alpha_or_section_is_rejected() {
+    let mut truss = Model::new(Units::Millimeter);
+    truss.add_node("n1", 0.0, 0.0).expect("n1");
+    truss.add_node("n2", L, 0.0).expect("n2");
+    truss.add_element("e1", "n1", "n2", None).expect("bar");
+    assert_eq!(
+        truss.set_element_temperature_gradient("e1", Some(GRADIENT)).expect_err("truss").code,
+        "element/gradient-requires-beam"
+    );
+    assert_eq!(
+        truss.set_element_temperature_gradient("missing", Some(GRADIENT)).expect_err("unknown").code,
+        "element/unknown-id"
+    );
+
+    let mut no_alpha = Model::new(Units::Millimeter);
+    let section = Some(Section::Rectangle { width: 100.0, height: DEPTH });
+    no_alpha.set_material_data(gradient_material(None, section)).expect("material");
+    no_alpha.add_node("n1", 0.0, 0.0).expect("n1");
+    no_alpha.add_node("n2", L, 0.0).expect("n2");
+    no_alpha.add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, Some(I), None).expect("beam");
+    no_alpha.set_element_temperature_gradient("b1", Some(GRADIENT)).expect("gradient");
+    no_alpha.add_support_full("n1", true, true, false, true).expect("fixed");
+    assert_eq!(solve(&no_alpha).expect_err("missing alpha").code, "material/missing-alpha");
+
+    let mut no_section = Model::new(Units::Millimeter);
+    no_section.set_material_data(gradient_material(Some(ALPHA), None)).expect("material");
+    no_section.add_node("n1", 0.0, 0.0).expect("n1");
+    no_section.add_node("n2", L, 0.0).expect("n2");
+    no_section.add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, Some(I), None).expect("beam");
+    no_section.set_element_temperature_gradient("b1", Some(GRADIENT)).expect("gradient");
+    no_section.add_support_full("n1", true, true, false, true).expect("fixed");
+    assert_eq!(solve(&no_section).expect_err("missing section").code, "material/missing-section");
+    assert!(
+        no_section.validate().iter().any(|issue| issue.code == "material/missing-section" && issue.severity == Severity::Error)
+    );
 }
