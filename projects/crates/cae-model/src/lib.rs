@@ -42,7 +42,7 @@ mod validate;
 
 pub use crate::{
     error::CaeError,
-    export::{export_csv, export_md, export_vtk, write_atomic},
+    export::{export_csv, export_html, export_md, export_vtk, write_atomic},
     library::{MATERIAL_PRESETS, MaterialPreset, SectionProperties, library_json, material_preset},
     model::{
         Element, ElementKind, ElementMaterial, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
@@ -96,6 +96,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "csv": "supported",
     "vtk": "supported",
     "md": "supported",
+    "html": "supported",
     "svg": "unsupported",
     "inp": "unsupported",
     "step": "unsupported"

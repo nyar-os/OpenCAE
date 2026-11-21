@@ -899,7 +899,7 @@ async function report(args: readonly string[]): Promise<number> {
 
 async function exportCommand(args: readonly string[]): Promise<number> {
     const parsed = parse(args, ['--format', '--out'], []);
-    const file = positional(parsed, 0, 'export <file> --format csv|vtk|md --out <dir|file>');
+    const file = positional(parsed, 0, 'export <file> --format csv|vtk|md|html --out <dir|file>');
     const format = exportFormat(required(parsed, '--format'));
     const out = required(parsed, '--out');
     return withSession(async (session) => {

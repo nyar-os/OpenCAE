@@ -471,6 +471,40 @@ fn modal_requires_positive_density() {
 }
 
 #[test]
+fn html_report_is_deterministic_and_contains_all_sections() {
+    let directory = temporary_dir("html");
+    let path = directory.join("model.ocae");
+    let mut model = cantilever_tip_load();
+    model.set_material_full(Some("steel".to_string()), E, A, RHO);
+    model.save_atomic(&path).expect("save");
+
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(&path).expect("open");
+    let first = session.export(ExportFormat::Html, &directory).expect("first export");
+    assert_eq!(first.format, "html");
+    assert!(first.files[0].ends_with("report.html"));
+    let first_report = fs::read_to_string(&first.files[0]).expect("report");
+    let second = session.export(ExportFormat::Html, &directory).expect("second export");
+    let second_report = fs::read_to_string(&second.files[0]).expect("report");
+    assert_eq!(first_report, second_report);
+    assert!(first_report.starts_with("<!DOCTYPE html>"));
+    for section in [
+        "Model Summary",
+        "Validation",
+        "Solution Summary",
+        "Nodal Displacements",
+        "Nodal Reactions",
+        "Element Results",
+        "Modal Results",
+    ] {
+        assert!(first_report.contains(section), "missing {section}");
+    }
+    assert!(first_report.contains("<table>"));
+    assert!(first_report.contains("Frequency (Hz)"));
+    assert!(first_report.trim_end().ends_with("</html>"));
+}
+
+#[test]
 fn markdown_report_is_deterministic_and_contains_all_sections() {
     let directory = temporary_dir("md");
     let path = directory.join("model.ocae");

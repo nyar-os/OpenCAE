@@ -26,7 +26,7 @@ export type SupportLevel = 'supported' | 'unsupported';
 export type Severity = 'error' | 'warning' | 'notice';
 
 /** Export formats `export()` can write. */
-export type ExportFormat = 'csv' | 'vtk' | 'md';
+export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html';
 
 /** Session options. Constructing a session opens no file. */
 export interface OpenCAEOptions {

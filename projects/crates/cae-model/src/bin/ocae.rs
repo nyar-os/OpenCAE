@@ -48,7 +48,7 @@ Usage:
   ocae buckling-combinations <file> [--modes N] [--out report.json]
   ocae forces <file> [--stations N] [--out report.json]
   ocae stresses <file> [--stations N] [--out report.json]
-  ocae export <file> --format csv|vtk|md --out <dir|file>
+  ocae export <file> --format csv|vtk|md|html --out <dir|file>
   ocae report <file>
   ocae capabilities
 
@@ -717,7 +717,7 @@ fn report(args: &[String]) -> Result<i32, CaeError> {
 
 fn export(args: &[String]) -> Result<i32, CaeError> {
     let parsed = parse(args, &["--format", "--out"], &[])?;
-    let file = positional(&parsed, 0, "export <file> --format csv|vtk|md --out <dir|file>")?;
+    let file = positional(&parsed, 0, "export <file> --format csv|vtk|md|html --out <dir|file>")?;
     let format = required(&parsed, "--format")?;
     let out = required(&parsed, "--out")?;
     let format = format.parse::<ExportFormat>()?;

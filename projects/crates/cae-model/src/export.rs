@@ -332,6 +332,226 @@ fn format_float(value: f64) -> String {
     format!("{value:.6e}")
 }
 
+/// Writes a self-contained, deterministic HTML analysis report.
+///
+/// The report mirrors the Markdown sections (model summary, validation,
+/// solution, nodal and element results and modal data) and embeds its CSS so the
+/// single file can be opened in any browser. It contains no timestamps, so
+/// repeated exports of the same model are byte-identical.
+///
+/// When `path` ends in `.html` or `.htm` it is used as the output file,
+/// otherwise `path` is treated as a directory and `report.html` is created
+/// inside it.
+pub fn export_html(
+    model: &Model,
+    solution: &Solution,
+    modal: Option<&ModalSolution>,
+    issues: &[Issue],
+    path: &Path,
+) -> Result<(), CaeError> {
+    check_alignment(model, solution)?;
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    let target =
+        if extension == Some("html") || extension == Some("htm") { path.to_path_buf() } else { path.join("report.html") };
+
+    let mut text = String::new();
+    text.push_str(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>OpenCAE Analysis Report</title>\n<style>\n\
+         body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;margin:2rem;color:#1b1f24;background:#fff}\n\
+         h1{font-size:1.6rem;margin-bottom:1.5rem}\n\
+         h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #d8dee4;padding-bottom:.3rem}\n\
+         table{border-collapse:collapse;margin:.75rem 0;font-size:.9rem}\n\
+         th,td{border:1px solid #d8dee4;padding:.35rem .6rem;text-align:left}\n\
+         th{background:#f3f5f7}\ncode{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}\n\
+         .passed{color:#17691f}.error{color:#a4161a}.warning{color:#8a5a00}.notice{color:#3b5bdb}\n\
+         </style>\n</head>\n<body>\n<h1>OpenCAE Analysis Report</h1>\n",
+    );
+
+    text.push_str("<section>\n<h2>Model Summary</h2>\n<table>\n<tr><th>Item</th><th>Value</th></tr>\n");
+    let _ = writeln!(
+        text,
+        "<tr><td>Document format</td><td><code>{} v{}</code></td></tr>",
+        escape_html(&model.format),
+        model.version
+    );
+    let _ = writeln!(text, "<tr><td>Dimension</td><td>{}D</td></tr>", model.dimension);
+    let _ = writeln!(text, "<tr><td>Units</td><td>{}</td></tr>", model.units.unwrap_or(Units::Millimeter).as_str());
+    let _ = writeln!(text, "<tr><td>Nodes</td><td>{}</td></tr>", model.nodes.len());
+    let _ = writeln!(text, "<tr><td>Elements</td><td>{}</td></tr>", model.elements.len());
+    let _ = writeln!(
+        text,
+        "<tr><td>Element types</td><td>truss {} / beam {}</td></tr>",
+        model.elements.iter().filter(|element| element.kind == ElementKind::Truss).count(),
+        model.elements.iter().filter(|element| element.kind == ElementKind::Beam).count()
+    );
+    let _ = writeln!(text, "<tr><td>Support entries</td><td>{}</td></tr>", model.supports.len());
+    let _ = writeln!(text, "<tr><td>Concentrated load entries</td><td>{}</td></tr>", model.loads.len());
+    let _ = writeln!(text, "<tr><td>Material</td><td>{}</td></tr>", escape_html(&model.material.name));
+    let _ = writeln!(text, "<tr><td>E</td><td>{}</td></tr>", format_float(model.material.youngs_modulus));
+    let _ = writeln!(text, "<tr><td>A</td><td>{}</td></tr>", format_float(model.material.area));
+    let _ = writeln!(text, "<tr><td>density</td><td>{}</td></tr>", format_float(model.material.density));
+    match model.gravity {
+        Some(gravity) => {
+            let _ = writeln!(
+                text,
+                "<tr><td>gravity</td><td>[{}, {}, {}]</td></tr>",
+                format_float(gravity[0]),
+                format_float(gravity[1]),
+                format_float(gravity[2])
+            );
+        }
+        None => text.push_str("<tr><td>gravity</td><td>not set</td></tr>\n"),
+    }
+    text.push_str("</table>\n</section>\n");
+
+    text.push_str("<section>\n<h2>Validation</h2>\n");
+    if issues.is_empty() {
+        text.push_str("<p class=\"passed\">Passed, no issues found.</p>\n");
+    }
+    else {
+        text.push_str("<table>\n<tr><th>Severity</th><th>Code</th><th>Message</th></tr>\n");
+        for issue in issues {
+            let severity = match issue.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+                Severity::Notice => "notice",
+            };
+            let _ = writeln!(
+                text,
+                "<tr><td class=\"{severity}\">{severity}</td><td><code>{}</code></td><td>{}</td></tr>",
+                escape_html(&issue.code),
+                escape_html(&issue.message)
+            );
+        }
+        text.push_str("</table>\n");
+    }
+    text.push_str("</section>\n");
+
+    text.push_str("<section>\n<h2>Solution Summary</h2>\n<table>\n<tr><th>Item</th><th>Value</th></tr>\n");
+    let _ = writeln!(
+        text,
+        "<tr><td>Max displacement</td><td>{} (node <code>{}</code>, component norm)</td></tr>",
+        format_float(solution.max_displacement.magnitude),
+        escape_html(&solution.max_displacement.id)
+    );
+    let _ = writeln!(
+        text,
+        "<tr><td>Max axial force</td><td>{} (element <code>{}</code>)</td></tr>",
+        format_float(solution.max_axial_force.axial_force),
+        escape_html(&solution.max_axial_force.element)
+    );
+    let _ = writeln!(
+        text,
+        "<tr><td>Max bending moment</td><td>{} (element <code>{}</code>)</td></tr>",
+        format_float(solution.max_moment.moment),
+        escape_html(&solution.max_moment.element)
+    );
+    let _ = writeln!(text, "<tr><td>Total strain energy</td><td>{}</td></tr>", format_float(solution.strain_energy));
+    text.push_str("</table>\n</section>\n");
+
+    text.push_str(
+        "<section>\n<h2>Nodal Displacements</h2>\n<table>\n\
+         <tr><th>Node</th><th>ux</th><th>uy</th><th>uz</th><th>rz</th><th>Magnitude</th></tr>\n",
+    );
+    for node in &solution.nodes {
+        let _ = writeln!(
+            text,
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            escape_html(&node.id),
+            format_float(node.ux),
+            format_float(node.uy),
+            format_float(node.uz),
+            format_float(node.rz),
+            format_float(node.magnitude)
+        );
+    }
+    text.push_str("</table>\n</section>\n");
+
+    text.push_str(
+        "<section>\n<h2>Nodal Reactions</h2>\n<table>\n<tr><th>Node</th><th>fx</th><th>fy</th><th>fz</th><th>mz</th></tr>\n",
+    );
+    for reaction in &solution.reactions {
+        let _ = writeln!(
+            text,
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            escape_html(&reaction.node),
+            format_float(reaction.fx),
+            format_float(reaction.fy),
+            format_float(reaction.fz),
+            format_float(reaction.mz)
+        );
+    }
+    text.push_str("</table>\n</section>\n");
+
+    text.push_str(
+        "<section>\n<h2>Element Results</h2>\n<table>\n<tr><th>Element</th><th>Type</th><th>Length</th>\
+         <th>Axial force</th><th>Stress</th><th>maxAbsMoment</th><th>n1</th><th>v1</th><th>m1</th>\
+         <th>n2</th><th>v2</th><th>m2</th></tr>\n",
+    );
+    for element in &solution.elements {
+        let _ = writeln!(
+            text,
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>\
+             <td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            escape_html(&element.id),
+            element.kind.as_str(),
+            format_float(element.length),
+            format_float(element.axial_force),
+            format_float(element.stress),
+            format_float(element.max_abs_moment),
+            format_float(element.end_forces.n1),
+            format_float(element.end_forces.v1),
+            format_float(element.end_forces.m1),
+            format_float(element.end_forces.n2),
+            format_float(element.end_forces.v2),
+            format_float(element.end_forces.m2)
+        );
+    }
+    text.push_str("</table>\n</section>\n");
+
+    text.push_str("<section>\n<h2>Modal Results</h2>\n");
+    match modal {
+        Some(modal) => {
+            let _ = writeln!(
+                text,
+                "<p>Requested {} modes, returned {}, skipped {} zero/negative eigenvalues.</p>",
+                modal.requested,
+                modal.modes.len(),
+                modal.skipped
+            );
+            if modal.modes.is_empty() {
+                text.push_str("<p>No positive eigenvalues available.</p>\n");
+            }
+            else {
+                text.push_str(
+                    "<table>\n<tr><th>Mode</th><th>Frequency (Hz)</th><th>Eigenvalue</th><th>Max amplitude</th></tr>\n",
+                );
+                for (index, mode) in modal.modes.iter().enumerate() {
+                    let _ = writeln!(
+                        text,
+                        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                        index + 1,
+                        format_float(mode.frequency_hz),
+                        format_float(mode.eigenvalue),
+                        format_float(mode.max_amplitude)
+                    );
+                }
+                text.push_str("</table>\n");
+            }
+        }
+        None => text.push_str("<p>Not run (requires a positive density).</p>\n"),
+    }
+    text.push_str("</section>\n</body>\n</html>\n");
+
+    write_atomic(&target, &text)
+}
+
+fn escape_html(value: &str) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+}
+
 fn escape_markdown(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
 }

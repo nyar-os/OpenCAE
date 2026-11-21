@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::{
     CAPABILITIES_JSON, CaeError,
-    export::{export_csv, export_md, export_vtk, write_atomic},
+    export::{export_csv, export_html, export_md, export_vtk, write_atomic},
     library::material_preset,
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
@@ -96,6 +96,8 @@ pub enum ExportFormat {
     Vtk,
     /// One deterministic Markdown engineering report.
     Md,
+    /// One deterministic, self-contained HTML engineering report.
+    Html,
 }
 
 impl ExportFormat {
@@ -105,6 +107,7 @@ impl ExportFormat {
             Self::Csv => "csv",
             Self::Vtk => "vtk",
             Self::Md => "md",
+            Self::Html => "html",
         }
     }
 }
@@ -117,10 +120,11 @@ impl FromStr for ExportFormat {
             "csv" => Ok(Self::Csv),
             "vtk" => Ok(Self::Vtk),
             "md" => Ok(Self::Md),
+            "html" | "htm" => Ok(Self::Html),
             "inp" | "abaqus" | "step" | "stp" => Err(not_implemented(&format!("`{value}` format export"))),
             other => Err(CaeError::new(
                 "cli/unknown-format",
-                format!("unknown export format `{other}`; only csv, vtk or md is supported"),
+                format!("unknown export format `{other}`; only csv, vtk, md or html is supported"),
             )),
         }
     }
@@ -772,6 +776,19 @@ impl OpenCae {
                 }
                 else {
                     target.join("report.md")
+                };
+                vec![file.display().to_string()]
+            }
+            ExportFormat::Html => {
+                let modal = if positive_density(model) { Some(solve_modal(model, 5)?) } else { None };
+                let issues = model.validate();
+                export_html(model, &solution, modal.as_ref(), &issues, target)?;
+                let extension = target.extension().and_then(|extension| extension.to_str());
+                let file = if extension == Some("html") || extension == Some("htm") {
+                    target.to_path_buf()
+                }
+                else {
+                    target.join("report.html")
                 };
                 vec![file.display().to_string()]
             }
