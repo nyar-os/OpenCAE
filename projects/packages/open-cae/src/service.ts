@@ -1,0 +1,154 @@
+/**
+ * Orthogonal native operations.
+ *
+ * One function performs one operation and returns data; argument parsing, help
+ * text and exit codes belong to `cli.ts` and to the session surface. Nothing
+ * here knows about a command line. Every function forwards to the optional
+ * native addon and decodes one JSON string.
+ */
+
+import { NotImplementedError, OpenCAEError, errorCodes, type OpenCAEErrorCode } from './errors.js';
+import { nativeBinding } from './native.js';
+import type {
+    CreateOptions,
+    DocumentSummary,
+    ElementAddRequest,
+    ExportFormat,
+    ExportReport,
+    GravitySetRequest,
+    LoadAddRequest,
+    MaterialSetRequest,
+    ModalSolution,
+    NodeAddRequest,
+    OpenCAECapabilities,
+    Report,
+    Solution,
+    SolveOptions,
+    SupportAddRequest,
+    ValidationReport,
+} from './types.js';
+
+const knownCodes = new Set<string>(errorCodes);
+
+function binding(feature: string) {
+    const native = nativeBinding();
+    if (!native) {
+        throw new NotImplementedError(feature);
+    }
+    return native;
+}
+
+function decode<T>(work: () => string): T {
+    try {
+        return JSON.parse(work()) as T;
+    } catch (error) {
+        throw translate(error);
+    }
+}
+
+function translate(error: unknown): OpenCAEError {
+    if (error instanceof OpenCAEError) {
+        return error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    const separator = message.indexOf(': ');
+    const code = separator > 0 ? message.slice(0, separator) : '';
+    if (knownCodes.has(code)) {
+        return new OpenCAEError(code as OpenCAEErrorCode, message.slice(separator + 2));
+    }
+    return new OpenCAEError('native/error', message, { cause: error });
+}
+
+/** Reads the version of the installed addon. */
+export function version(): string {
+    return decode<string>(() => binding('version').version());
+}
+
+/** Reads the capability matrix of the installed addon. */
+export function capabilities(): OpenCAECapabilities {
+    const matrix = decode<{ solver: Record<string, 'supported' | 'unsupported'>; io: Record<string, 'supported' | 'unsupported'> }>(
+        () => binding('capabilities').capabilities(),
+    );
+    return {
+        engine: { package: 'open-cae-napi', version: version() },
+        solver: matrix.solver,
+        io: matrix.io,
+    };
+}
+
+/** Creates an empty document and returns its summary. */
+export function create(path: string, options: Required<CreateOptions>): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('create').create(path, JSON.stringify(options)));
+}
+
+/** Opens a document and returns its summary. */
+export function open(path: string): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('open').open(path));
+}
+
+/** Writes a document to `target`, or in place when `target` is undefined. */
+export function save(path: string, target?: string): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        target === undefined ? binding('save').save(path) : binding('save').save(path, target),
+    );
+}
+
+/** Adds a node and returns the updated summary. */
+export function nodeAdd(path: string, request: NodeAddRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('node.add').node_add(path, JSON.stringify(request)));
+}
+
+/** Adds a truss or beam element and returns the updated summary. */
+export function elementAdd(path: string, request: ElementAddRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('element.add').element_add(path, JSON.stringify(request)));
+}
+
+/** Replaces the global material and returns the updated summary. */
+export function materialSet(path: string, request: MaterialSetRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('material.set').material_set(path, JSON.stringify(request)));
+}
+
+/** Adds or merges a support entry and returns the updated summary. */
+export function supportAdd(path: string, request: SupportAddRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('support.add').support_add(path, JSON.stringify(request)));
+}
+
+/** Adds or updates a concentrated load and returns the updated summary. */
+export function loadAdd(path: string, request: LoadAddRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('load.add').load_add(path, JSON.stringify(request)));
+}
+
+/** Sets the gravity acceleration vector and returns the updated summary. */
+export function setGravity(path: string, request: GravitySetRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('gravity.set').gravity_set(path, JSON.stringify(request)));
+}
+
+/** Validates a document. */
+export function validate(path: string): ValidationReport {
+    return decode<ValidationReport>(() => binding('validate').validate(path));
+}
+
+/** Solves a document for a static load case. */
+export function solve(path: string, options?: SolveOptions & { analysis?: 'static' }): Solution;
+/** Solves a document for `options.modes` natural frequencies. */
+export function solve(path: string, options: SolveOptions & { analysis: 'modal' }): ModalSolution;
+/** Solves a document, optionally writing the JSON report to `options.out`. */
+export function solve(path: string, options: SolveOptions = {}): Solution | ModalSolution {
+    const request =
+        options.out === undefined && options.analysis === undefined && options.modes === undefined
+            ? undefined
+            : JSON.stringify({ out: options.out, analysis: options.analysis, modes: options.modes });
+    return decode<Solution | ModalSolution>(() =>
+        request === undefined ? binding('solve').solve(path) : binding('solve').solve(path, request),
+    );
+}
+
+/** Exports a solved document. */
+export function exportDocument(path: string, format: ExportFormat, target: string): ExportReport {
+    return decode<ExportReport>(() => binding('export').export(path, format, target));
+}
+
+/** Solves a document and returns the full report. */
+export function report(path: string): Report {
+    return decode<Report>(() => binding('report').report(path));
+}

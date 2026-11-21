@@ -1,0 +1,53 @@
+{
+    "name": "@wae/open-cae",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Truss linear-static analysis on one native model",
+    "license": "MPL-2.0",
+    "type": "module",
+    "engines": {
+        "node": ">=22.6"
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+        "open-cae": "./dist/cli.js"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "locales"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "keywords": [
+        "cae",
+        "fea",
+        "truss",
+        "structural-analysis",
+        "wae"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nyar-os/OpenCAE.git",
+        "directory": "projects/packages/open-cae"
+    },
+    "devDependencies": {
+        "@types/node": "^22.20.4",
+        "typescript": "^5.9.2"
+    },
+    "optionalDependencies": {
+        "@wae/open-cae-darwin-arm64": "workspace:*",
+        "@wae/open-cae-darwin-x64": "workspace:*",
+        "@wae/open-cae-linux-arm64": "workspace:*",
+        "@wae/open-cae-linux-x64": "workspace:*",
+        "@wae/open-cae-win32-x64": "workspace:*"
+    }
+}

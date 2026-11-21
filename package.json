@@ -1,0 +1,31 @@
+{
+    "name": "open-cae-workspace",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@10.28.0",
+    "description": "OpenCAE workspace: truss linear-static analysis on one native model",
+    "keywords": ["cae", "fea", "truss", "structural-analysis", "wae"],
+    "license": "MPL-2.0",
+    "repository": "https://github.com/nyar-os/OpenCAE",
+    "scripts": {
+        "build": "wae build",
+        "build:rust": "cargo build --workspace",
+        "doc": "cargo doc --no-deps --all-features",
+        "test": "cargo test --release",
+        "test:cae": "cargo test -p cae-model --offline",
+        "fmt": "cargo fmt --all",
+        "check:rust": "cargo clippy -p cae-model -p open-cae-napi --all-targets -- -D warnings && cargo test -p cae-model --offline",
+        "build:napi": "wae native build",
+        "build:ts": "pnpm --filter @wae/open-cae run build",
+        "stage:native": "wae native stage",
+        "typecheck": "pnpm -r --filter \"./projects/packages/*\" run typecheck",
+        "p": "git push && git push --tags --prune",
+        "reset": "git reset Head~ --soft",
+        "u": "cargo upgrade --workspace"
+    },
+    "devDependencies": {
+        "@types/node": "^22.20.4",
+        "@wae/wae": "0.0.6",
+        "typescript": "^5.9.2"
+    }
+}

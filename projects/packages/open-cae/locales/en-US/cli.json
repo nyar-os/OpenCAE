@@ -1,0 +1,55 @@
+{
+    "cli": {
+        "intro": "ocae - OpenCAE truss/beam linear-static and modal solver (2D/3D)",
+        "usage": [
+            "Usage:",
+            "  ocae create <file.ocae> [--units mm|m] [--dimension 2|3]",
+            "  ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]",
+            "  ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]",
+            "                    [--kind truss|beam] [--I <I>] [--w <w>]",
+            "  ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]",
+            "  ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]",
+            "  ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]",
+            "  ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]",
+            "  ocae self-weight <file> --g <g> [--axis x|y|z]",
+            "  ocae validate <file>",
+            "  ocae solve <file> [--out report.json] [--analysis static|modal] [--modes N] [--element truss|beam] [--dimension 2|3]",
+            "  ocae modal <file> [--modes N] [--out report.json]",
+            "  ocae export <file> --format csv|vtk|md --out <dir|file>",
+            "  ocae report <file>",
+            "  ocae capabilities"
+        ],
+        "exit": "Exit codes: 0 success, 1 input/validation error, 2 capability not implemented",
+        "message": {
+            "created": "created {path} ({units}, dimension {dimension})",
+            "nodeAdded": "node `{id}` added (z={z}, revision {revision})",
+            "elementAdded": "element `{id}` added (revision {revision})",
+            "materialSet": "material set: E={youngsModulus} A={area} density={density} (revision {revision})",
+            "supportAdded": "support `{node}` added (dx={dx}, dy={dy}, dz={dz}, rz={rz}, revision {revision})",
+            "loadAdded": "load `{node}` added (revision {revision})",
+            "gravitySet": "gravity set: gx={gx} gy={gy} gz={gz} (revision {revision})",
+            "exported": "exported {format} to {path}"
+        },
+        "error": {
+            "unknownCommand": "unknown command `{command}`; run --help for usage",
+            "unknownGroup": "unknown command `{group} {action}`",
+            "unknownSubcommand": "`{group}` has no subcommand `{action}`; only `{expected}` is supported",
+            "missingSubcommand": "`{group}` needs a subcommand; only `{expected}` is supported",
+            "missingArgument": "missing argument: {usage}",
+            "missingOption": "missing required option `{option}`",
+            "missingValue": "`{option}` needs a value",
+            "unknownOption": "unknown option `{option}`",
+            "invalidNumber": "`{option}` value `{value}` is not a number",
+            "invalidUnits": "unsupported unit `{value}`; use `mm` or `m`",
+            "invalidDimension": "unknown dimension `{value}`; only 2 or 3 is supported",
+            "unknownFormat": "unknown export format `{format}`; only csv, vtk or md is supported",
+            "unknownAnalysis": "unknown analysis `{value}`; only static or modal is supported",
+            "unknownElement": "unknown element type `{value}`; only truss or beam is supported",
+            "unknownAxis": "unknown gravity axis `{value}`; use `x`, `y` or `z`",
+            "invalidModes": "`--modes` value `{value}` is not a positive integer",
+            "modesRequireModal": "`--modes` only applies to `--analysis modal`",
+            "dimensionMismatch": "`--dimension {requested}` does not match document dimension {dimension}; change the document or drop the option",
+            "noFreedom": "specify at least one of `--dx`, `--dy`, `--dz` or `--rz`, otherwise the support constrains nothing"
+        }
+    }
+}

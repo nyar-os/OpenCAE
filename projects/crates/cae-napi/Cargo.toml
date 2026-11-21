@@ -1,0 +1,16 @@
+[package]
+name = "open-cae-napi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Thin Node-API surface for OpenCAE"
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cae-model = { path = "../cae-model" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wae = { workspace = true }
