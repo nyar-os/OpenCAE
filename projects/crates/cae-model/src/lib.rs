@@ -9,6 +9,7 @@
 //!   stiffness, uniform transverse loads and endpoint moments;
 //! * linear elastic material behaviour and a single static load case;
 //! * self-weight body loads;
+//! * prescribed (enforced) nodal displacements and support settlements;
 //! * modal analysis with a diagonal (lumped) mass matrix and a symmetric
 //!   Jacobi eigen-solver;
 //! * linear buckling of two- and three-dimensional truss models and
@@ -36,7 +37,10 @@ mod validate;
 pub use crate::{
     error::CaeError,
     export::{export_csv, export_md, export_vtk, write_atomic},
-    model::{Element, ElementKind, ElementMaterial, FORMAT, Load, Material, Model, Node, Support, Units, VERSION},
+    model::{
+        Element, ElementKind, ElementMaterial, FORMAT, Load, Material, Model, Node, PrescribedDisplacement, Support, Units,
+        VERSION,
+    },
     session::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
     },
@@ -63,6 +67,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "frame3d": "unsupported",
     "modal": "supported",
     "selfWeight": "supported",
+    "prescribedDisplacement": "supported",
     "nonlinear": "unsupported",
     "buckling": "supported",
     "thermal": "unsupported"

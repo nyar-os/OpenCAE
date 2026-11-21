@@ -179,6 +179,32 @@ pub struct Element {
     pub distributed_load: Option<f64>,
 }
 
+/// Enforced (prescribed) values of the constrained degrees of freedom of a
+/// support.
+///
+/// Every component applies only when the matching [`Support`] flag (`dx`, `dy`,
+/// `dz`, `rz`) is `true`; components left out of the document default to `0`,
+/// which is the ordinary homogeneous constraint. Values use the document units
+/// and the rotation is in radians. A non-zero value therefore models a support
+/// settlement or an explicitly driven displacement.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrescribedDisplacement {
+    /// Enforced translation along X (requires `dx`).
+    #[serde(default)]
+    pub ux: f64,
+    /// Enforced translation along Y (requires `dy`).
+    #[serde(default)]
+    pub uy: f64,
+    /// Enforced translation along Z (requires `dz`; three dimensions only).
+    #[serde(default)]
+    pub uz: f64,
+    /// Enforced rotation about Z in radians (requires `rz`; beam nodes in two
+    /// dimensions only).
+    #[serde(default)]
+    pub rz: f64,
+}
+
 /// Support conditions of a node. `true` means that degree of freedom is fixed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,6 +224,12 @@ pub struct Support {
     /// only at nodes touched by at least one beam element.
     #[serde(default)]
     pub rz: bool,
+    /// Enforced non-zero values of the constrained degrees of freedom.
+    ///
+    /// `None` is the ordinary zero constraint and is omitted from the JSON, so
+    /// documents written by older builds load unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prescribed: Option<PrescribedDisplacement>,
 }
 
 /// Concentrated nodal load.
@@ -524,7 +556,84 @@ impl Model {
             support.rz |= rz;
         }
         else {
-            self.supports.push(Support { node, dx, dy, dz, rz });
+            self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None });
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Enforces (prescribes) non-zero displacement values at a support node.
+    ///
+    /// Supplying a component also constrains the matching degree of freedom, so
+    /// `prescribe_displacement("n2", Some(0.5), ..)` implies a `dx` support on
+    /// `n2` with `ux = 0.5`. Components not supplied keep their previous value.
+    /// An unknown node is rejected with `support/unknown-node`; a non-zero `uz`
+    /// in a two-dimensional document or a non-zero rotation in a
+    /// three-dimensional document is rejected with
+    /// `document/dimension-mismatch`. Callers receive `support/no-freedom` when
+    /// no component is supplied.
+    pub fn prescribe_displacement(
+        &mut self,
+        node: impl Into<String>,
+        ux: Option<f64>,
+        uy: Option<f64>,
+        uz: Option<f64>,
+        rz: Option<f64>,
+    ) -> Result<(), CaeError> {
+        let node = node.into();
+        if ux.is_none() && uy.is_none() && uz.is_none() && rz.is_none() {
+            return Err(CaeError::new(
+                "support/no-freedom",
+                "specify at least one of ux, uy, uz or rz; otherwise no displacement is prescribed",
+            ));
+        }
+        if self.node(&node).is_none() {
+            return Err(CaeError::new("support/unknown-node", format!("support references unknown node `{node}`")));
+        }
+        if [ux, uy, uz, rz].into_iter().flatten().any(|value| !value.is_finite()) {
+            return Err(CaeError::new("support/invalid-prescribed", "prescribed displacements must be finite"));
+        }
+        if self.dimension != 3 && uz.is_some_and(|value| value != 0.0) {
+            return Err(dimension_mismatch(format!(
+                "a two-dimensional document cannot prescribe a Z displacement for node `{node}`; set dimension to 3 first"
+            )));
+        }
+        if self.dimension == 3 && rz.is_some_and(|value| value != 0.0) {
+            return Err(dimension_mismatch(format!(
+                "a three-dimensional document cannot prescribe an rz rotation for node `{node}`; beam elements are two-dimensional only"
+            )));
+        }
+        let position = match self.supports.iter().position(|support| support.node == node) {
+            Some(position) => position,
+            None => {
+                self.supports.push(Support {
+                    node: node.clone(),
+                    dx: false,
+                    dy: false,
+                    dz: false,
+                    rz: false,
+                    prescribed: None,
+                });
+                self.supports.len() - 1
+            }
+        };
+        let support = &mut self.supports[position];
+        let prescribed = support.prescribed.get_or_insert_with(PrescribedDisplacement::default);
+        if let Some(value) = ux {
+            support.dx = true;
+            prescribed.ux = value;
+        }
+        if let Some(value) = uy {
+            support.dy = true;
+            prescribed.uy = value;
+        }
+        if let Some(value) = uz {
+            support.dz = true;
+            prescribed.uz = value;
+        }
+        if let Some(value) = rz {
+            support.rz = true;
+            prescribed.rz = value;
         }
         self.bump_revision();
         Ok(())

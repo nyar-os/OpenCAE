@@ -385,6 +385,29 @@ impl OpenCae {
         self.edit(|model| model.add_support_full(node, dx, dy, dz, rz))
     }
 
+    /// Prescribes (enforces) non-zero displacement values at a support node and
+    /// saves the document.
+    ///
+    /// Supplying a component constrains the matching degree of freedom, so
+    /// `prescribe_displacement("n2", Some(0.5), None, None, None)` creates or
+    /// updates a support with `dx = true` and `ux = 0.5`.
+    pub fn prescribe_displacement(
+        &mut self,
+        node: &str,
+        ux: Option<f64>,
+        uy: Option<f64>,
+        uz: Option<f64>,
+        rz: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        if ux.is_none() && uy.is_none() && uz.is_none() && rz.is_none() {
+            return Err(CaeError::new(
+                "support/no-freedom",
+                "specify at least one of ux, uy, uz or rz; otherwise no displacement is prescribed",
+            ));
+        }
+        self.edit(|model| model.prescribe_displacement(node, ux, uy, uz, rz))
+    }
+
     /// Adds or updates a concentrated load and saves the document.
     pub fn add_load(
         &mut self,

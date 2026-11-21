@@ -267,6 +267,7 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["solver"]["frame3d"], "unsupported");
     assert_eq!(capabilities["solver"]["modal"], "supported");
     assert_eq!(capabilities["solver"]["selfWeight"], "supported");
+    assert_eq!(capabilities["solver"]["prescribedDisplacement"], "supported");
     assert_eq!(capabilities["solver"]["nonlinear"], "unsupported");
     assert_eq!(capabilities["solver"]["buckling"], "supported");
     assert_eq!(capabilities["solver"]["thermal"], "unsupported");

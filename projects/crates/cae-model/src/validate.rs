@@ -251,6 +251,50 @@ impl Model {
                     ));
                 }
             }
+            if let Some(prescribed) = &support.prescribed {
+                let components =
+                    [("ux", support.dx, prescribed.ux), ("uy", support.dy, prescribed.uy), ("rz", support.rz, prescribed.rz)];
+                for (name, constrained, value) in components {
+                    if !value.is_finite() {
+                        report.push(check_error(
+                            "support/invalid-prescribed",
+                            format!("prescribed `{name}` of node `{}` must be finite", support.node),
+                        ));
+                    }
+                    else if value != 0.0 && !constrained {
+                        report.push(check_error(
+                            "support/prescribed-unconstrained",
+                            format!(
+                                "node `{}` prescribes {name}={value}, but the matching support flag is not set",
+                                support.node
+                            ),
+                        ));
+                    }
+                }
+                if prescribed.uz != 0.0 {
+                    if self.dimension != 3 {
+                        report.push(check_error(
+                            "document/dimension-mismatch",
+                            format!("node `{}` in a two-dimensional document cannot prescribe a Z displacement (uz); set dimension to 3 for 3D models", support.node),
+                        ));
+                    }
+                    else if !support.dz {
+                        report.push(check_error(
+                            "support/prescribed-unconstrained",
+                            format!(
+                                "node `{}` prescribes uz={}, but the matching support flag is not set",
+                                support.node, prescribed.uz
+                            ),
+                        ));
+                    }
+                }
+                if self.dimension == 3 && prescribed.rz != 0.0 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!("node `{}` in a three-dimensional document cannot prescribe an rz rotation; beam elements are two-dimensional only", support.node),
+                    ));
+                }
+            }
         }
 
         for load in &self.loads {

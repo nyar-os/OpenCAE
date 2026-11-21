@@ -155,6 +155,32 @@ fn session_solves_buckling_and_writes_the_json_report() {
 }
 
 #[test]
+fn session_prescribes_a_displacement_and_solves_the_settled_model() {
+    let directory = temporary_dir("prescribed");
+    let path = directory.join("bar.ocae");
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.create(&path, OpenCaeOptions::default()).expect("create");
+    session.add_node("n1", 0.0, 0.0, None).expect("n1");
+    session.add_node("n2", 1000.0, 0.0, None).expect("n2");
+    session.add_element("e1", "n1", "n2", None, None).expect("element");
+    session.add_support("n1", true, true, false).expect("fixed end");
+    session.add_support("n2", false, true, false).expect("lateral guide");
+    session.prescribe_displacement("n2", Some(0.5), None, None, None).expect("prescribed displacement");
+
+    let solution = session.solve(None).expect("solve");
+    let tip = solution.nodes.iter().find(|node| node.id == "n2").expect("n2 result");
+    assert_close(tip.ux, 0.5, 1e-12);
+    let expected_force = 210_000.0 * 100.0 * 0.5 / 1000.0;
+    let fixed = solution.reactions.iter().find(|reaction| reaction.node == "n1").expect("fixed reaction");
+    assert_close(fixed.fx, -expected_force, 1e-12);
+
+    assert_eq!(
+        session.prescribe_displacement("n2", None, None, None, None).expect_err("no component").code,
+        "support/no-freedom"
+    );
+}
+
+#[test]
 fn session_reports_stable_codes_for_invalid_operations() {
     let directory = temporary_dir("errors");
     let path = directory.join("demo.ocae");

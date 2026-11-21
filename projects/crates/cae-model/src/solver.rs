@@ -350,6 +350,9 @@ struct System {
     stiffness: Vec<f64>,
     forces: Vec<f64>,
     constrained: Vec<bool>,
+    /// Enforced displacement of every constrained degree of freedom; `0` for
+    /// ordinary homogeneous supports.
+    prescribed: Vec<f64>,
     elements: Vec<AssemblyElement>,
 }
 
@@ -367,7 +370,17 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
     let size = system.layout.size;
     let free: Vec<usize> = (0..size).filter(|&dof| !constrained(&system, dof)).collect();
     let free_count = free.len();
-    let (reduced, reduced_forces) = reduce(&system, &free);
+    let (reduced, mut reduced_forces) = reduce(&system, &free);
+    // Non-zero prescribed displacements contribute `−K_fc · u_c` to the free
+    // right-hand side. With all prescribed values zero this term vanishes and
+    // the homogeneous behaviour is unchanged.
+    for (row, &row_dof) in free.iter().enumerate() {
+        for (column, &value) in system.prescribed.iter().enumerate() {
+            if value != 0.0 {
+                reduced_forces[row] -= system.stiffness[row_dof * size + column] * value;
+            }
+        }
+    }
     let free_displacements = solve_dense(reduced, reduced_forces, free_count).map_err(|()| {
         CaeError::new(
             "model/mechanism",
@@ -375,7 +388,7 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
         )
     })?;
 
-    let mut displacement = vec![0.0; size];
+    let mut displacement = system.prescribed.clone();
     for (index, &dof) in free.iter().enumerate() {
         displacement[dof] = free_displacements[index];
     }
@@ -1061,6 +1074,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
     }
 
     let mut constrained = vec![false; size];
+    let mut prescribed = vec![0.0; size];
     for support in &model.supports {
         let Some(&node) = index.get(support.node.as_str())
         else {
@@ -1084,9 +1098,28 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
         if layout.uses_rotation && support.rz {
             mark(base + 2);
         }
+        if let Some(values) = &support.prescribed {
+            let mut assign = |slot: usize, value: f64| {
+                if let Some(dof) = layout.index.get(slot).copied().flatten() {
+                    prescribed[dof] = value;
+                }
+            };
+            if support.dx {
+                assign(base, values.ux);
+            }
+            if support.dy {
+                assign(base + 1, values.uy);
+            }
+            if model.dimension == 3 && support.dz {
+                assign(base + 2, values.uz);
+            }
+            if layout.uses_rotation && support.rz {
+                assign(base + 2, values.rz);
+            }
+        }
     }
 
-    Ok(System { layout, stiffness, forces, constrained, elements })
+    Ok(System { layout, stiffness, forces, constrained, prescribed, elements })
 }
 
 fn reduce(system: &System, free: &[usize]) -> (Vec<f64>, Vec<f64>) {
