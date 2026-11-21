@@ -14,7 +14,7 @@ use std::{
 use cae_model::{CaeError, ElementKind, ExportFormat, OpenCae, OpenCaeOptions, Units, not_implemented};
 
 const USAGE: &str = "\
-ocae - OpenCAE truss/beam linear-static and modal solver (2D/3D)
+ocae - OpenCAE truss/beam linear-static, modal and buckling solver (2D/3D)
 
 Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]

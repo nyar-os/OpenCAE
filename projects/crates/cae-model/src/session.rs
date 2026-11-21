@@ -545,7 +545,7 @@ pub fn not_implemented(feature: &str) -> CaeError {
     CaeError::new(
         "capability/not-implemented",
         format!(
-            "{feature} is not implemented; this build supports 2D truss/beam, 3D truss, linear static, modal and self-weight analysis (truss2d/beam2d/truss3d/modal)"
+            "{feature} is not implemented; this build supports 2D truss/beam, 3D truss, linear static, modal, self-weight and linear buckling analysis (truss2d/beam2d/truss3d/modal/buckling)"
         ),
     )
 }
