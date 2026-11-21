@@ -13,7 +13,8 @@
 //!   (`α·ΔT`) and the matching equivalent nodal loads;
 //! * prescribed (enforced) nodal displacements and support settlements;
 //! * modal analysis with a diagonal (lumped) mass matrix and a symmetric
-//!   Jacobi eigen-solver;
+//!   Jacobi eigen-solver, including steady-state harmonic (frequency-response)
+//!   sweeps by modal superposition;
 //! * linear buckling of two- and three-dimensional truss models and
 //!   two-dimensional beam models using a geometric stiffness assembled from
 //!   the static axial forces, including per-load-combination buckling;
@@ -24,11 +25,11 @@
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
-//! Three-dimensional beams, frames, nonlinear analysis, temperature gradients,
-//! heat transfer, contact and solver-specific import formats (Abaqus `.inp`,
-//! STEP, ...) are **not** implemented. See [`CAPABILITIES_JSON`] for the
-//! machine-readable capability matrix and the repository Readme for the user
-//! facing description.
+//! Three-dimensional beams, frames, material nonlinearity, temperature
+//! gradients, heat transfer, contact and solver-specific import formats
+//! (Abaqus `.inp`, STEP, ...) are **not** implemented. See [`CAPABILITIES_JSON`]
+//! for the machine-readable capability matrix and the repository Readme for the
+//! user facing description.
 
 #![deny(missing_docs)]
 
@@ -57,16 +58,17 @@ pub use crate::{
         COMBINATION_REPORT_FORMAT, COMBINATION_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution,
         DEFLECTION_REPORT_FORMAT, DEFLECTION_REPORT_VERSION, DeflectionGoverning, DeflectionSolution, DeflectionStation,
         ElementDeflection, ElementDiagram, ElementEnvelope, ElementResult, ElementStress, EndForces, EnvelopeValue,
-        ForceResultant, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution,
+        FREQUENCY_RESPONSE_REPORT_FORMAT, FREQUENCY_RESPONSE_REPORT_VERSION, ForceResultant, FrequencyResponsePoint,
+        FrequencyResponseSolution, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution,
         LOAD_CASE_REPORT_FORMAT, LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT,
         MATRIX_REPORT_VERSION, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MatrixDof, MaxAxialForce, MaxMoment, ModalSolution,
         Mode, ModeShape, NODAL_STRESS_REPORT_FORMAT, NODAL_STRESS_REPORT_VERSION, NodalStressGoverning, NodalStressSolution,
-        NodeDisplacement, NodeEnvelope, NodeReaction, NodeStress, REPORT_FORMAT, REPORT_VERSION,
+        NodeDisplacement, NodeEnvelope, NodeFrequencyResponse, NodeReaction, NodeStress, REPORT_FORMAT, REPORT_VERSION,
         RESPONSE_SPECTRUM_REPORT_FORMAT, RESPONSE_SPECTRUM_REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution,
         STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION, SectionForces, Solution, SpectrumMode, SpectrumPoint, StationStress,
         StressGoverning, StressSolution, SupportReaction, SystemMatrices, solve, solve_buckling, solve_buckling_combinations,
-        solve_combinations, solve_deflection, solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress,
-        solve_response_spectrum, solve_stress, summarize_load_cases,
+        solve_combinations, solve_deflection, solve_frequency_response, solve_internal_forces, solve_matrices, solve_modal,
+        solve_nodal_stress, solve_response_spectrum, solve_stress, summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -100,6 +102,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "inclinedSupports": "supported",
     "matrixExport": "supported",
     "responseSpectrum": "supported",
+    "frequencyResponse": "supported",
     "thermalExpansion": "supported",
     "thermalGradient": "supported",
     "partialSpanLoad": "supported",

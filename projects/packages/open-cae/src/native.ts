@@ -41,6 +41,7 @@ export interface NativeBinding {
     load_cases(path: string, requestJson?: string): string;
     matrices(path: string, requestJson?: string): string;
     response_spectrum(path: string, requestJson: string): string;
+    frequency_response(path: string, requestJson: string): string;
     export(path: string, format: string, target: string): string;
     report(path: string): string;
 }

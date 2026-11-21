@@ -24,6 +24,8 @@ import type {
     ElementReleaseRequest,
     ExportFormat,
     ExportReport,
+    FrequencyResponseOptions,
+    FrequencyResponseSolution,
     GravitySetRequest,
     InternalForceOptions,
     InternalForceSolution,
@@ -267,6 +269,12 @@ export class CaeDocument {
     responseSpectrum(options: ResponseSpectrumOptions): ResponseSpectrumSolution {
         this.assertOpen();
         return service.responseSpectrum(this.path, options);
+    }
+
+    /** Solves the steady-state harmonic response over a frequency sweep. */
+    frequencyResponse(options: FrequencyResponseOptions): FrequencyResponseSolution {
+        this.assertOpen();
+        return service.frequencyResponse(this.path, options);
     }
 
     /** Solves the document and returns the full report. */

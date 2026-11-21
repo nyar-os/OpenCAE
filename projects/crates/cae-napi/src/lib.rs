@@ -666,6 +666,36 @@ fn matrices(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Solves the steady-state harmonic response over a frequency sweep.
+///
+/// The request accepts required `damping`, `startHz` and `endHz`, optional
+/// `modes` (default 5), `axis` (`"x"`, `"y"` or `"z"`, default `"x"`),
+/// `points` (default 101) and an optional `out` path. The static load vector of
+/// the document is treated as the harmonic excitation.
+#[function]
+fn frequency_response(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let modes = usize::try_from(request.get("modes").and_then(Value::as_u64).unwrap_or(5))
+        .map_err(|_| argument_error("`modes` must be a positive integer"))?;
+    let axis = match request.get("axis").and_then(Value::as_str).unwrap_or("x") {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        other => return Err(argument_error(&format!("`axis` must be `x`, `y` or `z`, not `{other}`"))),
+    };
+    let damping = required_number_field(&request, "damping")?;
+    let start = required_number_field(&request, "startHz")?;
+    let end = required_number_field(&request, "endHz")?;
+    let points = usize::try_from(request.get("points").and_then(Value::as_u64).unwrap_or(101))
+        .map_err(|_| argument_error("`points` must be a positive integer"))?;
+    let out = request.get("out").and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.frequency_response(modes, axis, damping, start, end, points, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Exports a solved document as `csv`, `vtk` or `md`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
@@ -717,6 +747,7 @@ register_module![
     load_cases,
     matrices,
     response_spectrum,
+    frequency_response,
     export,
     report
 ];

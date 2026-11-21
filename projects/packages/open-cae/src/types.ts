@@ -577,6 +577,65 @@ export interface ResponseSpectrumOptions {
     readonly out?: string;
 }
 
+/** Steady-state response at one sampled excitation frequency. */
+export interface FrequencyResponsePoint {
+    /** Excitation frequency in hertz. */
+    readonly frequencyHz: number;
+    /** Largest translational displacement amplitude over all nodes. */
+    readonly maxAmplitude: number;
+    /** Node that carries `maxAmplitude`. */
+    readonly governingNode: string;
+}
+
+/** Peak steady-state response of one node over the sampled range. */
+export interface NodeFrequencyResponse {
+    readonly node: string;
+    /** Sampled frequency that produced `maxAmplitude`. */
+    readonly peakFrequencyHz: number;
+    readonly maxAmplitude: number;
+}
+
+/** Result of `frequencyResponse()`. */
+export interface FrequencyResponseSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Analysed global direction (`x`, `y` or `z`). */
+    readonly axis: string;
+    /** Requested number of modes. */
+    readonly requested: number;
+    /** Modal damping ratio applied to every mode. */
+    readonly dampingRatio: number;
+    readonly startHz: number;
+    readonly endHz: number;
+    /** Number of equally spaced sampled frequencies, including both ends. */
+    readonly points: number;
+    /** Steady-state amplitude at every sampled frequency. */
+    readonly sweep: readonly FrequencyResponsePoint[];
+    /** Sampled frequency with the largest amplitude. */
+    readonly peak: FrequencyResponsePoint;
+    /** Peak amplitude of every node over the sampled range. */
+    readonly nodes: readonly NodeFrequencyResponse[];
+}
+
+/** Options of `frequencyResponse()`. */
+export interface FrequencyResponseOptions {
+    /** Number of modes; defaults to 5. */
+    readonly modes?: number;
+    /** Global direction of the harmonic excitation; defaults to `x`. */
+    readonly axis?: 'x' | 'y' | 'z';
+    /** Modal damping ratio applied to every mode; must be positive. */
+    readonly damping: number;
+    /** First sampled frequency in hertz. */
+    readonly startHz: number;
+    /** Last sampled frequency in hertz; must be greater than `startHz`. */
+    readonly endHz: number;
+    /** Number of equally spaced samples; defaults to 101. */
+    readonly points?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

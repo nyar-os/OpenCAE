@@ -24,6 +24,8 @@ import type {
     ElementReleaseRequest,
     ExportFormat,
     ExportReport,
+    FrequencyResponseOptions,
+    FrequencyResponseSolution,
     GravitySetRequest,
     InternalForceOptions,
     InternalForceSolution,
@@ -301,6 +303,29 @@ export function responseSpectrum(path: string, options: ResponseSpectrumOptions)
                 modes: options.modes,
                 axis: options.axis,
                 spectrum: options.spectrum,
+                out: options.out,
+            }),
+        ),
+    );
+}
+
+/** Solves the steady-state harmonic response over a frequency sweep. */
+export function frequencyResponse(path: string, options: FrequencyResponseOptions): FrequencyResponseSolution {
+    if (!(options.damping > 0)) {
+        throw new OpenCAEError('session/argument-invalid', '`damping` must be a positive ratio', {
+            details: { feature: 'frequency.response' },
+        });
+    }
+    return decode<FrequencyResponseSolution>(() =>
+        binding('frequency.response').frequency_response(
+            path,
+            JSON.stringify({
+                modes: options.modes,
+                axis: options.axis,
+                damping: options.damping,
+                startHz: options.startHz,
+                endHz: options.endHz,
+                points: options.points,
                 out: options.out,
             }),
         ),

@@ -79,6 +79,12 @@ pub const RESPONSE_SPECTRUM_REPORT_VERSION: u32 = 1;
 /// Format tag of the response-spectrum JSON report.
 pub const RESPONSE_SPECTRUM_REPORT_FORMAT: &str = "open-cae-response-spectrum-report";
 
+/// Version of the JSON report produced by [`solve_frequency_response`].
+pub const FREQUENCY_RESPONSE_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the harmonic frequency-response JSON report.
+pub const FREQUENCY_RESPONSE_REPORT_FORMAT: &str = "open-cae-frequency-response-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -392,6 +398,60 @@ pub struct ResponseSpectrumSolution {
     pub nodes: Vec<NodeDisplacement>,
     /// Nodal displacement with the largest SRSS magnitude.
     pub max_displacement: NodeDisplacement,
+}
+
+/// Steady-state response of the model at one excitation frequency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrequencyResponsePoint {
+    /// Excitation frequency in hertz.
+    pub frequency_hz: f64,
+    /// Largest translational displacement amplitude over all nodes.
+    pub max_amplitude: f64,
+    /// Node that carries `max_amplitude`.
+    pub governing_node: String,
+}
+
+/// Peak steady-state response of one node over the sampled frequency range.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeFrequencyResponse {
+    /// Node identifier.
+    pub node: String,
+    /// Sampled frequency that produced `max_amplitude`.
+    pub peak_frequency_hz: f64,
+    /// Largest translational displacement amplitude of the node.
+    pub max_amplitude: f64,
+}
+
+/// Result of [`solve_frequency_response`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrequencyResponseSolution {
+    /// Report format tag, always `open-cae-frequency-response-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Analysed global direction (`x`, `y` or `z`).
+    pub axis: String,
+    /// Requested number of modes.
+    pub requested: usize,
+    /// Modal damping ratio applied to every mode.
+    pub damping_ratio: f64,
+    /// First sampled frequency in hertz.
+    pub start_hz: f64,
+    /// Last sampled frequency in hertz.
+    pub end_hz: f64,
+    /// Number of equally spaced sampled frequencies, including both ends.
+    pub points: usize,
+    /// Steady-state amplitude at every sampled frequency.
+    pub sweep: Vec<FrequencyResponsePoint>,
+    /// Sampled frequency with the largest amplitude.
+    pub peak: FrequencyResponsePoint,
+    /// Peak amplitude of every node over the sampled range.
+    pub nodes: Vec<NodeFrequencyResponse>,
 }
 
 /// One linear buckling mode.
@@ -1630,6 +1690,224 @@ fn interpolate_spectrum(points: &[SpectrumPoint], period: f64) -> f64 {
         }
     }
     points.last().map(|point| point.acceleration).unwrap_or(0.0)
+}
+
+/// Solves the steady-state harmonic response of a model by modal
+/// superposition.
+///
+/// The applied static load vector of the document (nodal forces, element
+/// distributed loads, self-weight and thermal actions) is treated as a
+/// harmonic excitation `f(t) = f·sin(ω·t)` in the requested global direction,
+/// so the modal force of mode `r` is `p_r = φ_rᵀ·f` with the mass-normalized
+/// shapes of [`solve_modal`]. The steady-state complex amplitude of mode `r` is
+/// `p_r / (ω_r² − ω² + 2·i·ζ·ω_r·ω)`, and the nodal amplitudes are obtained by
+/// summing the modes and taking the modulus.
+///
+/// The response is sampled at `points` equally spaced frequencies from
+/// `start_hz` to `end_hz` in hertz. Every mode uses the same viscous damping
+/// ratio `damping_ratio`, which must be strictly positive: zero damping makes
+/// the amplitude unbounded at resonance, which this build does not report.
+/// Peaks are read from the sampled frequencies, so a finer sweep resolves the
+/// peak more accurately. Models with non-zero prescribed displacements or
+/// inclined supports are rejected because the excitation vector and the modal
+/// expansion do not share a single homogeneous frame.
+pub fn solve_frequency_response(
+    model: &Model,
+    modes: usize,
+    axis: usize,
+    damping_ratio: f64,
+    start_hz: f64,
+    end_hz: f64,
+    points: usize,
+) -> Result<FrequencyResponseSolution, CaeError> {
+    if modes == 0 {
+        return Err(CaeError::new("analysis/invalid-modes", "the number of modes must be at least 1"));
+    }
+    if points < 2 {
+        return Err(CaeError::new(
+            "analysis/invalid-points",
+            format!("the frequency sweep requires at least 2 points (currently {points})"),
+        ));
+    }
+    if !start_hz.is_finite() || start_hz < 0.0 {
+        return Err(CaeError::new(
+            "analysis/invalid-range",
+            format!("the start frequency must be finite and non-negative (currently {start_hz})"),
+        ));
+    }
+    if !end_hz.is_finite() || end_hz <= start_hz {
+        return Err(CaeError::new(
+            "analysis/invalid-range",
+            format!("the end frequency must be finite and greater than the start frequency (currently {start_hz}..{end_hz})"),
+        ));
+    }
+    if !damping_ratio.is_finite() || damping_ratio <= 0.0 {
+        return Err(CaeError::new(
+            "analysis/invalid-damping",
+            format!("the modal damping ratio must be finite and positive (currently {damping_ratio})"),
+        ));
+    }
+    let translations = if model.dimension == 3 { 3 } else { 2 };
+    if axis >= translations {
+        return Err(CaeError::new(
+            "analysis/invalid-axis",
+            format!(
+                "frequency-response axis {axis} is not available in a {}-dimensional model; use axis 0 or 1",
+                model.dimension
+            ),
+        ));
+    }
+    if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
+        return Err(CaeError::new(issue.code, issue.message));
+    }
+    let has_prescribed = model.supports.iter().any(|support| {
+        support
+            .prescribed
+            .as_ref()
+            .is_some_and(|values| values.ux != 0.0 || values.uy != 0.0 || values.uz != 0.0 || values.rz != 0.0)
+    });
+    if has_prescribed {
+        return Err(CaeError::new(
+            "analysis/unsupported-boundary",
+            "frequency-response analysis requires homogeneous supports; non-zero prescribed displacements are not supported",
+        ));
+    }
+    let system = assemble(model)?;
+    if system.rotations.iter().any(Option::is_some) {
+        return Err(CaeError::new(
+            "capability/not-implemented",
+            "frequency-response analysis with inclined supports is not implemented",
+        ));
+    }
+    let excitation = system.to_global_vector(&system.forces);
+    let modal = solve_modal(model, modes)?;
+    if modal.modes.is_empty() {
+        return Err(CaeError::new(
+            "modal/no-modes",
+            "modal analysis returned no positive eigenvalue for the frequency response",
+        ));
+    }
+
+    let size = system.layout.size;
+    let mut modal_terms: Vec<(f64, f64, Vec<f64>)> = Vec::with_capacity(modal.modes.len());
+    for mode in &modal.modes {
+        if !positive_finite(mode.eigenvalue) {
+            continue;
+        }
+        let mut shape = vec![0.0; size];
+        for (node, entry) in mode.shape.iter().enumerate() {
+            let base = node * system.layout.slots;
+            if let Some(dof) = system.layout.index.get(base).copied().flatten() {
+                shape[dof] = entry.ux;
+            }
+            if let Some(dof) = system.layout.index.get(base + 1).copied().flatten() {
+                shape[dof] = entry.uy;
+            }
+            if model.dimension == 3 {
+                if let Some(dof) = system.layout.index.get(base + 2).copied().flatten() {
+                    shape[dof] = entry.uz;
+                }
+            }
+            else if system.layout.uses_rotation {
+                if let Some(dof) = system.layout.index.get(base + 2).copied().flatten() {
+                    shape[dof] = entry.rz;
+                }
+            }
+        }
+        let modal_force: f64 = shape.iter().zip(excitation.iter()).map(|(shape, force)| shape * force).sum();
+        modal_terms.push((mode.eigenvalue, modal_force, shape));
+    }
+    if modal_terms.is_empty() {
+        return Err(CaeError::new(
+            "modal/no-modes",
+            "modal analysis returned no positive eigenvalue for the frequency response",
+        ));
+    }
+
+    let step = (end_hz - start_hz) / (points - 1) as f64;
+    let mut sweep = Vec::with_capacity(points);
+    let mut node_peak = vec![(start_hz, 0.0_f64); model.nodes.len()];
+    let mut peak = FrequencyResponsePoint { frequency_hz: start_hz, max_amplitude: 0.0, governing_node: String::new() };
+    for sample in 0..points {
+        let frequency_hz = start_hz + step * sample as f64;
+        let angular = 2.0 * std::f64::consts::PI * frequency_hz;
+        let mut real = vec![0.0_f64; size];
+        let mut imaginary = vec![0.0_f64; size];
+        for (eigenvalue, modal_force, shape) in &modal_terms {
+            let natural = eigenvalue.sqrt();
+            let real_denominator = eigenvalue - angular * angular;
+            let imaginary_denominator = 2.0 * damping_ratio * natural * angular;
+            let norm = real_denominator * real_denominator + imaginary_denominator * imaginary_denominator;
+            if norm <= 0.0 {
+                return Err(CaeError::new(
+                    "analysis/invalid-damping",
+                    format!("the steady-state denominator vanished at {frequency_hz} Hz"),
+                ));
+            }
+            let scale = modal_force / norm;
+            for (dof, value) in shape.iter().enumerate() {
+                if *value == 0.0 {
+                    continue;
+                }
+                real[dof] += scale * real_denominator * value;
+                imaginary[dof] -= scale * imaginary_denominator * value;
+            }
+        }
+        let mut governing = String::new();
+        let mut max_amplitude = 0.0_f64;
+        for (node, entry) in model.nodes.iter().enumerate() {
+            let base = node * system.layout.slots;
+            let mut squares = 0.0;
+            for component in 0..translations {
+                if let Some(dof) = system.layout.index.get(base + component).copied().flatten() {
+                    squares += real[dof] * real[dof] + imaginary[dof] * imaginary[dof];
+                }
+            }
+            let magnitude = squares.sqrt();
+            if !magnitude.is_finite() {
+                return Err(CaeError::new(
+                    "analysis/non-finite-response",
+                    format!("the steady-state amplitude of node `{}` is not finite at {frequency_hz} Hz", entry.id),
+                ));
+            }
+            if magnitude > node_peak[node].1 {
+                node_peak[node] = (frequency_hz, magnitude);
+            }
+            if magnitude > max_amplitude {
+                max_amplitude = magnitude;
+                governing = entry.id.clone();
+            }
+        }
+        if max_amplitude > peak.max_amplitude {
+            peak = FrequencyResponsePoint { frequency_hz, max_amplitude, governing_node: governing.clone() };
+        }
+        sweep.push(FrequencyResponsePoint { frequency_hz, max_amplitude, governing_node: governing });
+    }
+
+    let nodes = model
+        .nodes
+        .iter()
+        .zip(node_peak)
+        .map(|(node, (peak_frequency_hz, max_amplitude))| NodeFrequencyResponse {
+            node: node.id.clone(),
+            peak_frequency_hz,
+            max_amplitude,
+        })
+        .collect();
+    Ok(FrequencyResponseSolution {
+        format: FREQUENCY_RESPONSE_REPORT_FORMAT.to_string(),
+        version: FREQUENCY_RESPONSE_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        axis: ["x", "y", "z"][axis].to_string(),
+        requested: modes,
+        damping_ratio,
+        start_hz,
+        end_hz,
+        points,
+        sweep,
+        peak,
+        nodes,
+    })
 }
 
 /// Solves the linear buckling eigenproblem `(K + λ·Kg)·φ = 0` for the lowest

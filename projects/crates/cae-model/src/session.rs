@@ -20,11 +20,12 @@ use crate::{
     library::material_preset,
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
-        BucklingCombinationSolution, BucklingSolution, CombinationSolution, DeflectionSolution, InternalForceSolution,
-        LoadCaseSummary, ModalSolution, NodalStressSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary,
-        ResponseSpectrumSolution, Solution, SpectrumPoint, StressSolution, SystemMatrices, solve, solve_buckling,
-        solve_buckling_combinations, solve_combinations, solve_deflection, solve_internal_forces, solve_matrices, solve_modal,
-        solve_nodal_stress, solve_response_spectrum, solve_stress, summarize_load_cases,
+        BucklingCombinationSolution, BucklingSolution, CombinationSolution, DeflectionSolution, FrequencyResponseSolution,
+        InternalForceSolution, LoadCaseSummary, ModalSolution, NodalStressSolution, REPORT_FORMAT, REPORT_VERSION,
+        ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumPoint, StressSolution, SystemMatrices, solve,
+        solve_buckling, solve_buckling_combinations, solve_combinations, solve_deflection, solve_frequency_response,
+        solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_response_spectrum, solve_stress,
+        summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -836,6 +837,33 @@ impl OpenCae {
         if let Some(path) = out {
             let json = serde_json::to_string_pretty(&result).map_err(|error| {
                 CaeError::new("document/serialize", format!("cannot serialize response-spectrum result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(result)
+    }
+
+    /// Solves the steady-state harmonic response over a frequency sweep by
+    /// modal superposition.
+    ///
+    /// Frequencies are in hertz and `damping_ratio` applies to every mode. When
+    /// `out` is given the JSON report is written atomically to that path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn frequency_response(
+        &self,
+        modes: usize,
+        axis: usize,
+        damping_ratio: f64,
+        start_hz: f64,
+        end_hz: f64,
+        points: usize,
+        out: Option<&Path>,
+    ) -> Result<FrequencyResponseSolution, CaeError> {
+        let model = &self.current()?.model;
+        let result = solve_frequency_response(model, modes, axis, damping_ratio, start_hz, end_hz, points)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&result).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize frequency-response result: {error}"))
             })?;
             write_atomic(path, &json)?;
         }
