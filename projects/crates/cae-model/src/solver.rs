@@ -61,6 +61,12 @@ pub const NODAL_STRESS_REPORT_VERSION: u32 = 1;
 /// Format tag of the averaged nodal-stress JSON report.
 pub const NODAL_STRESS_REPORT_FORMAT: &str = "open-cae-nodal-stress-report";
 
+/// Version of the JSON report produced by [`summarize_load_cases`].
+pub const LOAD_CASE_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the load-case summary JSON report.
+pub const LOAD_CASE_REPORT_FORMAT: &str = "open-cae-load-case-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -620,6 +626,50 @@ pub struct NodalStressSolution {
     pub governing: NodalStressGoverning,
     /// Per-node averaged stresses in model node order.
     pub nodes: Vec<NodeStress>,
+}
+
+/// One row of a load-case summary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadCaseResult {
+    /// Case name; the unfactored static solve is always called `base`.
+    pub name: String,
+    /// Factor applied to nodal and element applied loads.
+    pub loads: f64,
+    /// Factor applied to the gravity vector.
+    pub gravity: f64,
+    /// Sum of the applied external loads of this case.
+    pub applied: ForceResultant,
+    /// Largest nodal displacement magnitude.
+    pub max_displacement: f64,
+    /// Node that carries `max_displacement`.
+    pub max_displacement_node: String,
+    /// Signed axial force with the largest magnitude.
+    pub max_axial_force: f64,
+    /// Element that carries `max_axial_force`.
+    pub max_axial_element: String,
+    /// Largest absolute bending moment.
+    pub max_abs_moment: f64,
+    /// Element that carries `max_abs_moment`.
+    pub max_moment_element: String,
+    /// Total strain energy of the case.
+    pub strain_energy: f64,
+    /// `true` when `reaction + applied` is within tolerance.
+    pub balanced: bool,
+}
+
+/// Result of [`summarize_load_cases`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadCaseSummary {
+    /// Report format tag, always `open-cae-load-case-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Unfactored case followed by every stored load combination.
+    pub cases: Vec<LoadCaseResult>,
 }
 
 /// One solved load combination.
@@ -1878,6 +1928,58 @@ pub fn solve_nodal_stress(model: &Model, stations: usize) -> Result<NodalStressS
             utilization: allowable.map(|allowable| governing.max_abs_stress / allowable),
         },
         nodes,
+    })
+}
+
+fn load_case_row(name: &str, loads: f64, gravity: f64, solution: &Solution) -> LoadCaseResult {
+    LoadCaseResult {
+        name: name.to_string(),
+        loads,
+        gravity,
+        applied: solution.reaction_summary.applied,
+        max_displacement: solution.max_displacement.magnitude,
+        max_displacement_node: solution.max_displacement.id.clone(),
+        max_axial_force: solution.max_axial_force.axial_force,
+        max_axial_element: solution.max_axial_force.element.clone(),
+        max_abs_moment: solution.max_moment.moment.abs(),
+        max_moment_element: solution.max_moment.element.clone(),
+        strain_energy: solution.strain_energy,
+        balanced: solution.reaction_summary.balanced,
+    }
+}
+
+/// Builds a compact summary table of the unfactored static case and every
+/// stored load combination.
+///
+/// The unfactored solve is always the first row and is called `base` with
+/// factors `1/1`. Each combination is solved on the model scaled by its `loads`
+/// and `gravity` factors, exactly like [`solve_combinations`], and contributes
+/// one row with the applied resultant, the largest displacement and its node,
+/// the extreme axial force and bending moment with their elements, the strain
+/// energy and the reaction balance flag. The table is intended for reports and
+/// quick screening; per-element diagrams come from [`solve_internal_forces`].
+pub fn summarize_load_cases(model: &Model) -> Result<LoadCaseSummary, CaeError> {
+    let base = solve(model)?;
+    let mut cases = vec![load_case_row("base", 1.0, 1.0, &base)];
+    for combination in &model.combinations {
+        if combination.name.trim().is_empty() {
+            return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
+        }
+        if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+            return Err(CaeError::new(
+                "combination/invalid-factor",
+                format!("load combination `{}` requires finite loads and gravity factors", combination.name),
+            ));
+        }
+        let scaled = scaled_model(model, combination.loads, combination.gravity);
+        let solution = solve(&scaled)?;
+        cases.push(load_case_row(&combination.name, combination.loads, combination.gravity, &solution));
+    }
+    Ok(LoadCaseSummary {
+        format: LOAD_CASE_REPORT_FORMAT.to_string(),
+        version: LOAD_CASE_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        cases,
     })
 }
 

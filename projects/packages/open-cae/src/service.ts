@@ -28,6 +28,8 @@ import type {
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
+    LoadCaseOptions,
+    LoadCaseSummary,
     MaterialLibrary,
     MaterialPresetRequest,
     MaterialSetRequest,
@@ -268,6 +270,16 @@ export function nodalStresses(path: string, options: NodalStressOptions = {}): N
         request === undefined
             ? binding('stress.nodal').nodal_stresses(path)
             : binding('stress.nodal').nodal_stresses(path, request),
+    );
+}
+
+/** Summarises the unfactored static case and every stored load combination. */
+export function loadCases(path: string, options: LoadCaseOptions = {}): LoadCaseSummary {
+    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    return decode<LoadCaseSummary>(() =>
+        request === undefined
+            ? binding('load.cases').load_cases(path)
+            : binding('load.cases').load_cases(path, request),
     );
 }
 

@@ -459,6 +459,43 @@ export interface NodalStressOptions {
     readonly out?: string;
 }
 
+/** One row of a load-case summary. */
+export interface LoadCaseResult {
+    /** Case name; the unfactored static solve is always called `base`. */
+    readonly name: string;
+    readonly loads: number;
+    readonly gravity: number;
+    /** Sum of the applied external loads of this case. */
+    readonly applied: ForceResultant;
+    /** Largest nodal displacement magnitude. */
+    readonly maxDisplacement: number;
+    readonly maxDisplacementNode: string;
+    /** Signed axial force with the largest magnitude. */
+    readonly maxAxialForce: number;
+    readonly maxAxialElement: string;
+    /** Largest absolute bending moment. */
+    readonly maxAbsMoment: number;
+    readonly maxMomentElement: string;
+    readonly strainEnergy: number;
+    /** `true` when `reaction + applied` is within tolerance. */
+    readonly balanced: boolean;
+}
+
+/** Result of `loadCases()`. */
+export interface LoadCaseSummary {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Unfactored case followed by every stored load combination. */
+    readonly cases: readonly LoadCaseResult[];
+}
+
+/** Options of `loadCases()`. */
+export interface LoadCaseOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

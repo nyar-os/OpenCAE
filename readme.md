@@ -68,10 +68,11 @@ const forces = document.internalForces({ stations: 11 }); // N/V/M diagrams
 const stresses = document.stresses({ stations: 11 });     // sigma = N/A +/- M/S, utilization
 const deflections = document.deflections({ stations: 11 }); // local deflection/rotation + deformed coordinates
 const nodal = document.nodalStresses({ stations: 11 });     // averaged nodal stress + extremes
+const cases = document.loadCases();                          // one summary row per case/combination
 ```
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/export/report/save/close`; every edit operation writes atomically to the file.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
@@ -197,6 +198,7 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae stresses <file> [--stations N] [--out report.json]` | Recover extreme-fibre stresses, governing station and utilisation; a beam model needs a material section |
 | `ocae deflections <file> [--stations N] [--out report.json]` | Sample the deflected centreline (`axial`, `transverse`, `rotation`, deformed `x/y/z`) per element; the Hermite interpolation is completed by the exact particular solution of the member load |
 | `ocae nodal-stresses <file> [--stations N] [--out report.json]` | Average element-end stresses at shared nodes and report `meanAxialStress`, extreme fibre `minStress`/`maxStress` and the governing element |
+| `ocae load-cases <file> [--out report.json]` | Print one summary row for the unfactored `base` case and each stored combination: applied resultant, largest displacement, extreme axial force/moment and strain energy |
 | `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv`, `<dir>/elements.csv` and `<dir>/reactions.csv`; node columns include `x,y,z` and `ux,uy,uz` |
 | `ocae reactions <file> [--out report.json]` | Print per-support reactions and the global `reaction + applied` equilibrium check |
 | `ocae export <file> --format vtk --out <dir\|file.vtk>` | Write legacy ASCII VTK; points are 3D coordinates and displacements are 3D vectors |
@@ -289,6 +291,7 @@ The file is UTF-8 JSON with camelCase fields:
 | beam stress recovery and utilisation (`stresses`) | ✅ supported |
 | deflected-shape sampling (`deflections`, local deflection/rotation and deformed coordinates) | ✅ supported |
 | averaged nodal stress and extremes (`nodalStresses`) | ✅ supported |
+| load-case summary table (`loadCases`, `base` plus every combination) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
 | linear elastic spring supports (`elasticSupports`, translational and rotational stiffness) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
@@ -302,7 +305,7 @@ The file is UTF-8 JSON with camelCase fields:
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `elasticSupports`, `deflections` and `nodalStress` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` covers uniform member temperature changes only; it does not enable the `thermal` heat-transfer analysis, which remains unimplemented.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `elasticSupports`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` covers uniform member temperature changes only; it does not enable the `thermal` heat-transfer analysis, which remains unimplemented.
 
 ## Numerical methods
 
@@ -332,6 +335,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 16. **Beam end releases**: released bending rotations are statically condensed before assembly (`K_cond = K − K_er·K_rr⁻¹·K_re`, `f_cond = f − K_er·K_rr⁻¹·f_r`) so the assembled element carries no moment at the hinge. The internal released rotation is recovered from `K_rr·θ_r = f_r − K_re·d_e` before end forces are reported, which keeps `m = 0` at the released end. Releasing both ends of a member gives a moment-free (simply supported) member; a node whose beam ends are all released has no rotational degree of freedom.
 17. **Deflected shape**: `solve_deflection(model, stations)` (CLI `ocae deflections`) transforms the nodal displacements into the member frame, restores released hinge rotations, and evaluates the cubic Hermite interpolation of `(v1, θ1, v2, θ2)` plus the exact fixed-end particular solution of the linearly varying transverse load (`EI·v'''' = q(x)`, a quartic/quintic polynomial). The axial displacement adds the quadratic term of a uniform axial load. Each station reports `axial`, `transverse`, `rotation` and the deformed global `x/y/z`, so simply supported, cantilever and triangular-load cases reproduce the closed-form deflections exactly.
 18. **Nodal stress summary**: `solve_nodal_stress(model, stations)` (CLI `ocae nodal-stresses`) reuses the per-element stress recovery, routes the first and last station to the `from` and `to` nodes, and reports the arithmetic mean of the connected axial stresses, the minimum/maximum extreme-fibre stresses of the connected ends, the largest absolute value with its governing element, and the utilisation against `allowableStress`. It is a screening view of the sampled stress field, not a fibre-level integration.
+19. **Load-case summary**: `summarize_load_cases(model)` (CLI `ocae load-cases`) always solves the unfactored `base` case and then each stored combination on the same `loads`/`gravity` scaled model used by combination analysis. Each row reports the applied resultant, the largest displacement and its node, the extreme axial force and bending moment with their elements, the strain energy and the equilibrium flag, giving a compact table for reports without superseding the per-element diagrams.
 
 ## Validation and tests
 
@@ -351,6 +355,7 @@ pnpm --filter @wae/open-cae run typecheck
 - CSV/VTK/Markdown/HTML content and `.ocae` round trips.
 - `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`), cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load (`wL⁴/8EI`), triangular load (`11wL⁴/120EI`), a straight truss sample and the session JSON export.
 - `tests/nodal_stress.rs`: a cantilever end-stress average, a shared node that combines two element ends, a truss nodal stress without utilisation and the session JSON export.
+- `tests/load_cases.rs`: load/gravity factor scaling of the `base` row and combinations, a gravity-dominated case, a model without combinations and the session JSON export.
 
 `projects/crates/cae-model/tests/beam_modal.rs` asserts analytical solutions:
 

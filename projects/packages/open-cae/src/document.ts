@@ -28,6 +28,8 @@ import type {
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
+    LoadCaseOptions,
+    LoadCaseSummary,
     Material,
     MaterialPresetRequest,
     MaterialSetRequest,
@@ -243,6 +245,12 @@ export class CaeDocument {
     nodalStresses(options: NodalStressOptions = {}): NodalStressSolution {
         this.assertOpen();
         return service.nodalStresses(this.path, options);
+    }
+
+    /** Summarises the unfactored static case and every stored load combination. */
+    loadCases(options: LoadCaseOptions = {}): LoadCaseSummary {
+        this.assertOpen();
+        return service.loadCases(this.path, options);
     }
 
     /** Solves the document and returns the full report. */
