@@ -1,6 +1,6 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, load combinations, modal (with effective mass) and linear buckling analysis, plus a built-in material and parametric-section library. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, linear elastic spring supports, load combinations, modal (with effective mass) and linear buckling analysis, plus a built-in material and parametric-section library. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
@@ -70,6 +70,7 @@ const stresses = document.stresses({ stations: 11 });     // sigma = N/A +/- M/S
 - Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/reactions/internalForces/stresses/export/report/save/close`; every edit operation writes atomically to the file.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
+- `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
 
@@ -155,6 +156,14 @@ cargo run -p cae-model --bin ocae --offline -- solve beam.ocae   # roller settle
 
 For a propped cantilever with a 2 mm roller settlement the roller reaction is `3EIδ/L³` downwards, the fixed-end reaction is the opposite force and the fixed-end moment is `3EIδ/L²`; the value is asserted to relative error `1e-12` in the tests.
 
+Elastic supports use the same command without a constraint flag:
+
+```shell
+cargo run -p cae-model --bin ocae --offline -- support add beam.ocae --node n2 --ky 5000
+```
+
+For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L³ + k)` and the fixed-end reaction is `P − kδ`; the tests assert the axial bar `P/(EA/L + k)`, the tip-spring cantilever and a root rotational spring to relative error `1e-12`.
+
 ## CLI commands
 
 | Command | Description |
@@ -165,7 +174,7 @@ For a propped cantilever with a 2 mm roller settlement the roller reaction is `3
 | `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--section ...]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`) |
 | `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
 | `ocae library [--units mm\|m]` | Print the built-in material presets and supported section shapes as JSON |
-| `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]` | Add/merge support constraints; `--rz` is available only on beam nodes and `--dz` only in 3D documents. A supplied displacement clamps that degree of freedom to the given value and implies its flag |
+| `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]` | Add/merge support constraints or spring stiffness; `--rz`/`--kr` are available only on beam nodes and `--dz`/`--kz` only in 3D documents. A supplied displacement clamps that degree of freedom to the given value and implies its flag; a supplied spring leaves it free |
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
 | `ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]` | Set the gravity acceleration; the zero vector clears it |
 | `ocae self-weight <file> --g <g> [--axis x\|y\|z]` | Set the gravity acceleration along the given axis |
@@ -216,7 +225,8 @@ The file is UTF-8 JSON with camelCase fields:
     { "id": "b1", "from": "n1", "to": "n2", "kind": "beam", "inertia": 1000000.0, "distributedLoad": -2.0 }
   ],
   "supports": [
-    { "node": "n1", "dx": true, "dy": true, "dz": false, "rz": true }
+    { "node": "n1", "dx": true, "dy": true, "dz": false, "rz": true },
+    { "node": "n2", "spring": { "kx": 0.0, "ky": 5000.0, "kz": 0.0, "kr": 0.0 } }
   ],
   "loads": [
     { "node": "n2", "fx": 0.0, "fy": -1000.0, "fz": 0.0, "mz": 0.0 }
@@ -237,13 +247,13 @@ The file is UTF-8 JSON with camelCase fields:
 | `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name`, `allowableStress` (for utilisation) and `section` (parametric geometry). A section is `{ "shape": "rectangle", "width", "height" }`, `{ "shape": "circle", "diameter" }` or `{ "shape": "i", "depth", "flangeWidth", "flangeThickness", "webThickness" }`; when present it supplies the strong-axis inertia for beams that omit `inertia` |
 | `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
 | `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` or a material `section` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying) |
-| `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged |
+| `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged. Optional `spring: { kx, ky, kz, kr }` adds linear elastic stiffness (force/length, moment/radian) and leaves the matching degree of freedom free; `kz` is 3D-only and `kr` is 2D beam-node-only |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
 | `gravity` | Optional `[gx, gy, gz]`; when set, self-weight is applied from the density |
 | `combinations` | Optional list of `{ name, loads, gravity }` linear combinations; `loads` multiplies nodal and element applied loads (default 1), `gravity` multiplies self-weight (default 0). Names must be unique and factors finite |
 | `revision` | Edit counter incremented by CLI modifications; may be 0 |
 
-**Dimension consistency**: if a `dimension: 2` document contains a non-zero `z`, `dz: true`, a non-zero `fz` or a non-zero `gz`, validation returns a `document/dimension-mismatch` error (edit commands also reject it before writing) instead of silently ignoring those values. 3D documents do not allow `beam` elements, `rz: true` or a non-zero `mz` (returning `capability/not-implemented` or `document/dimension-mismatch`). `rz`/`mz` may only be used on nodes connected by beam elements; otherwise `support/inactive-dof` / `load/inactive-dof` is reported. A `prescribed` value must be finite and its matching flag must be `true`, otherwise `support/invalid-prescribed` or `support/prescribed-unconstrained` is reported; a non-zero `prescribed.uz` in 2D or `prescribed.rz` in 3D is a `document/dimension-mismatch`.
+**Dimension consistency**: if a `dimension: 2` document contains a non-zero `z`, `dz: true`, a non-zero `fz` or a non-zero `gz`, validation returns a `document/dimension-mismatch` error (edit commands also reject it before writing) instead of silently ignoring those values. 3D documents do not allow `beam` elements, `rz: true` or a non-zero `mz` (returning `capability/not-implemented` or `document/dimension-mismatch`). `rz`/`mz` may only be used on nodes connected by beam elements; otherwise `support/inactive-dof` / `load/inactive-dof` is reported. A `prescribed` value must be finite and its matching flag must be `true`, otherwise `support/invalid-prescribed` or `support/prescribed-unconstrained` is reported; a non-zero `prescribed.uz` in 2D or `prescribed.rz` in 3D is a `document/dimension-mismatch`. A `spring` component must be finite and non-negative, a zero spring is `support/invalid-spring`, and a spring plus a rigid flag on the same component is `support/spring-constrained`; `kz` in 2D, `kr` in 3D and `kr` at a truss-only node are rejected like their rigid counterparts.
 
 **Degree-of-freedom activation**: a 2D document that contains any beam element uses 3 degrees of freedom per node (`ux, uy, rz`); however, `rz` is active only at nodes touched by a beam, so purely truss parts never produce zero-stiffness rotation rows. Pure truss documents still use 2 degrees of freedom per node. 3D trusses keep 3 translational degrees of freedom per node.
 
@@ -263,6 +273,7 @@ The file is UTF-8 JSON with camelCase fields:
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | beam stress recovery and utilisation (`stresses`) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
+| linear elastic spring supports (`elasticSupports`, translational and rotational stiffness) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
@@ -274,7 +285,7 @@ The file is UTF-8 JSON with camelCase fields:
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling` and `prescribedDisplacement` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement` and `elasticSupports` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families.
 
 ## Numerical methods
 
@@ -298,7 +309,8 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 10. **Load combinations**: each combination clones the model, multiplies every nodal load and element distributed load by `loads`, multiplies the gravity vector by `gravity` (clearing it when the result is the zero vector), solves the scaled model and keeps the full static solution. The envelope reports the governing nodal displacement, signed axial force/moment maxima and per-node/per-element extremes with the combination names that produced them. Prescribed displacements are not scaled.
 11. **Material and section library**: presets store Young's modulus and density in `mm` units and convert by `1e6` (Pa) and `1e12` (kg/m³). Sections compute `A`, `I_strong = b h³/12` (rectangle), `I_weak`, the extreme-fibre distance `c` and a Saint-Venant torsion constant (`J ≈ a b³/3·(1 − 0.63 b/a + 0.052 (b/a)⁵)` for rectangles, `π d⁴/32` for circles and a thin-walled sum for I-sections). The elastic section modulus is `I_strong / c`; a beam may omit `inertia` and inherit `I_strong` from the section.
 12. **Beam stress recovery**: at every internal-force station the report computes `σ_min/σ_max = N/A ± |M|/S` with `S = I/c`, where `I` is the element inertia (or the material-section inertia) and `c` is the material-section extreme-fibre distance. Each element reports the largest absolute stress, the governing station and, when `allowableStress` is declared, `utilisation = |σ|max / allowableStress`; the report also names the governing element. Trusses report `N/A` only. This is a sampled check, not a fibre-level integration.
-13. **Support reaction summary**: after solving, the reaction vector `R = K·u − F` is grouped per support (`fx, fy, fz, mz`) and the report compares `reaction + applied` with a tolerance that scales with the largest resultant. `applied` includes nodal forces, consistent distributed loads and self-weight; `balanced` is the global force-equilibrium check. The same summary is included in every static solution and written to `reactions.csv` by the CSV exporter.
+13. **Support reaction summary**: after solving, the reaction vector `R = K·u − F` is grouped per support (`fx, fy, fz, mz`) and the report compares `reaction + applied` with a tolerance that scales with the largest resultant. Rigid supports report the residual; spring supports report `−k·u`. `applied` includes nodal forces, consistent distributed loads and self-weight; `balanced` is the global force-equilibrium check. The same summary is included in every static solution and written to `reactions.csv` by the CSV exporter.
+14. **Elastic supports**: a spring adds its stiffness to the diagonal of the assembled matrix and leaves the matching degree of freedom free, so a model can be stabilized by springs instead of rigid constraints. Spring and rigid constraint never share a degree of freedom (validation rejects it), which keeps the reaction split unambiguous. The axial bar `P/(EA/L + k)`, the cantilever tip spring `P/(3EI/L³ + k)` and a root rotational spring `P L³/(3EI) + P L²/k` are asserted to relative error `1e-12`.
 
 ## Validation and tests
 
@@ -362,6 +374,14 @@ pnpm --filter @wae/open-cae run typecheck
 - a beam without a material section is rejected with `material/missing-section`, and fewer than two stations with `analysis/invalid-stations`;
 - the session writes a valid `open-cae-stress-report` JSON file.
 
+`projects/crates/cae-model/tests/springs.rs` asserts linear elastic spring supports:
+
+- an axial bar with an end spring reproduces `u = P/(EA/L + k)`, the fixed reaction `−EA·u/L`, the spring force `−k·u` and a balanced reaction summary (`1e-12`);
+- a cantilever with a tip vertical spring reproduces `δ = P/(3EI/L³ + k)`, a fixed-end reaction `P − kδ`, the spring force `kδ` and a balanced summary (`1e-12`);
+- a cantilever whose root rotation is held by a rotational spring reproduces `θ = −PL/kr` and `δ = PL³/(3EI) + PL²/kr`, with the spring moment `PL` (`1e-12`);
+- negative, zero and unknown-node springs are rejected; `kz` in 2D, `kr` at a truss-only node and a spring plus rigid flag on the same component produce stable validation codes;
+- a spring round-trips through `.ocae`, reopens through the session and solves.
+
 `projects/crates/cae-model/tests/reactions.rs` asserts the reaction summary:
 
 - a cantilever tip load gives `fy = +P`, `mz = +PL`, `applied.fy = −P` and zero unbalanced force (`1e-9`);
@@ -391,6 +411,7 @@ projects/
     tests/library.rs     material-preset and section-property tests
     tests/stress.rs      beam stress-recovery tests
     tests/reactions.rs   support-reaction summary and CSV tests
+    tests/springs.rs     elastic spring-support tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -412,6 +433,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Loads are limited to **nodal concentrated forces/moments** and **element transverse loads that are uniform or linear along the member in the local `+y` direction**; arbitrary curved distributed loads, loads in a global direction and temperature loads are not supported.
 - Load combinations only scale the **single applied load set and self-weight**; independent named load patterns (separate live-load cases) are not modelled, so a combination cannot mix two different nodal load layouts.
 - The material and section are **global**: all elements share one material and one parametric section. Per-element `E`/`A` overrides still exist, but there is no per-element section library yet.
+- Spring supports are **linear elastic and two-way**: no tension-only/compression-only (gap) behaviour, no friction, no plasticity, and no nonlinear force-displacement law is modelled.
 - Beam stress recovery is **sampled** at the requested stations and uses the global material section. Shear stress distributions, stress concentrations and fibre-level plasticity are not modelled.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.

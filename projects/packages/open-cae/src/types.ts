@@ -567,8 +567,8 @@ export interface MaterialSetRequest {
 }
 
 /**
- * Request of `addSupport()`. At least one constraint flag or prescribed value
- * must be present.
+ * Request of `addSupport()`. At least one constraint flag, prescribed value or
+ * spring stiffness must be present.
  */
 export interface SupportAddRequest {
     readonly node: string;
@@ -588,6 +588,14 @@ export interface SupportAddRequest {
     readonly uz?: number;
     /** Enforced rotation about Z in radians; implies `rz`. */
     readonly rotation?: number;
+    /** Linear elastic translational spring stiffness along X (force/length). */
+    readonly kx?: number;
+    /** Linear elastic translational spring stiffness along Y (force/length). */
+    readonly ky?: number;
+    /** Linear elastic translational spring stiffness along Z (3D only). */
+    readonly kz?: number;
+    /** Linear elastic rotational spring stiffness about Z (2D beam nodes only). */
+    readonly kr?: number;
 }
 
 /** Request of `addLoad()`. */

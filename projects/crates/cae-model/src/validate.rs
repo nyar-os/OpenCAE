@@ -319,6 +319,72 @@ impl Model {
                     ));
                 }
             }
+            if let Some(spring) = &support.spring {
+                let components = [
+                    ("kx", spring.kx, support.dx),
+                    ("ky", spring.ky, support.dy),
+                    ("kz", spring.kz, support.dz),
+                    ("kr", spring.kr, support.rz),
+                ];
+                for (name, stiffness, constrained) in components {
+                    if !stiffness.is_finite() || stiffness < 0.0 {
+                        report.push(check_error(
+                            "support/invalid-spring",
+                            format!(
+                                "spring stiffness {name} of node `{}` must be finite and non-negative (currently {stiffness})",
+                                support.node
+                            ),
+                        ));
+                    }
+                    else if stiffness > 0.0 && constrained {
+                        report.push(check_error(
+                            "support/spring-constrained",
+                            format!(
+                                "node `{}` defines a {name} spring and also rigidly constrains that degree of freedom; remove one of them",
+                                support.node
+                            ),
+                        ));
+                    }
+                }
+                if spring.is_empty() {
+                    report.push(check_error(
+                        "support/invalid-spring",
+                        format!(
+                            "spring stiffness of node `{}` is zero; an elastic support needs a positive stiffness",
+                            support.node
+                        ),
+                    ));
+                }
+                if spring.kz > 0.0 && self.dimension != 3 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!(
+                            "node `{}` in a two-dimensional document cannot use a kz spring; set dimension to 3 for 3D models",
+                            support.node
+                        ),
+                    ));
+                }
+                if spring.kr > 0.0 {
+                    if self.dimension == 3 {
+                        report.push(check_error(
+                            "document/dimension-mismatch",
+                            format!(
+                                "node `{}` in a three-dimensional document cannot use a kr spring; beam elements are two-dimensional only",
+                                support.node
+                            ),
+                        ));
+                    }
+                    else if !beam_nodes.contains(support.node.as_str()) {
+                        report.push(check_error(
+                            "support/inactive-dof",
+                            format!(
+                                "node `{}` is not connected to any beam element, so it has no rotational degree of freedom for a kr spring",
+                                support.node
+                            ),
+                        ));
+                    }
+                }
+            }
             if let Some(prescribed) = &support.prescribed {
                 let components =
                     [("ux", support.dx, prescribed.ux), ("uy", support.dy, prescribed.uy), ("rz", support.rz, prescribed.rz)];

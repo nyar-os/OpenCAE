@@ -29,6 +29,7 @@ Usage:
   ocae library [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
+                    [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
   ocae self-weight <file> --g <g> [--axis x|y|z]
@@ -352,11 +353,15 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn support_add(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--node", "--ux", "--uy", "--uz", "--rotation"], &["--dx", "--dy", "--dz", "--rz"])?;
+    let parsed = parse(
+        args,
+        &["--node", "--ux", "--uy", "--uz", "--rotation", "--kx", "--ky", "--kz", "--kr"],
+        &["--dx", "--dy", "--dz", "--rz"],
+    )?;
     let file = positional(
         &parsed,
         0,
-        "support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]",
+        "support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]",
     )?;
     let node = required(&parsed, "--node")?;
     let dx = parsed.flags.contains("--dx");
@@ -367,26 +372,29 @@ fn support_add(args: &[String]) -> Result<i32, CaeError> {
     let uy = number(&parsed, "--uy")?;
     let uz = number(&parsed, "--uz")?;
     let rotation = number(&parsed, "--rotation")?;
+    let kx = number(&parsed, "--kx")?;
+    let ky = number(&parsed, "--ky")?;
+    let kz = number(&parsed, "--kz")?;
+    let kr = number(&parsed, "--kr")?;
     let prescribed = ux.is_some() || uy.is_some() || uz.is_some() || rotation.is_some();
-    if !dx && !dy && !dz && !rz && !prescribed {
+    let spring = kx.is_some() || ky.is_some() || kz.is_some() || kr.is_some();
+    if !dx && !dy && !dz && !rz && !prescribed && !spring {
         return Err(CaeError::new(
             "cli/missing-option",
-            "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz` or `--rotation`; otherwise the support constrains no degree of freedom",
+            "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz`, `--rotation`, `--kx`, `--ky`, `--kz` or `--kr`; otherwise the support has no effect",
         ));
     }
     let mut session = session();
     session.open(Path::new(file))?;
-    let summary = if prescribed {
-        if dx || dy || dz || rz {
-            session.add_support_full(node, dx, dy, dz, rz)?;
-        }
-        session.prescribe_displacement(node, ux, uy, uz, rotation)?
+    if dx || dy || dz || rz {
+        session.add_support_full(node, dx, dy, dz, rz)?;
     }
-    else {
-        session.add_support_full(node, dx, dy, dz, rz)?
-    };
+    if prescribed {
+        session.prescribe_displacement(node, ux, uy, uz, rotation)?;
+    }
+    let summary = if spring { session.set_spring(node, kx, ky, kz, kr)? } else { session.summary()? };
     println!(
-        "support `{node}` added (dx={dx}, dy={dy}, dz={dz}, rz={rz}, ux={ux:?}, uy={uy:?}, uz={uz:?}, rotation={rotation:?}, revision {})",
+        "support `{node}` added (dx={dx}, dy={dy}, dz={dz}, rz={rz}, ux={ux:?}, uy={uy:?}, uz={uz:?}, rotation={rotation:?}, kx={kx:?}, ky={ky:?}, kz={kz:?}, kr={kr:?}, revision {})",
         summary.revision
     );
     Ok(0)

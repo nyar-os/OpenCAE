@@ -147,9 +147,11 @@ pub struct MaxMoment {
 
 /// Reaction forces summarised at one support node.
 ///
-/// Only the degrees of freedom constrained by that support are populated; the
-/// remaining components are `0`. Positive values act in the positive global
-/// direction, so they are the forces the support applies to the structure.
+/// Rigidly constrained degrees of freedom report the residual `K·u − F`;
+/// elastic supports report the spring force `−k·u`. Components that are
+/// neither constrained nor spring-supported are `0`. Positive values act in
+/// the positive global direction, so they are the forces the support applies
+/// to the structure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportReaction {
@@ -692,7 +694,7 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
             NodeReaction { node: node.id.clone(), fx, fy, fz, mz }
         })
         .collect();
-    let reaction_summary = summarize_reactions(model, &system, &residual);
+    let reaction_summary = summarize_reactions(model, &system, &residual, &displacement);
 
     let mut elements = Vec::with_capacity(system.elements.len());
     let mut strain_energy = 0.0;
@@ -1797,6 +1799,33 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
         }
     }
 
+    for support in &model.supports {
+        let Some(&node) = index.get(support.node.as_str())
+        else {
+            continue;
+        };
+        let Some(spring) = support.spring
+        else {
+            continue;
+        };
+        let base = node * layout.slots;
+        let mut add = |slot: usize, stiffness_value: f64| {
+            if stiffness_value > 0.0 {
+                if let Some(dof) = layout.index.get(slot).copied().flatten() {
+                    stiffness[dof * size + dof] += stiffness_value;
+                }
+            }
+        };
+        add(base, spring.kx);
+        add(base + 1, spring.ky);
+        if model.dimension == 3 {
+            add(base + 2, spring.kz);
+        }
+        else if layout.uses_rotation {
+            add(base + 2, spring.kr);
+        }
+    }
+
     Ok(System { layout, stiffness, forces, constrained, prescribed, elements })
 }
 
@@ -2077,19 +2106,15 @@ fn solve_dense(mut matrix: Vec<f64>, mut rhs: Vec<f64>, size: usize) -> Result<V
 }
 
 /// Groups the reaction residual by support and checks global force balance.
-fn summarize_reactions(model: &Model, system: &System, residual: &[f64]) -> ReactionSummary {
+///
+/// Rigid constraints report the residual `K·u − F`; elastic supports report the
+/// spring force `−k·u`. The two are mutually exclusive per degree of freedom,
+/// which validation enforces, so no component is counted twice.
+fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displacement: &[f64]) -> ReactionSummary {
     let layout = &system.layout;
     let translation_components = if model.dimension == 3 { 3 } else { 2 };
-    let mut reaction = ForceResultant::default();
     let mut applied = ForceResultant::default();
     for node in 0..model.nodes.len() {
-        let mut values = [0.0_f64; 3];
-        for (component, value) in values.iter_mut().enumerate().take(translation_components) {
-            *value = node_value(layout, residual, node, component);
-        }
-        reaction.fx += values[0];
-        reaction.fy += values[1];
-        reaction.fz += values[2];
         let mut loads = [0.0_f64; 3];
         for (component, value) in loads.iter_mut().enumerate().take(translation_components) {
             *value = node_value(layout, &system.forces, node, component);
@@ -2098,20 +2123,38 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64]) -> Reac
         applied.fy += loads[1];
         applied.fz += loads[2];
     }
-    let supports = model
+    let supports: Vec<SupportReaction> = model
         .supports
         .iter()
         .filter_map(|support| {
             let node = model.nodes.iter().position(|entry| entry.id == support.node)?;
+            let spring = support.spring.unwrap_or_default();
+            let component = |rigid: bool, stiffness: f64, index: usize| -> f64 {
+                if rigid {
+                    node_value(layout, residual, node, index)
+                }
+                else if stiffness > 0.0 {
+                    -stiffness * node_value(layout, displacement, node, index)
+                }
+                else {
+                    0.0
+                }
+            };
             Some(SupportReaction {
                 node: support.node.clone(),
-                fx: if support.dx { node_value(layout, residual, node, 0) } else { 0.0 },
-                fy: if support.dy { node_value(layout, residual, node, 1) } else { 0.0 },
-                fz: if model.dimension == 3 && support.dz { node_value(layout, residual, node, 2) } else { 0.0 },
-                mz: if layout.uses_rotation && support.rz { node_value(layout, residual, node, 2) } else { 0.0 },
+                fx: component(support.dx, spring.kx, 0),
+                fy: component(support.dy, spring.ky, 1),
+                fz: if model.dimension == 3 { component(support.dz, spring.kz, 2) } else { 0.0 },
+                mz: if layout.uses_rotation { component(support.rz, spring.kr, 2) } else { 0.0 },
             })
         })
         .collect();
+    let mut reaction = ForceResultant::default();
+    for support in &supports {
+        reaction.fx += support.fx;
+        reaction.fy += support.fy;
+        reaction.fz += support.fz;
+    }
     let unbalanced =
         ForceResultant { fx: reaction.fx + applied.fx, fy: reaction.fy + applied.fy, fz: reaction.fz + applied.fz };
     let scale = reaction

@@ -267,7 +267,9 @@ fn section_field(request: &Value) -> Result<Option<Section>> {
 ///
 /// `ux`, `uy`, `uz` and `rotation` enforce non-zero displacement values and
 /// imply the matching constraint; when they are present the entry is written
-/// through the prescribed-displacement path.
+/// through the prescribed-displacement path. `kx`, `ky`, `kz` and `kr` add
+/// linear elastic spring stiffness without constraining the matching degree of
+/// freedom.
 #[function]
 fn support_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -281,18 +283,22 @@ fn support_add(ctx: CallContext) -> Result<JsValue> {
     let uy = number_field(&request, "uy")?;
     let uz = number_field(&request, "uz")?;
     let rotation = number_field(&request, "rotation")?;
+    let kx = number_field(&request, "kx")?;
+    let ky = number_field(&request, "ky")?;
+    let kz = number_field(&request, "kz")?;
+    let kr = number_field(&request, "kr")?;
     let prescribed = ux.is_some() || uy.is_some() || uz.is_some() || rotation.is_some();
+    let spring = kx.is_some() || ky.is_some() || kz.is_some() || kr.is_some();
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary = if prescribed {
-        if dx || dy || dz || rz {
-            session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?;
-        }
-        session.prescribe_displacement(&node, ux, uy, uz, rotation).map_err(fail)?
+    if dx || dy || dz || rz {
+        session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?;
     }
-    else {
-        session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?
-    };
+    if prescribed {
+        session.prescribe_displacement(&node, ux, uy, uz, rotation).map_err(fail)?;
+    }
+    let summary =
+        if spring { session.set_spring(&node, kx, ky, kz, kr).map_err(fail)? } else { session.summary().map_err(fail)? };
     respond(&ctx, &summary)
 }
 

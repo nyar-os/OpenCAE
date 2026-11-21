@@ -16,6 +16,7 @@
 //!   two-dimensional beam models using a geometric stiffness assembled from
 //!   the static axial forces;
 //! * support reaction summaries with a global force equilibrium check;
+//! * linear elastic translational and rotational spring supports;
 //! * built-in material presets and parametric rectangular, circular and
 //!   I-section properties;
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
@@ -43,7 +44,7 @@ pub use crate::{
     library::{MATERIAL_PRESETS, MaterialPreset, SectionProperties, library_json, material_preset},
     model::{
         Element, ElementKind, ElementMaterial, FORMAT, Load, LoadCombination, Material, Model, Node, PrescribedDisplacement,
-        Section, Support, Units, VERSION,
+        Section, SpringStiffness, Support, Units, VERSION,
     },
     session::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
@@ -82,6 +83,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "stressRecovery": "supported",
     "loadCombinations": "supported",
     "materialLibrary": "supported",
+    "elasticSupports": "supported",
     "thermal": "unsupported"
   },
   "io": {

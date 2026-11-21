@@ -459,6 +459,29 @@ impl OpenCae {
         self.edit(|model| model.add_support_full(node, dx, dy, dz, rz))
     }
 
+    /// Sets or merges linear elastic spring stiffness at a support node and
+    /// saves the document.
+    ///
+    /// A spring is a flexible support: the matching degree of freedom stays
+    /// free and the stiffness is added to the global matrix. At least one
+    /// component must be supplied.
+    pub fn set_spring(
+        &mut self,
+        node: &str,
+        kx: Option<f64>,
+        ky: Option<f64>,
+        kz: Option<f64>,
+        kr: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        if kx.is_none() && ky.is_none() && kz.is_none() && kr.is_none() {
+            return Err(CaeError::new(
+                "support/no-freedom",
+                "specify at least one of kx, ky, kz or kr; otherwise the spring carries no stiffness",
+            ));
+        }
+        self.edit(|model| model.set_spring(node, kx, ky, kz, kr))
+    }
+
     /// Prescribes (enforces) non-zero displacement values at a support node and
     /// saves the document.
     ///

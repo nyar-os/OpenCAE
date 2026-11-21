@@ -495,11 +495,15 @@ async function libraryCommand(args: readonly string[]): Promise<number> {
 }
 
 async function supportAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--node', '--ux', '--uy', '--uz', '--rotation'], ['--dx', '--dy', '--dz', '--rz']);
+    const parsed = parse(
+        args,
+        ['--node', '--ux', '--uy', '--uz', '--rotation', '--kx', '--ky', '--kz', '--kr'],
+        ['--dx', '--dy', '--dz', '--rz'],
+    );
     const file = positional(
         parsed,
         0,
-        'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]',
+        'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
     );
     const node = required(parsed, '--node');
     const dx = parsed.flags.has('--dx');
@@ -510,12 +514,17 @@ async function supportAdd(args: readonly string[]): Promise<number> {
     const uy = number(parsed, '--uy');
     const uz = number(parsed, '--uz');
     const rotation = number(parsed, '--rotation');
-    if (!dx && !dy && !dz && !rz && ux === undefined && uy === undefined && uz === undefined && rotation === undefined) {
+    const kx = number(parsed, '--kx');
+    const ky = number(parsed, '--ky');
+    const kz = number(parsed, '--kz');
+    const kr = number(parsed, '--kr');
+    const spring = kx !== undefined || ky !== undefined || kz !== undefined || kr !== undefined;
+    if (!dx && !dy && !dz && !rz && ux === undefined && uy === undefined && uz === undefined && rotation === undefined && !spring) {
         throw failure('cli/missing-option', 'noFreedom');
     }
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.addSupport({ node, dx, dy, dz, rz, ux, uy, uz, rotation });
+        const summary = document.addSupport({ node, dx, dy, dz, rz, ux, uy, uz, rotation, kx, ky, kz, kr });
         console.log(
             message('supportAdded', {
                 node,

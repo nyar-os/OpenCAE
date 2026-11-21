@@ -276,6 +276,40 @@ pub struct PrescribedDisplacement {
     pub rz: f64,
 }
 
+/// Linear elastic spring stiffness attached to a support node.
+///
+/// A spring is a flexible support: the matching degree of freedom stays free
+/// and the assembled stiffness receives an additional diagonal term. All
+/// components default to zero, and a component is only active when it is
+/// strictly positive. Units follow the document: force per length for `kx`,
+/// `ky` and `kz`, and moment per radian for `kr`.
+///
+/// A spring and a rigid constraint on the same degree of freedom are mutually
+/// exclusive and rejected by validation (`support/spring-constrained`).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpringStiffness {
+    /// Translational stiffness along X.
+    #[serde(default)]
+    pub kx: f64,
+    /// Translational stiffness along Y.
+    #[serde(default)]
+    pub ky: f64,
+    /// Translational stiffness along Z; three dimensions only.
+    #[serde(default)]
+    pub kz: f64,
+    /// Rotational stiffness about Z; two-dimensional beam nodes only.
+    #[serde(default)]
+    pub kr: f64,
+}
+
+impl SpringStiffness {
+    /// Returns `true` when every component is zero.
+    pub fn is_empty(self) -> bool {
+        self.kx == 0.0 && self.ky == 0.0 && self.kz == 0.0 && self.kr == 0.0
+    }
+}
+
 /// Support conditions of a node. `true` means that degree of freedom is fixed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -301,6 +335,14 @@ pub struct Support {
     /// documents written by older builds load unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prescribed: Option<PrescribedDisplacement>,
+    /// Linear elastic spring stiffness of this node.
+    ///
+    /// Supplying a spring leaves the matching degrees of freedom free and adds
+    /// its stiffness to the global matrix; the support reaction then reports
+    /// the spring force `−k·u`. `None` is omitted from the JSON so existing
+    /// documents load unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spring: Option<SpringStiffness>,
 }
 
 /// Concentrated nodal load.
@@ -787,8 +829,87 @@ impl Model {
             support.rz |= rz;
         }
         else {
-            self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None });
+            self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None, spring: None });
         }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or merges linear elastic spring stiffness at a support node.
+    ///
+    /// Supplying a component writes that component; components that are not
+    /// supplied keep their current value. At least one component must be
+    /// supplied and the resulting stiffness must not be zero. A spring is a
+    /// flexible support, so the matching degree of freedom stays free.
+    ///
+    /// An unknown node is rejected with `support/unknown-node`; a negative or
+    /// non-finite stiffness with `support/invalid-spring`; a `kz` spring in a
+    /// two-dimensional document or a `kr` spring in a three-dimensional
+    /// document with `document/dimension-mismatch`.
+    pub fn set_spring(
+        &mut self,
+        node: impl Into<String>,
+        kx: Option<f64>,
+        ky: Option<f64>,
+        kz: Option<f64>,
+        kr: Option<f64>,
+    ) -> Result<(), CaeError> {
+        let node = node.into();
+        if kx.is_none() && ky.is_none() && kz.is_none() && kr.is_none() {
+            return Err(CaeError::new(
+                "support/no-freedom",
+                "specify at least one of kx, ky, kz or kr; otherwise the spring carries no stiffness",
+            ));
+        }
+        if self.node(&node).is_none() {
+            return Err(CaeError::new("support/unknown-node", format!("support references unknown node `{node}`")));
+        }
+        if [kx, ky, kz, kr].into_iter().flatten().any(|value| !value.is_finite() || value < 0.0) {
+            return Err(CaeError::new(
+                "support/invalid-spring",
+                format!("spring stiffness of node `{node}` must be finite and non-negative"),
+            ));
+        }
+        let existing =
+            self.supports.iter().find(|support| support.node == node).and_then(|support| support.spring).unwrap_or_default();
+        let merged = SpringStiffness {
+            kx: kx.unwrap_or(existing.kx),
+            ky: ky.unwrap_or(existing.ky),
+            kz: kz.unwrap_or(existing.kz),
+            kr: kr.unwrap_or(existing.kr),
+        };
+        if merged.is_empty() {
+            return Err(CaeError::new(
+                "support/invalid-spring",
+                format!("spring stiffness of node `{node}` must be strictly positive"),
+            ));
+        }
+        if self.dimension != 3 && merged.kz != 0.0 {
+            return Err(dimension_mismatch(format!(
+                "a two-dimensional document cannot apply a kz spring to node `{node}`; set dimension to 3 first"
+            )));
+        }
+        if self.dimension == 3 && merged.kr != 0.0 {
+            return Err(dimension_mismatch(format!(
+                "a three-dimensional document cannot apply a kr spring to node `{node}`; beam elements are two-dimensional only"
+            )));
+        }
+        let position = match self.supports.iter().position(|support| support.node == node) {
+            Some(position) => position,
+            None => {
+                self.supports.push(Support {
+                    node: node.clone(),
+                    dx: false,
+                    dy: false,
+                    dz: false,
+                    rz: false,
+                    prescribed: None,
+                    spring: None,
+                });
+                self.supports.len() - 1
+            }
+        };
+        self.supports[position].spring = Some(merged);
         self.bump_revision();
         Ok(())
     }
@@ -844,6 +965,7 @@ impl Model {
                     dz: false,
                     rz: false,
                     prescribed: None,
+                    spring: None,
                 });
                 self.supports.len() - 1
             }
