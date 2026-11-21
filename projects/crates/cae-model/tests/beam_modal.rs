@@ -4,7 +4,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ElementKind, ExportFormat, Model, OpenCae, OpenCaeOptions, Units, solve, solve_buckling, solve_modal};
+use cae_model::{
+    ElementKind, ExportFormat, Model, OpenCae, OpenCaeOptions, Units, solve, solve_buckling, solve_internal_forces, solve_modal,
+};
 
 const E: f64 = 210_000.0;
 const A: f64 = 100.0;
@@ -84,6 +86,18 @@ fn simply_supported_triangular_load(q2: f64) -> Model {
     model.elements[1].distributed_load_end = Some(q2);
     model.add_support_full("n1", true, true, false, false).expect("pin");
     model.add_support_full("n3", false, true, false, false).expect("roller");
+    model
+}
+
+/// Single truss bar in tension, fixed at the left node and loaded at the right.
+fn single_bar_tension_model() -> Model {
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", L, 0.0).expect("n2");
+    model.add_element("e1", "n1", "n2", None).expect("e1");
+    model.add_support("n1", true, true).expect("pin");
+    model.add_support("n2", false, true).expect("lateral guide");
+    model.add_load("n2", Some(1000.0), None).expect("load");
     model
 }
 
@@ -176,6 +190,81 @@ fn simply_supported_triangular_load_reactions_follow_equilibrium() {
     assert_close(left.fy, -total / 3.0, 1e-9);
     assert_close(right.fy, -2.0 * total / 3.0, 1e-9);
     assert_close(left.fy + right.fy, -total, 1e-12);
+}
+
+#[test]
+fn internal_force_sampling_of_cantilever_matches_analytic_diagram() {
+    let w = 2.0;
+    let model = cantilever_uniform_load();
+    let diagram = solve_internal_forces(&model, 5).expect("internal forces");
+    let element = &diagram.elements[0];
+    assert_eq!(element.stations.len(), 5);
+
+    let start = &element.stations[0];
+    assert_close(start.position, 0.0, 1e-12);
+    assert_close(start.shear, w * L, 1e-9);
+    assert_close(start.moment, -w * L.powi(2) / 2.0, 1e-9);
+
+    let middle = &element.stations[2];
+    assert_close(middle.position, L / 2.0, 1e-12);
+    assert_close(middle.shear, w * L / 2.0, 1e-9);
+    assert_close(middle.moment, -w * (L / 2.0).powi(2) / 2.0, 1e-9);
+
+    let end = &element.stations[4];
+    assert!(end.shear.abs() < 1e-9, "end shear should vanish, got {}", end.shear);
+    assert!(end.moment.abs() < 1e-9, "end moment should vanish, got {}", end.moment);
+    assert_close(element.max_abs_moment, w * L.powi(2) / 2.0, 1e-9);
+}
+
+#[test]
+fn internal_force_sampling_ends_reproduce_element_end_forces() {
+    let q0 = -2.0;
+    let model = cantilever_triangular_load(q0);
+    let solution = solve(&model).expect("solve");
+    let diagram = solve_internal_forces(&model, 7).expect("internal forces");
+    let result = &solution.elements[0];
+    let element = &diagram.elements[0];
+
+    assert!((element.stations[0].moment + result.end_forces.m1).abs() < 1e-6);
+    assert!((element.stations[6].moment - result.end_forces.m2).abs() < 1e-6);
+    assert!((element.stations[0].shear - result.end_forces.v1).abs() < 1e-6);
+    assert!((element.stations[6].shear + result.end_forces.v2).abs() < 1e-6);
+    assert!((element.stations[0].axial_force + result.end_forces.n1).abs() < 1e-6);
+    assert!((element.stations[6].axial_force - result.end_forces.n2).abs() < 1e-6);
+}
+
+#[test]
+fn internal_force_sampling_of_simply_supported_center_load_matches_analytic() {
+    let model = simply_supported_center_load();
+    let diagram = solve_internal_forces(&model, 3).expect("internal forces");
+    let left = &diagram.elements[0];
+    let midspan = &left.stations[2];
+
+    assert_close(midspan.position, L / 2.0, 1e-12);
+    assert_close(midspan.shear, 500.0, 1e-9);
+    assert_close(midspan.moment, 1000.0 * L / 4.0, 1e-9);
+    for station in &left.stations {
+        assert!(station.axial_force.abs() < 1e-12);
+    }
+}
+
+#[test]
+fn internal_force_sampling_reports_constant_truss_axial_force() {
+    let model = single_bar_tension_model();
+    let diagram = solve_internal_forces(&model, 4).expect("internal forces");
+    let element = &diagram.elements[0];
+    for station in &element.stations {
+        assert_close(station.axial_force, 1000.0, 1e-9);
+        assert!(station.shear.abs() < 1e-12);
+        assert!(station.moment.abs() < 1e-12);
+    }
+}
+
+#[test]
+fn internal_force_sampling_requires_at_least_two_stations() {
+    let model = cantilever_tip_load();
+    let error = solve_internal_forces(&model, 1).expect_err("one station must be rejected");
+    assert_eq!(error.code, "analysis/invalid-stations");
 }
 
 #[test]

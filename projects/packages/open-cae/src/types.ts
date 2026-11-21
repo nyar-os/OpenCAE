@@ -165,6 +165,46 @@ export interface Solution {
     readonly maxMoment: MaxMoment;
 }
 
+/** Internal force result at one station along an element. */
+export interface SectionForces {
+    /** Distance from the `from` node along the element. */
+    readonly position: number;
+    /** Axial force, positive in tension. */
+    readonly axialForce: number;
+    readonly shear: number;
+    readonly moment: number;
+}
+
+/** Sampled internal forces of one element. */
+export interface ElementDiagram {
+    readonly id: string;
+    readonly from: string;
+    readonly to: string;
+    readonly kind: ElementKind;
+    readonly length: number;
+    readonly maxAbsShear: number;
+    readonly maxAbsMoment: number;
+    readonly stations: readonly SectionForces[];
+}
+
+/** Internal force diagrams returned by `internalForces()`. */
+export interface InternalForceSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Number of stations sampled per element, including both ends. */
+    readonly stations: number;
+    readonly elements: readonly ElementDiagram[];
+}
+
+/** Options of `internalForces()`. */
+export interface InternalForceOptions {
+    /** Number of stations per element including both ends; defaults to 11. */
+    readonly stations?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Nodal value of one mass-normalized mode shape. */
 export interface ModeShape {
     readonly node: string;

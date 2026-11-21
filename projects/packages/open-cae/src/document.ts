@@ -17,6 +17,8 @@ import type {
     ExportFormat,
     ExportReport,
     GravitySetRequest,
+    InternalForceOptions,
+    InternalForceSolution,
     LoadAddRequest,
     Material,
     MaterialSetRequest,
@@ -157,6 +159,12 @@ export class CaeDocument {
             return service.solve(this.path, { ...options, analysis: 'buckling' });
         }
         return service.solve(this.path, options as SolveOptions & { analysis?: 'static' });
+    }
+
+    /** Samples internal forces at equally spaced stations along each element. */
+    internalForces(options: InternalForceOptions = {}): InternalForceSolution {
+        this.assertOpen();
+        return service.internalForces(this.path, options);
     }
 
     /** Solves the document and returns the full report. */

@@ -32,6 +32,7 @@ Usage:
                    [--element truss|beam] [--dimension 2|3]
   ocae modal <file> [--modes N] [--out report.json]
   ocae buckling <file> [--modes N] [--out report.json]
+  ocae forces <file> [--stations N] [--out report.json]
   ocae export <file> --format csv|vtk|md --out <dir|file>
   ocae report <file>
   ocae capabilities
@@ -79,6 +80,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "solve" => solve_command(&args[1..]),
         "modal" => modal_command(&args[1..]),
         "buckling" => buckling_command(&args[1..]),
+        "forces" => forces_command(&args[1..]),
         "export" => export(&args[1..]),
         "report" => report(&args[1..]),
         "import" => Err(not_implemented("Abaqus .inp import")),
@@ -374,6 +376,27 @@ fn buckling_command(args: &[String]) -> Result<i32, CaeError> {
     let buckling = session.solve_buckling(modes, out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&buckling).unwrap_or_default());
     Ok(0)
+}
+
+fn forces_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--stations", "--out"], &[])?;
+    let file = positional(&parsed, 0, "forces <file> [--stations N] [--out report.json]")?;
+    let stations = parse_stations(&parsed)?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let forces = session.internal_forces(stations, out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&forces).unwrap_or_default());
+    Ok(0)
+}
+
+fn parse_stations(parsed: &Parsed) -> Result<usize, CaeError> {
+    match parsed.options.get("--stations") {
+        Some(value) => value.parse::<usize>().map_err(|_| {
+            CaeError::new("cli/invalid-number", format!("value `{value}` of `--stations` is not a valid positive integer"))
+        }),
+        None => Ok(11),
+    }
 }
 
 fn parse_modes(parsed: &Parsed) -> Result<usize, CaeError> {

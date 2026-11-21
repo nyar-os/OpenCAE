@@ -26,6 +26,7 @@ export interface NativeBinding {
     gravity_set(path: string, requestJson: string): string;
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
+    internal_forces(path: string, requestJson?: string): string;
     export(path: string, format: string, target: string): string;
     report(path: string): string;
 }

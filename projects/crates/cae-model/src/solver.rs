@@ -25,6 +25,12 @@ pub const BUCKLING_REPORT_VERSION: u32 = 1;
 /// Format tag of the linear buckling JSON report.
 pub const BUCKLING_REPORT_FORMAT: &str = "open-cae-buckling-report";
 
+/// Version of the JSON report produced by [`solve_internal_forces`].
+pub const INTERNAL_FORCE_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the internal force diagram JSON report.
+pub const INTERNAL_FORCE_REPORT_FORMAT: &str = "open-cae-internal-force-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,6 +304,63 @@ pub struct BucklingSolution {
     pub modes: Vec<BucklingMode>,
 }
 
+/// Internal force result at one station along an element.
+///
+/// `position` is measured from the `from` node along the element. The axial
+/// force is positive in tension, the shear follows `dV/dx = q` with `q` the
+/// local `+y` load intensity, and the bending moment satisfies `dM/dx = V`
+/// (sagging positive for a horizontally oriented beam).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionForces {
+    /// Distance from the `from` node along the element.
+    pub position: f64,
+    /// Axial force, positive in tension.
+    pub axial_force: f64,
+    /// Shear force.
+    pub shear: f64,
+    /// Bending moment.
+    pub moment: f64,
+}
+
+/// Sampled internal forces of one element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementDiagram {
+    /// Element identifier.
+    pub id: String,
+    /// Start node identifier.
+    pub from: String,
+    /// End node identifier.
+    pub to: String,
+    /// Element formulation (`truss` or `beam`).
+    pub kind: ElementKind,
+    /// Element length.
+    pub length: f64,
+    /// Largest absolute shear among the sampled stations.
+    pub max_abs_shear: f64,
+    /// Largest absolute bending moment among the sampled stations.
+    pub max_abs_moment: f64,
+    /// Sampled stations from the `from` node to the `to` node.
+    pub stations: Vec<SectionForces>,
+}
+
+/// Internal force diagrams of every element of a solved model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalForceSolution {
+    /// Report format tag, always `open-cae-internal-force-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of stations sampled per element, including both ends.
+    pub stations: usize,
+    /// Diagrams in model element order.
+    pub elements: Vec<ElementDiagram>,
+}
+
 /// Two-dimensional field layout with explicit degree-of-freedom activation.
 ///
 /// Every node owns `slots` full slots. In two dimensions without beams those
@@ -343,6 +406,12 @@ struct BeamLocal {
     transform: [[f64; 6]; 6],
     stiffness: [[f64; 6]; 6],
     load: [f64; 6],
+    /// Combined user and gravity transverse intensity at the start node.
+    transverse_start: f64,
+    /// Combined user and gravity transverse intensity at the end node.
+    transverse_end: f64,
+    /// Uniform distributed axial load per unit length (gravity component).
+    axial_uniform: f64,
 }
 
 struct System {
@@ -826,6 +895,86 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
     })
 }
 
+/// Solves the static load case and samples the internal axial force, shear and
+/// bending moment at `stations` equally spaced points per element.
+///
+/// The sampling follows section equilibrium using the element end forces and
+/// the applied transverse and axial distributed loads, so the first and last
+/// stations reproduce the element end forces exactly. `stations` counts both
+/// ends and must be at least `2`; a larger value only refines the interior
+/// points. Truss elements report a constant axial force and zero shear and
+/// moment.
+pub fn solve_internal_forces(model: &Model, stations: usize) -> Result<InternalForceSolution, CaeError> {
+    if stations < 2 {
+        return Err(CaeError::new(
+            "analysis/invalid-stations",
+            format!("internal force sampling requires at least 2 stations, but {stations} were requested"),
+        ));
+    }
+    let solution = solve(model)?;
+    let system = assemble(model)?;
+    let mut elements = Vec::with_capacity(system.elements.len());
+    for (element, result) in system.elements.iter().zip(&solution.elements) {
+        let length = element.length;
+        let mut samples = Vec::with_capacity(stations);
+        match &element.model {
+            ElementModel::Truss { .. } => {
+                for index in 0..stations {
+                    let position = length * index as f64 / (stations - 1) as f64;
+                    samples.push(SectionForces { position, axial_force: result.axial_force, shear: 0.0, moment: 0.0 });
+                }
+            }
+            ElementModel::Beam(beam) => {
+                let q1 = beam.transverse_start;
+                let slope = (beam.transverse_end - q1) / length;
+                let axial_uniform = beam.axial_uniform;
+                for index in 0..stations {
+                    let position = length * index as f64 / (stations - 1) as f64;
+                    let shear = result.end_forces.v1 + q1 * position + 0.5 * slope * position * position;
+                    let moment = -result.end_forces.m1
+                        + result.end_forces.v1 * position
+                        + 0.5 * q1 * position * position
+                        + slope * position * position * position / 6.0;
+                    samples.push(SectionForces {
+                        position,
+                        axial_force: -result.end_forces.n1 - axial_uniform * position,
+                        shear,
+                        moment,
+                    });
+                }
+            }
+        }
+        let max_abs_shear = samples.iter().fold(0.0_f64, |largest, sample| largest.max(sample.shear.abs()));
+        let max_abs_moment = samples.iter().fold(0.0_f64, |largest, sample| largest.max(sample.moment.abs()));
+        elements.push(ElementDiagram {
+            id: element.id.clone(),
+            from: model.nodes[element.from].id.clone(),
+            to: model.nodes[element.to].id.clone(),
+            kind: element.kind,
+            length,
+            max_abs_shear,
+            max_abs_moment,
+            stations: samples,
+        });
+    }
+
+    let mut output = InternalForceSolution::empty(model, stations);
+    output.elements = elements;
+    Ok(output)
+}
+
+impl InternalForceSolution {
+    fn empty(model: &Model, stations: usize) -> Self {
+        Self {
+            format: INTERNAL_FORCE_REPORT_FORMAT.to_string(),
+            version: INTERNAL_FORCE_REPORT_VERSION,
+            units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+            stations,
+            elements: Vec::new(),
+        }
+    }
+}
+
 /// Returns ids of nodes that have no support constraining any active degree of
 /// freedom.
 pub(crate) fn unconstrained_nodes(model: &Model) -> Vec<String> {
@@ -953,18 +1102,21 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         format!("distributed load w of element `{}` must be finite", element.id),
                     ));
                 }
-                let load_start = element.distributed_load.unwrap_or(0.0);
-                let load_end = element.distributed_load_end.unwrap_or(load_start);
-                if load_start != 0.0 || load_end != 0.0 {
-                    add_linear_transverse(&mut local_load, load_start, load_end, length);
-                }
+                let mut load_start = element.distributed_load.unwrap_or(0.0);
+                let mut load_end = element.distributed_load_end.unwrap_or(load_start);
+                let mut axial_uniform = 0.0;
                 if let Some(gravity) = gravity {
                     let mass_per_length = density * area;
                     let transverse = mass_per_length * (-gravity[0] * s + gravity[1] * c);
-                    add_uniform_transverse(&mut local_load, transverse, length);
-                    let axial = mass_per_length * length * (gravity[0] * c + gravity[1] * s);
+                    load_start += transverse;
+                    load_end += transverse;
+                    axial_uniform = mass_per_length * (gravity[0] * c + gravity[1] * s);
+                    let axial = axial_uniform * length;
                     local_load[0] += 0.5 * axial;
                     local_load[3] += 0.5 * axial;
+                }
+                if load_start != 0.0 || load_end != 0.0 {
+                    add_linear_transverse(&mut local_load, load_start, load_end, length);
                 }
                 let local_stiffness = beam_stiffness(youngs_modulus, area, inertia, length);
                 let transform = beam_transform(c, s);
@@ -1002,7 +1154,14 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     youngs_modulus,
                     area,
                     displacement_dofs,
-                    model: ElementModel::Beam(Box::new(BeamLocal { transform, stiffness: local_stiffness, load: local_load })),
+                    model: ElementModel::Beam(Box::new(BeamLocal {
+                        transform,
+                        stiffness: local_stiffness,
+                        load: local_load,
+                        transverse_start: load_start,
+                        transverse_end: load_end,
+                        axial_uniform,
+                    })),
                 });
             }
             ElementKind::Truss => {
@@ -1208,10 +1367,6 @@ fn beam_transform(c: f64, s: f64) -> [[f64; 6]; 6] {
     transform[4][4] = c;
     transform[5][5] = 1.0;
     transform
-}
-
-fn add_uniform_transverse(load: &mut [f64; 6], w: f64, length: f64) {
-    add_linear_transverse(load, w, w, length);
 }
 
 /// Adds the consistent nodal vector of a linearly varying transverse load

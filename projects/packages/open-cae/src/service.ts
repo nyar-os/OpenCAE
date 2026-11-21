@@ -17,6 +17,8 @@ import type {
     ExportFormat,
     ExportReport,
     GravitySetRequest,
+    InternalForceOptions,
+    InternalForceSolution,
     LoadAddRequest,
     MaterialSetRequest,
     ModalSolution,
@@ -143,6 +145,16 @@ export function solve(path: string, options: SolveOptions = {}): Solution | Moda
             : JSON.stringify({ out: options.out, analysis: options.analysis, modes: options.modes });
     return decode<Solution | ModalSolution | BucklingSolution>(() =>
         request === undefined ? binding('solve').solve(path) : binding('solve').solve(path, request),
+    );
+}
+
+/** Samples internal axial force, shear and bending moment per element. */
+export function internalForces(path: string, options: InternalForceOptions = {}): InternalForceSolution {
+    const request = options.stations === undefined && options.out === undefined
+        ? undefined
+        : JSON.stringify({ stations: options.stations, out: options.out });
+    return decode<InternalForceSolution>(() =>
+        request === undefined ? binding('internal.forces').internal_forces(path) : binding('internal.forces').internal_forces(path, request),
     );
 }
 

@@ -45,10 +45,11 @@ pub use crate::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
     },
     solver::{
-        BUCKLING_REPORT_FORMAT, BUCKLING_REPORT_VERSION, BucklingMode, BucklingSolution, ElementResult, EndForces,
-        ForceResultant, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape,
-        NodeDisplacement, NodeReaction, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, Solution, SupportReaction, solve,
-        solve_buckling, solve_modal,
+        BUCKLING_REPORT_FORMAT, BUCKLING_REPORT_VERSION, BucklingMode, BucklingSolution, ElementDiagram, ElementResult,
+        EndForces, ForceResultant, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution,
+        MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape, NodeDisplacement,
+        NodeReaction, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, SectionForces, Solution, SupportReaction, solve,
+        solve_buckling, solve_internal_forces, solve_modal,
     },
     validate::{Issue, Severity},
 };
@@ -70,6 +71,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "prescribedDisplacement": "supported",
     "nonlinear": "unsupported",
     "buckling": "supported",
+    "internalForces": "supported",
     "thermal": "unsupported"
   },
   "io": {

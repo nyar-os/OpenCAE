@@ -61,7 +61,7 @@ document.export('md', 'out/report.md');              // deterministic Markdown r
 ```
 
 - Sessions: `capabilities()`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/validate/solve/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/addSupport/addLoad/setGravity/validate/solve/internalForces/export/report/save/close`; every edit operation writes atomically to the file.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
@@ -162,6 +162,7 @@ For a propped cantilever with a 2 mm roller settlement the roller reaction is `3
 | `ocae solve <file> [--out report.json] [--analysis static\|modal\|buckling] [--modes N] [--dimension 2\|3]` | Run a static, modal or linear buckling solve and print JSON; `--modes` is modal/buckling-only and defaults to 5 |
 | `ocae modal <file> [--modes N] [--out report.json]` | Shortcut for a modal solve |
 | `ocae buckling <file> [--modes N] [--out report.json]` | Shortcut for a linear buckling solve |
+| `ocae forces <file> [--stations N] [--out report.json]` | Print sampled axial force, shear and bending moment per element; `--stations` counts both ends and defaults to 11 |
 | `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv` and `<dir>/elements.csv`; node columns include `x,y,z` and `ux,uy,uz` |
 | `ocae export <file> --format vtk --out <dir\|file.vtk>` | Write legacy ASCII VTK; points are 3D coordinates and displacements are 3D vectors |
 | `ocae export <file> --format md --out <dir\|file.md>` | Write a deterministic Markdown report; appends the first 5 modes when density is positive |
@@ -232,6 +233,7 @@ The file is UTF-8 JSON with camelCase fields:
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
+| internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown report export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -257,6 +259,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
    - displacement `u = (ux, uy, uz, rz)` (`rz = 0` for pure trusses and 3D models);
    - reaction `R = K·u − F`, including `fx, fy, fz` and `mz`;
    - each element reports local end forces `endForces = {n1,v1,m1,n2,v2,m2} = K_local·d_local − f_eq` and `maxAbsMoment`; the axial force `axialForce` is reported separately with tension positive;
+   - `solve_internal_forces(model, stations)` (CLI `ocae forces`) recovers section forces by equilibrium from the end forces and the applied linear/gravity loads: `N(x) = −n1 − p·x`, `V(x) = v1 + ∫q`, `M(x) = −m1 + v1·x + ∫q(x−s)ds`, sampled at equally spaced stations; the end stations reproduce the end forces exactly;
    - total strain energy `Σ ½·dᵀKd` is reported as `strainEnergy`.
 7. **Modal analysis**: uses the same `K` as the original problem and a diagonal lumped mass matrix — `ρAL/2` for translational degrees of freedom and `ρIL/2` (rotary inertia) for beam rotational degrees of freedom. It forms the symmetric matrix `A = M^(−1/2)·K·M^(−1/2)`, computes eigenvalues with symmetric Jacobi iterations (off-diagonal tolerance `1e-12·max|A|`, at most 100 sweeps) and frequencies `f = √λ/(2π)`. Zero, negative or non-finite eigenvalues are skipped and counted in `skipped`; NaN is never emitted.
 8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Two-dimensional beams and two- or three-dimensional trusses are assembled.
@@ -289,6 +292,7 @@ pnpm --filter @wae/open-cae run typecheck
 - pinned-pinned beam column (20 elements): first linear buckling factor within `0.1%` of the Euler load `P_cr = π²EI/L²`;
 - three-dimensional tetrahedron truss: the two lateral buckling factors match the closed-form geometric-stiffness eigenvalue `E·A·R²/(N·(R²+2H²))` (relative error `1e-8`);
 - vertical bar self-weight: sum of reactions equals total weight (relative error `1e-9`);
+- internal force sampling: cantilever `V(0)=wL`, `M(0)=−wL²/2`, `M(L)=0`; simply supported midspan `M=PL/4`, `V=P/2`; sampled end values reproduce the reported element end forces; truss axial force is constant and shear/moment are zero; fewer than two stations are rejected (`1e-9`);
 - rejection/behaviour tests for 3D beams, truss distributed loads, zero-density modal analysis, three-dimensional buckling and Markdown report determinism.
 
 `projects/crates/cae-model/tests/prescribed.rs` asserts prescribed-displacement behaviour:

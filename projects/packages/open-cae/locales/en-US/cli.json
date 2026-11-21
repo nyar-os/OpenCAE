@@ -16,6 +16,7 @@
             "  ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]",
             "  ocae modal <file> [--modes N] [--out report.json]",
             "  ocae buckling <file> [--modes N] [--out report.json]",
+            "  ocae forces <file> [--stations N] [--out report.json]",
             "  ocae export <file> --format csv|vtk|md --out <dir|file>",
             "  ocae report <file>",
             "  ocae capabilities"
@@ -48,6 +49,7 @@
             "unknownElement": "unknown element type `{value}`; only truss or beam is supported",
             "unknownAxis": "unknown gravity axis `{value}`; use `x`, `y` or `z`",
             "invalidModes": "`--modes` value `{value}` is not a positive integer",
+            "invalidStations": "`--stations` value `{value}` is not an integer of at least 2",
             "modesRequireModal": "`--modes` only applies to `--analysis modal` or `--analysis buckling`",
             "dimensionMismatch": "`--dimension {requested}` does not match document dimension {dimension}; change the document or drop the option",
             "noFreedom": "specify at least one of `--dx`, `--dy`, `--dz` or `--rz`, otherwise the support constrains nothing"

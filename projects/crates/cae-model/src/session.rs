@@ -18,7 +18,10 @@ use crate::{
     CAPABILITIES_JSON, CaeError,
     export::{export_csv, export_md, export_vtk, write_atomic},
     model::{ElementKind, Material, Model, Units},
-    solver::{BucklingSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution, solve, solve_buckling, solve_modal},
+    solver::{
+        BucklingSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution, solve, solve_buckling,
+        solve_internal_forces, solve_modal,
+    },
     validate::{Issue, Severity},
 };
 
@@ -504,6 +507,22 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(buckling)
+    }
+
+    /// Solves the open document and samples internal forces at `stations`
+    /// equally spaced points per element.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn internal_forces(&self, stations: usize, out: Option<&Path>) -> Result<InternalForceSolution, CaeError> {
+        let model = &self.current()?.model;
+        let forces = solve_internal_forces(model, stations)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&forces).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize internal force result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(forces)
     }
 
     /// Solves the open document and exports the result.

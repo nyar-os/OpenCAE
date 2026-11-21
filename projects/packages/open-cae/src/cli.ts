@@ -205,6 +205,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return modalCommand(args.slice(1));
         case 'buckling':
             return bucklingCommand(args.slice(1));
+        case 'forces':
+            return forcesCommand(args.slice(1));
         case 'export':
             return exportCommand(args.slice(1));
         case 'report':
@@ -577,6 +579,29 @@ async function bucklingCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+function stationsOption(parsed: Parsed): number {
+    const raw = parsed.options.get('--stations');
+    if (raw === undefined) {
+        return 11;
+    }
+    const stations = Number(raw);
+    if (!Number.isInteger(stations) || stations < 2) {
+        throw failure('cli/invalid-number', 'invalidStations', { value: raw });
+    }
+    return stations;
+}
+
+async function forcesCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--stations', '--out'], []);
+    const file = positional(parsed, 0, 'forces <file> [--stations N] [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.internalForces({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });

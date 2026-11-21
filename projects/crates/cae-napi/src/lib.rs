@@ -327,6 +327,25 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
     }
 }
 
+/// Samples internal axial force, shear and bending moment and returns the
+/// diagram report.
+///
+/// The request accepts `stations` (default 11, at least 2) and an optional
+/// `out` path for the JSON report.
+#[function]
+fn internal_forces(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let stations = request.as_ref().and_then(|request| request.get("stations")).and_then(Value::as_u64);
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let stations =
+        usize::try_from(stations.unwrap_or(11)).map_err(|_| argument_error("`stations` must be a positive integer"))?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let forces = session.internal_forces(stations, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &forces)
+}
+
 /// Exports a solved document as `csv`, `vtk` or `md`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
@@ -363,6 +382,7 @@ register_module![
     gravity_set,
     validate,
     solve,
+    internal_forces,
     export,
     report
 ];

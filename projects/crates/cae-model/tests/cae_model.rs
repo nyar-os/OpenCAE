@@ -271,6 +271,7 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["solver"]["prescribedDisplacement"], "supported");
     assert_eq!(capabilities["solver"]["nonlinear"], "unsupported");
     assert_eq!(capabilities["solver"]["buckling"], "supported");
+    assert_eq!(capabilities["solver"]["internalForces"], "supported");
     assert_eq!(capabilities["solver"]["thermal"], "unsupported");
     assert_eq!(capabilities["io"]["csv"], "supported");
     assert_eq!(capabilities["io"]["vtk"], "supported");
