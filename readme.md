@@ -314,6 +314,7 @@ pnpm --filter @wae/open-cae run typecheck
 - single-bar axial tension: `u = PL/(EA)`, `σ = P/A`, `ε = σ/E`;
 - symmetric two-bar truss, 3D vertical single bar, 3D tetrahedral symmetric structure;
 - under-constrained mechanism detection, fully constrained reaction equilibrium, backward-compatible loading of old documents;
+- validation warnings for `node/unconnected` (a node that no element references) and `node/duplicate-coordinates` (two nodes at the same point); both warnings never block solving;
 - CSV/VTK/Markdown content and `.ocae` round trips.
 
 `projects/crates/cae-model/tests/beam_modal.rs` asserts analytical solutions:

@@ -198,6 +198,35 @@ fn validation_reports_required_error_codes() {
 }
 
 #[test]
+fn validation_warns_about_unconnected_nodes_and_duplicate_coordinates() {
+    let mut model = single_bar_model();
+    model.add_node("n3", 0.0, 0.0).expect("node n3");
+    model.add_support("n3", true, true).expect("support n3");
+
+    let issues = model.validate();
+    assert!(
+        issues.iter().any(|issue| issue.code == "node/unconnected" && issue.severity == Severity::Warning),
+        "missing node/unconnected warning: {issues:?}"
+    );
+    assert!(
+        issues.iter().any(|issue| issue.code == "node/duplicate-coordinates" && issue.severity == Severity::Warning),
+        "missing node/duplicate-coordinates warning: {issues:?}"
+    );
+    assert!(!issues.iter().any(|issue| issue.severity == Severity::Error), "warnings must not block solving: {issues:?}");
+    solve(&model).expect("a fully supported unconnected node does not change the solution");
+}
+
+#[test]
+fn validation_does_not_warn_about_connected_nodes() {
+    let model = single_bar_model();
+    let issues = model.validate();
+    assert!(
+        !issues.iter().any(|issue| issue.code == "node/unconnected" || issue.code == "node/duplicate-coordinates"),
+        "connected nodes must not be reported: {issues:?}"
+    );
+}
+
+#[test]
 fn csv_vtk_and_json_exports_are_consistent() {
     let directory = temporary_dir("export");
     let model = single_bar_model();

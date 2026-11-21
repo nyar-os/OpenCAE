@@ -58,6 +58,10 @@ fn check_notice(code: &str, message: impl Into<String>) -> CheckIssue {
     CheckIssue::new(code, CheckSeverity::Info, message)
 }
 
+fn check_warning(code: &str, message: impl Into<String>) -> CheckIssue {
+    CheckIssue::new(code, CheckSeverity::Warning, message)
+}
+
 impl Model {
     /// Validates the document and returns every finding it can determine.
     ///
@@ -67,6 +71,11 @@ impl Model {
     /// matrix on the free degrees of freedom and looking for a numerical rank
     /// deficiency (a near-zero pivot). The error code for an unstable or
     /// under-constrained structure is always `model/mechanism`.
+    ///
+    /// Unreferenced nodes are reported as the `node/unconnected` warning and
+    /// two nodes at identical coordinates as `node/duplicate-coordinates`.
+    /// Warnings never block solving, so a load path that ignores an isolated
+    /// node still solves while the document stays visibly suspicious.
     ///
     /// A two-dimensional document (`dimension == 2`) must not contain a
     /// non-zero node `z`, a `dz` support or a non-zero `fz` load; such values
@@ -133,7 +142,7 @@ impl Model {
         };
 
         let mut node_ids = HashSet::new();
-        for node in &self.nodes {
+        for (index, node) in self.nodes.iter().enumerate() {
             if !node_ids.insert(node.id.as_str()) {
                 report.push(check_error("node/duplicate-id", format!("node id `{}` is duplicated", node.id)));
             }
@@ -143,6 +152,31 @@ impl Model {
                     format!(
                         "node `{}` in a two-dimensional document must have z = 0 (currently z={}); set dimension to 3 for 3D models",
                         node.id, node.z
+                    ),
+                ));
+            }
+            if let Some(other) =
+                self.nodes[..index].iter().find(|other| other.x == node.x && other.y == node.y && other.z == node.z)
+            {
+                report.push(check_warning(
+                    "node/duplicate-coordinates",
+                    format!(
+                        "node `{}` shares its coordinates ({}, {}, {}) with node `{}`; two distinct nodes at the same location have no connecting stiffness",
+                        node.id, node.x, node.y, node.z, other.id
+                    ),
+                ));
+            }
+        }
+
+        let connected: HashSet<&str> =
+            self.elements.iter().flat_map(|element| [element.from.as_str(), element.to.as_str()]).collect();
+        for node in &self.nodes {
+            if !connected.contains(node.id.as_str()) {
+                report.push(check_warning(
+                    "node/unconnected",
+                    format!(
+                        "node `{}` is not referenced by any element and contributes no stiffness; remove it or connect it",
+                        node.id
                     ),
                 ));
             }
