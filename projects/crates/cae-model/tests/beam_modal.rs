@@ -207,19 +207,44 @@ fn pinned_pinned_column_buckling_matches_euler_load() {
     );
 }
 
-#[test]
-fn three_dimensional_buckling_is_not_implemented() {
+/// Three equally spaced legs from a fixed triangular base to one loaded apex.
+fn tetrahedron_column() -> Model {
+    let radius = 500.0;
+    let offset = 0.866_025_403_784_438_6 * radius;
     let mut model = Model::new_with_dimension(Units::Millimeter, 3);
-    model.add_node_3d("n1", 0.0, 0.0, 0.0).expect("n1");
-    model.add_node_3d("n2", 0.0, 0.0, 1000.0).expect("n2");
-    model.add_element("e1", "n1", "n2", None).expect("e1");
-    model.add_support_3d("n1", true, true, true).expect("base");
-    model.add_support_3d("n2", true, true, false).expect("lateral guide");
-    model.add_load_3d("n2", None, None, Some(-1000.0)).expect("axial load");
+    model.add_node_3d("n1", 0.0, radius, 0.0).expect("n1");
+    model.add_node_3d("n2", -offset, -0.5 * radius, 0.0).expect("n2");
+    model.add_node_3d("n3", offset, -0.5 * radius, 0.0).expect("n3");
+    model.add_node_3d("n4", 0.0, 0.0, 500.0).expect("apex");
+    model.add_element("e1", "n1", "n4", None).expect("e1");
+    model.add_element("e2", "n2", "n4", None).expect("e2");
+    model.add_element("e3", "n3", "n4", None).expect("e3");
+    model.add_support_3d("n1", true, true, true).expect("base n1");
+    model.add_support_3d("n2", true, true, true).expect("base n2");
+    model.add_support_3d("n3", true, true, true).expect("base n3");
+    model.add_load_3d("n4", None, None, Some(-1000.0)).expect("apex load");
+    model
+}
 
-    let error = solve_buckling(&model, 1).expect_err("3D buckling must be rejected");
-    assert_eq!(error.code, "capability/not-implemented");
-    assert_eq!(error.exit_code(), 2);
+#[test]
+fn three_dimensional_truss_buckling_matches_analytic_tetrahedron() {
+    let model = tetrahedron_column();
+    let radius: f64 = 500.0;
+    let height: f64 = 500.0;
+    let leg_length = radius.hypot(height);
+    let axial_force = 1000.0 * leg_length / (3.0 * height);
+    let expected = E * A * radius.powi(2) / (axial_force * (radius.powi(2) + 2.0 * height.powi(2)));
+
+    let buckling = solve_buckling(&model, 2).expect("3D truss buckling");
+    let first = buckling.modes.first().expect("first buckling mode");
+    let second = buckling.modes.get(1).expect("second buckling mode");
+    assert_close(first.factor, expected, 1e-8);
+    assert_close(second.factor, expected, 1e-8);
+    assert!(
+        first.shape.iter().any(|node| node.ux.abs() + node.uy.abs() > 0.1),
+        "the critical tetrahedron mode must be lateral: {:?}",
+        first.shape
+    );
 }
 
 #[test]

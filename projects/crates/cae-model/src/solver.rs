@@ -616,18 +616,13 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
 /// static load case. The eigenproblem is reduced to a symmetric standard form
 /// with a Cholesky factor of `K` and solved by the crate's Jacobi iteration.
 ///
-/// Two-dimensional truss and beam models are supported. Three-dimensional
-/// buckling is not implemented and reports `capability/not-implemented`.
-/// Modes are normalized so that the largest absolute nodal value is one.
+/// Two-dimensional truss and beam models and three-dimensional truss models
+/// are supported. Three-dimensional beams are rejected earlier by the static
+/// reference solve. Modes are normalized so that the largest absolute nodal
+/// value is one.
 pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, CaeError> {
     if modes == 0 {
         return Err(CaeError::new("analysis/invalid-modes", "buckling mode count must be at least 1"));
-    }
-    if model.dimension != 2 {
-        return Err(CaeError::new(
-            "capability/not-implemented",
-            "three-dimensional buckling is not implemented; linear buckling supports truss and beam models with dimension=2 only",
-        ));
     }
     let reference = solve(model)?;
     let system = assemble(model)?;
@@ -682,17 +677,21 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
                 }
             }
             ElementModel::Truss { direction, components, .. } => {
-                if *components != 2 {
-                    return Err(CaeError::new(
-                        "capability/not-implemented",
-                        "three-dimensional buckling is not implemented; linear buckling supports two-dimensional trusses only",
-                    ));
-                }
-                let transverse = [direction[1], -direction[0], -direction[1], direction[0]];
+                // Geometric stiffness of a two-force member is
+                // (N/L)·[[P, −P], [−P, P]] with the transverse projector
+                // P = I − n·nᵀ. It works unchanged in two and three dimensions.
                 let scale = axial_force / length;
-                for (row, &row_dof) in element.displacement_dofs.iter().enumerate() {
-                    for (column, &column_dof) in element.displacement_dofs.iter().enumerate() {
-                        geometric[row_dof * size + column_dof] += scale * transverse[row] * transverse[column];
+                let ends = 2 * components;
+                for row in 0..ends {
+                    let row_end = row / components;
+                    for column in 0..ends {
+                        let column_end = column / components;
+                        let sign = if row_end == column_end { 1.0 } else { -1.0 };
+                        let i = row % components;
+                        let j = column % components;
+                        let projector = if i == j { 1.0 } else { 0.0 } - direction[i] * direction[j];
+                        geometric[element.displacement_dofs[row] * size + element.displacement_dofs[column]] +=
+                            scale * sign * projector;
                     }
                 }
             }
@@ -795,9 +794,9 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
             .map(|(node, entry)| {
                 let ux = node_value(layout, &shape_values, node, 0);
                 let uy = node_value(layout, &shape_values, node, 1);
-                let uz = 0.0;
+                let uz = if model.dimension == 3 { node_value(layout, &shape_values, node, 2) } else { 0.0 };
                 let rz = if layout.uses_rotation { node_value(layout, &shape_values, node, 2) } else { 0.0 };
-                shape_max = shape_max.max(ux.abs()).max(uy.abs()).max(rz.abs());
+                shape_max = shape_max.max(ux.abs()).max(uy.abs()).max(uz.abs()).max(rz.abs());
                 ModeShape { node: entry.id.clone(), ux, uy, uz, rz }
             })
             .collect();

@@ -11,8 +11,9 @@
 //! * self-weight body loads;
 //! * modal analysis with a diagonal (lumped) mass matrix and a symmetric
 //!   Jacobi eigen-solver;
-//! * linear buckling of two-dimensional truss and beam models using a
-//!   geometric stiffness assembled from the static axial forces;
+//! * linear buckling of two- and three-dimensional truss models and
+//!   two-dimensional beam models using a geometric stiffness assembled from
+//!   the static axial forces;
 //! * support reaction summaries with a global force equilibrium check;
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
