@@ -1,13 +1,13 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, linear elastic spring supports, load combinations, modal (with effective mass) and linear buckling analysis (single load case and per load combination), plus a built-in material and parametric-section library. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, rigid, spring and inclined supports, load combinations, modal (with effective mass), linear buckling (single load case and per load combination) and response-spectrum analysis, assembled stiffness/mass matrix export, plus a built-in material and parametric-section library. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
 - teaching, algorithm validation and small regression models in CI;
 - workflows that store models as plain-text JSON and reproduce results from the command line.
 
-It is **not** a general-purpose commercial finite element package: 3D beams/frames, shell/solid elements, nonlinear analysis, steady-state/transient heat transfer, temperature gradients and contact are not implemented. Every unimplemented capability fails explicitly (`capability/not-implemented`, exit code `2`) instead of degrading silently. Modal analysis uses a lumped mass matrix, so frequencies and effective masses are finite element approximations; the readme and tests state the error bounds against analytical solutions.
+It is **not** a general-purpose commercial finite element package: 3D beams/frames, shell/solid elements, nonlinear analysis, steady-state/transient heat transfer and contact are not implemented. Every unimplemented capability fails explicitly (`capability/not-implemented`, exit code `2`) instead of degrading silently. Modal analysis uses a lumped mass matrix, so frequencies and effective masses are finite element approximations; the readme and tests state the error bounds against analytical solutions.
 
 ## Architecture: the API is the core and the CLI only parses arguments
 
@@ -72,10 +72,12 @@ const cases = document.loadCases();                          // one summary row 
 ```
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/matrices/responseSpectrum/export/report/save/close`; every edit operation writes atomically to the file.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
+- `addSupport({ direction: [nx, ny] })` defines an inclined or rotated roller in two-dimensional documents. The normalised vector is the constrained displacement direction, so a roller at 30° uses `[cos 30°, sin 30°]`; it is an independent constraint frame and cannot be combined with `dx`, `dy`, a prescribed displacement or a spring on the same entry (`support/invalid-direction`).
+- `matrices()` returns the assembled global stiffness and lumped mass matrices with one label (`node`, `component`, `constrained`) per active degree of freedom. `responseSpectrum({ spectrum, modes, axis })` runs modal superposition with a single-degree-of-freedom spectral acceleration input and combines the modes with SRSS.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
 
@@ -184,7 +186,7 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--section ...]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`); `--alpha` is the coefficient of thermal expansion in `1/K` |
 | `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
 | `ocae library [--units mm\|m]` | Print the built-in material presets and supported section shapes as JSON |
-| `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]` | Add/merge support constraints or spring stiffness; `--rz`/`--kr` are available only on beam nodes and `--dz`/`--kz` only in 3D documents. A supplied displacement clamps that degree of freedom to the given value and implies its flag; a supplied spring leaves it free |
+| `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]` | Add/merge support constraints, an inclined constraint or spring stiffness; `--rz`/`--kr` are available only on beam nodes and `--dz`/`--kz` only in 3D documents. `--direction` constrains displacement along `[nx, ny]` in 2D and cannot be combined with the other constraint options. A supplied displacement clamps that degree of freedom to the given value and implies its flag; a supplied spring leaves it free |
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
 | `ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]` | Set the gravity acceleration; the zero vector clears it |
 | `ocae self-weight <file> --g <g> [--axis x\|y\|z]` | Set the gravity acceleration along the given axis |
@@ -201,6 +203,8 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae deflections <file> [--stations N] [--out report.json]` | Sample the deflected centreline (`axial`, `transverse`, `rotation`, deformed `x/y/z`) per element; the Hermite interpolation is completed by the exact particular solution of the member load |
 | `ocae nodal-stresses <file> [--stations N] [--out report.json]` | Average element-end stresses at shared nodes and report `meanAxialStress`, extreme fibre `minStress`/`maxStress` and the governing element |
 | `ocae load-cases <file> [--out report.json]` | Print one summary row for the unfactored `base` case and each stored combination: applied resultant, largest displacement, extreme axial force/moment and strain energy |
+| `ocae matrices <file> [--out report.json]` | Print the assembled global stiffness and lumped mass matrices, in degree-of-freedom order, with a label and `constrained` flag per row |
+| `ocae spectrum <file> [--modes N] [--axis x\|y\|z] --spectrum <T:Sa,...> [--out report.json]` | Run a response-spectrum analysis from SDOF spectral acceleration points (`period:acceleration`, linearly interpolated) and combine the modes with SRSS |
 | `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv`, `<dir>/elements.csv` and `<dir>/reactions.csv`; node columns include `x,y,z` and `ux,uy,uz` |
 | `ocae reactions <file> [--out report.json]` | Print per-support reactions and the global `reaction + applied` equilibrium check |
 | `ocae export <file> --format vtk --out <dir\|file.vtk>` | Write legacy ASCII VTK; points are 3D coordinates and displacements are 3D vectors |
@@ -263,7 +267,7 @@ The file is UTF-8 JSON with camelCase fields:
 | `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name`, `allowableStress` (for utilisation), `alpha` (coefficient of thermal expansion in `1/K`, required by temperature loads) and `section` (parametric geometry). A section is `{ "shape": "rectangle", "width", "height" }`, `{ "shape": "circle", "diameter" }` or `{ "shape": "i", "depth", "flangeWidth", "flangeThickness", "webThickness" }`; when present it supplies the strong-axis inertia for beams that omit `inertia` |
 | `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
 | `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` or a material `section` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying), an optional uniform `temperature` change and an optional moment `release: { "start": bool, "end": bool }` (beams only) |
-| `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged. Optional `spring: { kx, ky, kz, kr }` adds linear elastic stiffness (force/length, moment/radian) and leaves the matching degree of freedom free; `kz` is 3D-only and `kr` is 2D beam-node-only |
+| `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged. Optional `spring: { kx, ky, kz, kr }` adds linear elastic stiffness (force/length, moment/radian) and leaves the matching degree of freedom free; `kz` is 3D-only and `kr` is 2D beam-node-only. Optional `direction: [nx, ny]` constrains displacement along that unit vector in 2D and cannot be combined with `dx`, `dy`, a prescribed displacement or a spring |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
 | `gravity` | Optional `[gx, gy, gz]`; when set, self-weight is applied from the density |
 | `combinations` | Optional list of `{ name, loads, gravity }` linear combinations; `loads` multiplies nodal and element applied loads (default 1), `gravity` multiplies self-weight (default 0). Names must be unique and factors finite |
@@ -298,6 +302,9 @@ The file is UTF-8 JSON with camelCase fields:
 | load-case summary table (`loadCases`, `base` plus every combination) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
 | linear elastic spring supports (`elasticSupports`, translational and rotational stiffness) | ✅ supported |
+| inclined/rotated roller supports (`inclinedSupports`, arbitrary constraint direction in 2D) | ✅ supported |
+| assembled stiffness and mass matrix export (`matrixExport`) | ✅ supported |
+| response-spectrum analysis (`responseSpectrum`, SDOF spectral acceleration input + SRSS) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
@@ -309,7 +316,7 @@ The file is UTF-8 JSON with camelCase fields:
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `thermalGradient`, `partialSpanLoad`, `elasticSupports`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` and `thermalGradient` cover member temperature actions only; they do not enable the `thermal` heat-transfer analysis, which remains unimplemented.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `thermalGradient`, `partialSpanLoad`, `elasticSupports`, `inclinedSupports`, `matrixExport`, `responseSpectrum`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` and `thermalGradient` cover member temperature actions only; they do not enable the `thermal` heat-transfer analysis, which remains unimplemented.
 
 ## Numerical methods
 
@@ -341,6 +348,9 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 18. **Nodal stress summary**: `solve_nodal_stress(model, stations)` (CLI `ocae nodal-stresses`) reuses the per-element stress recovery, routes the first and last station to the `from` and `to` nodes, and reports the arithmetic mean of the connected axial stresses, the minimum/maximum extreme-fibre stresses of the connected ends, the largest absolute value with its governing element, and the utilisation against `allowableStress`. It is a screening view of the sampled stress field, not a fibre-level integration.
 19. **Load-case summary**: `summarize_load_cases(model)` (CLI `ocae load-cases`) always solves the unfactored `base` case and then each stored combination on the same `loads`/`gravity` scaled model used by combination analysis. Each row reports the applied resultant, the largest displacement and its node, the extreme axial force and bending moment with their elements, the strain energy and the equilibrium flag, giving a compact table for reports without superseding the per-element diagrams.
 20. **Partial-span loads**: `distributed_load_from`/`distributed_load_to` limit a beam transverse load to the fractions `[a, b]` of the length, with the intensity varying linearly from the start to the end of that segment. The consistent nodal vector is integrated with exact three-point Gauss-Legendre quadrature of the cubic Hermite shape functions. Internal-force sampling adds the segment resultant and its first moment piecewise, and the deflection sampler superposes its own fixed-end particular solution, so a simply supported beam loaded over its middle half reproduces `R = |q|L/4`, `M_mid = 3|q|L²/32` and `δ_mid = 19|q|L⁴/(2048EI)`.
+21. **Inclined supports**: a `direction: [nx, ny]` support rotates the node's two translational degrees of freedom into the local frame `Q = [[nx, −ny], [ny, nx]]` with `K ← Qᵀ·K·Q` and `F ← Qᵀ·F`, constrains the local first component (`u·n = 0`) and rotates displacements, reactions and exported matrices back with `Q` (or `Qᵀ·K·Q` in reverse for the stiffness). A 45° bar with a roller perpendicular to its axis therefore extends by `PL/EA` along the bar, carries no roller reaction, and its exported global stiffness is the standard `k·[[c², cs], …]` bar matrix.
+22. **Matrix export**: `solve_matrices(model)` assembles the same active-degree-of-freedom system the solver uses, exposes the dense global `K` (with the inclined-support rotation undone) and the diagonal lumped `M`, and labels every row with its node and component (`ux`, `uy`, `uz` or `rz`) plus whether a support constrains it. A bar's axial `EA/L` terms, a cantilever's `12EI/L³`, `6EI/L²`, `4EI/L` and `2EI/L` terms and the `ρAL/2` / `ρIL/2` masses are asserted directly.
+23. **Response spectrum**: `solve_response_spectrum(model, modes, axis, spectrum)` reuses the mass-normalised modal solution, reads `Sa(T)` by linear interpolation (constant beyond the first and last point), converts it to `Sd = Sa/ω²`, scales each mode by the signed participation factor `Γ` in the requested direction and combines the nodal contributions with SRSS. A single free translational degree of freedom therefore peaks at the static-equivalent `Sd = Sa·m/k`, which is asserted together with the interpolation and validation errors.
 
 ## Validation and tests
 
@@ -432,6 +442,12 @@ pnpm --filter @wae/open-cae run typecheck
 - CSV export writes `reactions.csv` with one header row and one row per support (`1e-9`);
 - static solutions keep the `reactionSummary` field.
 
+`projects/crates/cae-model/tests/inclined_support.rs`, `tests/matrices.rs` and `tests/response_spectrum.rs` assert the new capabilities:
+
+- a 45° bar with an inclined roller perpendicular to its axis extends by `PL/EA` and carries no roller reaction (`1e-9`), and a roller along Y matches the global `dy` support;
+- the exported matrix round-trips through the inclined frame: the global bar stiffness `k·[[c², cs], …]`, the constrained local row and a bar's `EA/L`, `12EI/L³` and `4EI/L` terms plus the lumped `ρAL/2`/`ρIL/2` masses (`1e-12`);
+- a single free translational degree of freedom peaks at `Sd = Sa·m/k` with `Γ = √m` (`1e-9`), the spectrum is linearly interpolated, and empty/negative-period spectra and unavailable axes are rejected.
+
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
 ## Repository structure
@@ -459,6 +475,9 @@ projects/
     tests/thermal.rs     uniform temperature-change, thermal-expansion and gradient tests
     tests/partial_load.rs  partial-span distributed load tests
     tests/releases.rs    beam end-release (hinge) tests
+    tests/inclined_support.rs  arbitrary-direction (inclined) support tests
+    tests/matrices.rs    assembled stiffness and lumped mass matrix tests
+    tests/response_spectrum.rs  SDOF spectral-acceleration and SRSS tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
     src/lib.rs           version/capabilities/create/open/save/…/report
@@ -481,8 +500,9 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Load combinations only scale the **single applied load set and self-weight**; independent named load patterns (separate live-load cases) are not modelled, so a combination cannot mix two different nodal load layouts.
 - The material and section are **global**: all elements share one material and one parametric section. Per-element `E`/`A` overrides still exist, but there is no per-element section library yet.
 - Spring supports are **linear elastic and two-way**: no tension-only/compression-only (gap) behaviour, no friction, no plasticity, and no nonlinear force-displacement law is modelled.
+- Inclined supports constrain **one translational direction** in two-dimensional documents; a prescribed settlement along that direction, a second independent normal at the same node, and three-dimensional inclined constraints are not modelled.
 - Beam stress recovery is **sampled** at the requested stations and uses the global material section. Shear stress distributions, stress concentrations and fibre-level plasticity are not modelled.
-- Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes; buckling and response-spectrum analysis are not performed.
+- Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes. Response-spectrum analysis is available, but it uses the SRSS combination only (no CQC or complete quadratic combination), no rotational/rocking excitation, and no ductility or inelastic spectrum modification.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.
 - The solver is **dense**: memory `O(n²)` and time `O(n³)`, suitable for small models but not for large engineering models.
 - Mechanism detection is based on numerical pivot thresholds; extremely ill-conditioned but theoretically stable structures may be misclassified.
