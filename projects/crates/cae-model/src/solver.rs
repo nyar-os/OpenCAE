@@ -91,6 +91,12 @@ pub const CONSTRUCTION_STAGE_REPORT_VERSION: u32 = 1;
 /// Format tag of the construction-stage JSON report.
 pub const CONSTRUCTION_STAGE_REPORT_FORMAT: &str = "open-cae-construction-stage-report";
 
+/// Version of the JSON report produced by [`solve_nonlinear`].
+pub const NONLINEAR_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the geometric-nonlinear JSON report.
+pub const NONLINEAR_REPORT_FORMAT: &str = "open-cae-nonlinear-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -530,6 +536,36 @@ pub struct ConstructionStageSolution {
     pub units: String,
     /// Stage summaries in the requested order.
     pub stages: Vec<ConstructionStageResult>,
+}
+
+/// Result of [`solve_nonlinear`].
+///
+/// The solver applies the load in equal increments and runs a Newton iteration
+/// with the corotational (large-displacement) tangent of every truss bar at each
+/// increment. `iterations` counts every residual evaluation that advanced a
+/// Newton step, and `residual_norm` is the free residual norm of the last
+/// accepted state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NonlinearSolution {
+    /// Report format tag, always `open-cae-nonlinear-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of equal load increments used by the path-following loop.
+    pub increments: usize,
+    /// Total number of Newton iterations over all increments.
+    pub iterations: usize,
+    /// Relative convergence tolerance that was requested.
+    pub tolerance: f64,
+    /// Free residual norm of the final accepted state.
+    pub residual_norm: f64,
+    /// Nodal displacements of the final state.
+    pub nodes: Vec<NodeDisplacement>,
+    /// Nodal displacement with the largest magnitude.
+    pub max_displacement: NodeDisplacement,
 }
 
 /// One linear buckling mode.
@@ -2953,6 +2989,273 @@ pub fn solve_combinations(model: &Model, combinations: &[LoadCombination]) -> Re
         units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
         combinations: cases,
         envelope,
+    })
+}
+
+struct NonlinearBar {
+    from: usize,
+    to: usize,
+    length: f64,
+    axial_stiffness: f64,
+}
+
+/// Current configuration of one large-displacement truss bar.
+struct NonlinearBarState {
+    direction: [f64; 3],
+    length: f64,
+    axial_force: f64,
+}
+
+fn nonlinear_bar_state(
+    model: &Model,
+    bar: &NonlinearBar,
+    layout: &Layout,
+    displacement: &[f64],
+    components: usize,
+) -> Result<NonlinearBarState, CaeError> {
+    let start = &model.nodes[bar.from];
+    let end = &model.nodes[bar.to];
+    let mut delta = [0.0_f64; 3];
+    for component in 0..components {
+        let start_displacement = node_value(layout, displacement, bar.from, component);
+        let end_displacement = node_value(layout, displacement, bar.to, component);
+        let origin = [start.x, start.y, start.z][component];
+        let target = [end.x, end.y, end.z][component];
+        delta[component] = (target + end_displacement) - (origin + start_displacement);
+    }
+    let length = (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
+    if !positive_finite(length) {
+        return Err(CaeError::new(
+            "analysis/degenerate-element",
+            format!(
+                "the bar between nodes `{}` and `{}` collapses to zero length during the nonlinear iteration",
+                model.nodes[bar.from].id, model.nodes[bar.to].id
+            ),
+        ));
+    }
+    let direction = [delta[0] / length, delta[1] / length, delta[2] / length];
+    // Corotational small-strain bar: the axial force follows the current chord
+    // length, so the only nonlinearity is the change of geometry.
+    let axial_force = bar.axial_stiffness * (length - bar.length);
+    Ok(NonlinearBarState { direction, length, axial_force })
+}
+
+fn nonlinear_internal_forces(
+    model: &Model,
+    bars: &[NonlinearBar],
+    layout: &Layout,
+    displacement: &[f64],
+    components: usize,
+) -> Result<Vec<f64>, CaeError> {
+    let mut internal = vec![0.0_f64; layout.size];
+    for bar in bars {
+        let state = nonlinear_bar_state(model, bar, layout, displacement, components)?;
+        for component in 0..components {
+            let value = state.axial_force * state.direction[component];
+            if let Some(dof) = layout.index.get(bar.from * layout.slots + component).copied().flatten() {
+                internal[dof] -= value;
+            }
+            if let Some(dof) = layout.index.get(bar.to * layout.slots + component).copied().flatten() {
+                internal[dof] += value;
+            }
+        }
+    }
+    Ok(internal)
+}
+
+fn nonlinear_tangent(
+    model: &Model,
+    bars: &[NonlinearBar],
+    layout: &Layout,
+    displacement: &[f64],
+    components: usize,
+) -> Result<Vec<f64>, CaeError> {
+    let size = layout.size;
+    let mut tangent = vec![0.0_f64; size * size];
+    for bar in bars {
+        let state = nonlinear_bar_state(model, bar, layout, displacement, components)?;
+        let geometric = state.axial_force / state.length;
+        let nodes = [bar.from, bar.to];
+        let signs = [1.0_f64, -1.0_f64];
+        for row in 0..2 {
+            for column in 0..2 {
+                for i in 0..components {
+                    let Some(row_dof) = layout.index.get(nodes[row] * layout.slots + i).copied().flatten()
+                    else {
+                        continue;
+                    };
+                    for j in 0..components {
+                        let Some(column_dof) = layout.index.get(nodes[column] * layout.slots + j).copied().flatten()
+                        else {
+                            continue;
+                        };
+                        let value = bar.axial_stiffness * state.direction[i] * state.direction[j]
+                            + if i == j { geometric } else { 0.0 }
+                            - geometric * state.direction[i] * state.direction[j];
+                        tangent[row_dof * size + column_dof] += signs[row] * signs[column] * value;
+                    }
+                }
+            }
+        }
+    }
+    Ok(tangent)
+}
+
+fn vector_norm(values: &[f64]) -> f64 {
+    values.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
+/// Solves a large-displacement (geometric nonlinear) truss model.
+///
+/// Only truss elements are supported: the corotational formulation updates the
+/// chord direction and length of every bar from the current nodal positions and
+/// derives the axial force `N = E·A·(L − L₀)/L₀`, so the analysis follows large
+/// rotations and the stiffening/softening of a shallow truss. Bending, material
+/// plasticity and member buckling are outside this formulation, and a model
+/// that contains a beam element is rejected with `capability/not-implemented`.
+///
+/// The applied load and self-weight are split into `increments` equal load
+/// steps. Every step runs a Newton iteration with the exact corotational tangent
+/// `K = E·A/L₀·n·nᵀ + N/L·(I − n·nᵀ)` until the free residual norm is below
+/// `tolerance × max(1, |λ·f|)`. The report contains the total iteration count,
+/// the final residual norm and the nodal displacements, which makes the
+/// convergence evidence part of the result instead of hidden state.
+pub fn solve_nonlinear(
+    model: &Model,
+    increments: usize,
+    max_iterations: usize,
+    tolerance: f64,
+) -> Result<NonlinearSolution, CaeError> {
+    if increments == 0 {
+        return Err(CaeError::new("analysis/invalid-increments", "the nonlinear load increments must be at least 1"));
+    }
+    if max_iterations == 0 {
+        return Err(CaeError::new("analysis/invalid-iterations", "the nonlinear iteration limit must be at least 1"));
+    }
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(CaeError::new(
+            "analysis/invalid-tolerance",
+            format!("the nonlinear convergence tolerance must be finite and positive (currently {tolerance})"),
+        ));
+    }
+    if model.elements.iter().any(|element| element.kind == ElementKind::Beam) {
+        return Err(CaeError::new(
+            "capability/not-implemented",
+            "geometric nonlinear analysis of beam elements is not implemented; only truss models are supported",
+        ));
+    }
+    if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
+        return Err(CaeError::new(issue.code, issue.message));
+    }
+    let system = assemble(model)?;
+    if system.rotations.iter().any(Option::is_some) {
+        return Err(CaeError::new(
+            "capability/not-implemented",
+            "geometric nonlinear analysis with inclined supports is not implemented",
+        ));
+    }
+    let size = system.layout.size;
+    let free: Vec<usize> = (0..size).filter(|&dof| !constrained(&system, dof)).collect();
+    if free.is_empty() {
+        return Err(CaeError::new("model/mechanism", "no free degrees of freedom available for nonlinear analysis"));
+    }
+    let components = if model.dimension == 3 { 3 } else { 2 };
+    let bars: Vec<NonlinearBar> = system
+        .elements
+        .iter()
+        .map(|element| NonlinearBar {
+            from: element.from,
+            to: element.to,
+            length: element.length,
+            axial_stiffness: element.youngs_modulus * element.area / element.length,
+        })
+        .collect();
+    if bars.is_empty() {
+        return Err(CaeError::new("model/no-elements", "the model requires at least 1 element"));
+    }
+    let external: Vec<f64> = free.iter().map(|&dof| system.forces[dof]).collect();
+    let external_norm = vector_norm(&external);
+    let mut displacement = system.prescribed.clone();
+    let mut iterations = 0;
+    let mut residual_norm = 0.0;
+
+    for step in 1..=increments {
+        let factor = step as f64 / increments as f64;
+        let mut converged = false;
+        for _ in 0..max_iterations {
+            let internal = nonlinear_internal_forces(model, &bars, &system.layout, &displacement, components)?;
+            let residual: Vec<f64> =
+                free.iter().enumerate().map(|(index, &dof)| factor * external[index] - internal[dof]).collect();
+            residual_norm = vector_norm(&residual);
+            let scale = 1.0_f64.max(factor * external_norm);
+            if residual_norm <= tolerance * scale {
+                converged = true;
+                break;
+            }
+            iterations += 1;
+            let tangent = nonlinear_tangent(model, &bars, &system.layout, &displacement, components)?;
+            let count = free.len();
+            let mut reduced = vec![0.0_f64; count * count];
+            for (row, &row_dof) in free.iter().enumerate() {
+                for (column, &column_dof) in free.iter().enumerate() {
+                    reduced[row * count + column] = tangent[row_dof * size + column_dof];
+                }
+            }
+            let delta = solve_dense(reduced, residual, count).map_err(|()| {
+                CaeError::new(
+                    "analysis/singular-tangent",
+                    format!(
+                        "the nonlinear tangent is singular at load step {step}/{increments}; the configuration is unstable"
+                    ),
+                )
+            })?;
+            for (index, &dof) in free.iter().enumerate() {
+                displacement[dof] += delta[index];
+            }
+            if displacement.iter().any(|value| !value.is_finite()) {
+                return Err(CaeError::new(
+                    "analysis/non-finite-displacement",
+                    format!("the nonlinear iteration produced non-finite displacements at load step {step}/{increments}"),
+                ));
+            }
+        }
+        if !converged {
+            return Err(CaeError::new(
+                "analysis/not-converged",
+                format!(
+                    "geometric nonlinear analysis did not converge after {max_iterations} iterations at load step {step}/{increments} (residual {residual_norm:.6e}, tolerance {tolerance:.6e})"
+                ),
+            ));
+        }
+    }
+
+    let nodes: Vec<NodeDisplacement> = model
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            let ux = node_value(&system.layout, &displacement, index, 0);
+            let uy = node_value(&system.layout, &displacement, index, 1);
+            let uz = if model.dimension == 3 { node_value(&system.layout, &displacement, index, 2) } else { 0.0 };
+            NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz: 0.0, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
+        })
+        .collect();
+    let max_displacement = nodes
+        .iter()
+        .max_by(|left, right| left.magnitude.partial_cmp(&right.magnitude).unwrap_or(std::cmp::Ordering::Equal))
+        .cloned()
+        .ok_or_else(|| CaeError::new("model/no-nodes", "the model requires at least 1 node"))?;
+
+    Ok(NonlinearSolution {
+        format: NONLINEAR_REPORT_FORMAT.to_string(),
+        version: NONLINEAR_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        increments,
+        iterations,
+        tolerance,
+        residual_norm,
+        nodes,
+        max_displacement,
     })
 }
 

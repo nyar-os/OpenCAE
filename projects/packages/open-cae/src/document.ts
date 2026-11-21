@@ -43,6 +43,8 @@ import type {
     NodeAddRequest,
     NodalStressOptions,
     NodalStressSolution,
+    NonlinearOptions,
+    NonlinearSolution,
     ReactionOptions,
     ReactionSummary,
     Report,
@@ -284,6 +286,12 @@ export class CaeDocument {
     constructionStages(stages: readonly ConstructionStage[], options: ConstructionStageOptions = {}): ConstructionStageSolution {
         this.assertOpen();
         return service.constructionStages(this.path, stages, options);
+    }
+
+    /** Solves a geometric-nonlinear truss model with a Newton iteration. */
+    geometricNonlinear(options: NonlinearOptions = {}): NonlinearSolution {
+        this.assertOpen();
+        return service.geometricNonlinear(this.path, options);
     }
 
     /** Solves the document and returns the full report. */

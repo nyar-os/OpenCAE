@@ -682,6 +682,36 @@ export interface ConstructionStageOptions {
     readonly out?: string;
 }
 
+/** Result of `geometricNonlinear()`. */
+export interface NonlinearSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Number of equal load increments used by the path-following loop. */
+    readonly increments: number;
+    /** Total Newton iterations over all increments. */
+    readonly iterations: number;
+    /** Requested relative convergence tolerance. */
+    readonly tolerance: number;
+    /** Free residual norm of the final accepted state. */
+    readonly residualNorm: number;
+    readonly nodes: readonly NodeDisplacement[];
+    /** Nodal displacement with the largest magnitude. */
+    readonly maxDisplacement: NodeDisplacement;
+}
+
+/** Options of `geometricNonlinear()`. */
+export interface NonlinearOptions {
+    /** Number of equal load increments; defaults to 10. */
+    readonly increments?: number;
+    /** Newton iterations per increment; defaults to 30. */
+    readonly iterations?: number;
+    /** Relative residual target; defaults to `1e-10`. */
+    readonly tolerance?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

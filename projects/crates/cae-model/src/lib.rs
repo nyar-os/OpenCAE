@@ -24,6 +24,8 @@
 //!   I-section properties;
 //! * construction-stage (element birth/death) summaries that solve the active
 //!   subset of elements stage by stage;
+//! * a large-displacement Newton iteration for truss models with the exact
+//!   corotational bar tangent;
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
@@ -66,13 +68,15 @@ pub use crate::{
         INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, LOAD_CASE_REPORT_FORMAT,
         LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT, MATRIX_REPORT_VERSION,
         MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MatrixDof, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape,
-        NODAL_STRESS_REPORT_FORMAT, NODAL_STRESS_REPORT_VERSION, NodalStressGoverning, NodalStressSolution, NodeDisplacement,
-        NodeEnvelope, NodeFrequencyResponse, NodeReaction, NodeStress, REPORT_FORMAT, REPORT_VERSION,
-        RESPONSE_SPECTRUM_REPORT_FORMAT, RESPONSE_SPECTRUM_REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution,
-        STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION, SectionForces, Solution, SpectrumMode, SpectrumPoint, StationStress,
-        StressGoverning, StressSolution, SupportReaction, SystemMatrices, solve, solve_buckling, solve_buckling_combinations,
+        NODAL_STRESS_REPORT_FORMAT, NODAL_STRESS_REPORT_VERSION, NONLINEAR_REPORT_FORMAT, NONLINEAR_REPORT_VERSION,
+        NodalStressGoverning, NodalStressSolution, NodeDisplacement, NodeEnvelope, NodeFrequencyResponse, NodeReaction,
+        NodeStress, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, RESPONSE_SPECTRUM_REPORT_FORMAT,
+        RESPONSE_SPECTRUM_REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution, STRESS_REPORT_FORMAT,
+        STRESS_REPORT_VERSION, SectionForces, Solution, SpectrumMode, SpectrumPoint, StationStress, StressGoverning,
+        StressSolution, SupportReaction, SystemMatrices, solve, solve_buckling, solve_buckling_combinations,
         solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces,
-        solve_matrices, solve_modal, solve_nodal_stress, solve_response_spectrum, solve_stress, summarize_load_cases,
+        solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress,
+        summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -108,6 +112,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "responseSpectrum": "supported",
     "frequencyResponse": "supported",
     "constructionStages": "supported",
+    "geometricNonlinear": "supported",
     "thermalExpansion": "supported",
     "thermalGradient": "supported",
     "partialSpanLoad": "supported",

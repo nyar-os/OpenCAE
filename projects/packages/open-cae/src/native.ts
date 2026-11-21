@@ -43,6 +43,7 @@ export interface NativeBinding {
     response_spectrum(path: string, requestJson: string): string;
     frequency_response(path: string, requestJson: string): string;
     construction_stages(path: string, requestJson: string): string;
+    geometric_nonlinear(path: string, requestJson?: string): string;
     export(path: string, format: string, target: string): string;
     report(path: string): string;
 }

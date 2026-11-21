@@ -22,10 +22,11 @@ use crate::{
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, FrequencyResponseSolution, InternalForceSolution, LoadCaseSummary, ModalSolution,
-        NodalStressSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumPoint,
-        StressSolution, SystemMatrices, solve, solve_buckling, solve_buckling_combinations, solve_combinations,
-        solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces, solve_matrices,
-        solve_modal, solve_nodal_stress, solve_response_spectrum, solve_stress, summarize_load_cases,
+        NodalStressSolution, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution,
+        Solution, SpectrumPoint, StressSolution, SystemMatrices, solve, solve_buckling, solve_buckling_combinations,
+        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces,
+        solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress,
+        summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -885,6 +886,29 @@ impl OpenCae {
             let json = serde_json::to_string_pretty(&result).map_err(|error| {
                 CaeError::new("document/serialize", format!("cannot serialize construction-stage result: {error}"))
             })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(result)
+    }
+
+    /// Solves the open truss model with a large-displacement Newton iteration.
+    ///
+    /// `increments` splits the load into equal steps, `max_iterations` bounds
+    /// the Newton loop of every step and `tolerance` is the relative residual
+    /// target. When `out` is given the JSON report is written atomically to
+    /// that path.
+    pub fn nonlinear(
+        &self,
+        increments: usize,
+        max_iterations: usize,
+        tolerance: f64,
+        out: Option<&Path>,
+    ) -> Result<NonlinearSolution, CaeError> {
+        let model = &self.current()?.model;
+        let result = solve_nonlinear(model, increments, max_iterations, tolerance)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&result)
+                .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize nonlinear result: {error}")))?;
             write_atomic(path, &json)?;
         }
         Ok(result)

@@ -717,6 +717,33 @@ fn construction_stages(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Solves a geometric-nonlinear truss model with a large-displacement Newton
+/// iteration.
+///
+/// The request accepts optional `increments` (default 10), `iterations`
+/// (default 30), `tolerance` (default `1e-10`) and an optional `out` path.
+#[function]
+fn geometric_nonlinear(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let number = |name: &str, default: f64| -> Result<f64> {
+        match request.as_ref().and_then(|request| request.get(name)) {
+            None | Some(Value::Null) => Ok(default),
+            Some(value) => value.as_f64().ok_or_else(|| argument_error(&format!("`{name}` must be a number"))),
+        }
+    };
+    let increments = usize::try_from(number("increments", 10.0)? as u64)
+        .map_err(|_| argument_error("`increments` must be a positive integer"))?;
+    let iterations = usize::try_from(number("iterations", 30.0)? as u64)
+        .map_err(|_| argument_error("`iterations` must be a positive integer"))?;
+    let tolerance = number("tolerance", 1e-10)?;
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.nonlinear(increments, iterations, tolerance, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Exports a solved document as `csv`, `vtk` or `md`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
@@ -770,6 +797,7 @@ register_module![
     response_spectrum,
     frequency_response,
     construction_stages,
+    geometric_nonlinear,
     export,
     report
 ];

@@ -43,6 +43,8 @@ import type {
     NodeAddRequest,
     NodalStressOptions,
     NodalStressSolution,
+    NonlinearOptions,
+    NonlinearSolution,
     OpenCAECapabilities,
     Report,
     ReactionOptions,
@@ -348,6 +350,21 @@ export function constructionStages(
     }
     return decode<ConstructionStageSolution>(() =>
         binding('stage.solve').construction_stages(path, JSON.stringify({ stages, out: options.out })),
+    );
+}
+
+/** Solves a geometric-nonlinear truss model with a Newton iteration. */
+export function geometricNonlinear(path: string, options: NonlinearOptions = {}): NonlinearSolution {
+    return decode<NonlinearSolution>(() =>
+        binding('nonlinear.truss').geometric_nonlinear(
+            path,
+            JSON.stringify({
+                increments: options.increments,
+                iterations: options.iterations,
+                tolerance: options.tolerance,
+                out: options.out,
+            }),
+        ),
     );
 }
 

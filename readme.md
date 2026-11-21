@@ -1,13 +1,13 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, rigid, spring and inclined supports, load combinations, modal (with effective mass), linear buckling (single load case and per load combination) and response-spectrum analysis, assembled stiffness/mass matrix export, plus a built-in material and parametric-section library. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, rigid, spring and inclined supports, load combinations, modal (with effective mass), linear buckling (single load case and per load combination), response-spectrum and steady-state harmonic (frequency-response) analysis, construction-stage (element birth/death) summaries, a geometric-nonlinear truss Newton solver, assembled stiffness/mass matrix export, plus a built-in material and parametric-section library. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
 - teaching, algorithm validation and small regression models in CI;
 - workflows that store models as plain-text JSON and reproduce results from the command line.
 
-It is **not** a general-purpose commercial finite element package: 3D beams/frames, shell/solid elements, nonlinear analysis, steady-state/transient heat transfer and contact are not implemented. Every unimplemented capability fails explicitly (`capability/not-implemented`, exit code `2`) instead of degrading silently. Modal analysis uses a lumped mass matrix, so frequencies and effective masses are finite element approximations; the readme and tests state the error bounds against analytical solutions.
+It is **not** a general-purpose commercial finite element package: 3D beams/frames, shell/solid elements, material nonlinearity, steady-state/transient heat transfer and contact are not implemented. Every unimplemented capability fails explicitly (`capability/not-implemented`, exit code `2`) instead of degrading silently. The nonlinear solver is limited to large-displacement trusses. Modal analysis uses a lumped mass matrix, so frequencies and effective masses are finite element approximations; the readme and tests state the error bounds against analytical solutions.
 
 ## Architecture: the API is the core and the CLI only parses arguments
 
@@ -72,12 +72,12 @@ const cases = document.loadCases();                          // one summary row 
 ```
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/matrices/responseSpectrum/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/matrices/responseSpectrum/frequencyResponse/constructionStages/geometricNonlinear/export/report/save/close`; every edit operation writes atomically to the file.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
 - `addSupport({ direction: [nx, ny] })` defines an inclined or rotated roller in two-dimensional documents. The normalised vector is the constrained displacement direction, so a roller at 30° uses `[cos 30°, sin 30°]`; it is an independent constraint frame and cannot be combined with `dx`, `dy`, a prescribed displacement or a spring on the same entry (`support/invalid-direction`).
-- `matrices()` returns the assembled global stiffness and lumped mass matrices with one label (`node`, `component`, `constrained`) per active degree of freedom. `responseSpectrum({ spectrum, modes, axis })` runs modal superposition with a single-degree-of-freedom spectral acceleration input and combines the modes with SRSS.
+- `matrices()` returns the assembled global stiffness and lumped mass matrices with one label (`node`, `component`, `constrained`) per active degree of freedom. `responseSpectrum({ spectrum, modes, axis })` runs modal superposition with a single-degree-of-freedom spectral acceleration input and combines the modes with SRSS. `frequencyResponse({ damping, startHz, endHz, points, modes, axis })` sweeps a harmonic excitation and returns the sampled amplitudes, the peak sample and every node's peak. `constructionStages([{ name, elements, loads, gravity }])` solves the active element subset of each stage. `geometricNonlinear({ increments, iterations, tolerance })` runs the large-displacement truss Newton iteration.
 - `solve()` defaults to `analysis: 'static'`; `solve({ analysis: 'modal', modes })` returns a `ModalSolution` and `solve({ analysis: 'buckling', modes })` returns a `BucklingSolution` whose factors multiply the static load case.
 - Errors carry stable `code`s (such as `model/mechanism`, `session/no-document`, `capability/not-implemented`) and can be detected with `isOpenCAEError`; the exit-code convention is handled by the CLI.
 
@@ -305,18 +305,21 @@ The file is UTF-8 JSON with camelCase fields:
 | inclined/rotated roller supports (`inclinedSupports`, arbitrary constraint direction in 2D) | ✅ supported |
 | assembled stiffness and mass matrix export (`matrixExport`) | ✅ supported |
 | response-spectrum analysis (`responseSpectrum`, SDOF spectral acceleration input + SRSS) | ✅ supported |
+| harmonic frequency response (`frequencyResponse`, modal superposition sweep, peak frequency/amplitude) | ✅ supported |
+| construction stages / element birth–death summaries (`constructionStages`, active element subsets + stage factors) | ✅ supported |
+| geometric-nonlinear truss analysis (`geometricNonlinear`, corotational Newton iteration with load increments) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
-| nonlinear analysis (`nonlinear`) | ❌ not implemented |
+| material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
 | heat transfer (`thermal`) | ❌ not implemented |
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `thermalGradient`, `partialSpanLoad`, `elasticSupports`, `inclinedSupports`, `matrixExport`, `responseSpectrum`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` and `thermalGradient` cover member temperature actions only; they do not enable the `thermal` heat-transfer analysis, which remains unimplemented.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `thermalGradient`, `partialSpanLoad`, `elasticSupports`, `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`, `constructionStages`, `geometricNonlinear`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK. `thermalExpansion` and `thermalGradient` cover member temperature actions only; they do not enable the `thermal` heat-transfer analysis, which remains unimplemented. `geometricNonlinear` is limited to truss models; the generic `nonlinear` entry (material nonlinearity, beam/frame large displacement) remains unimplemented.
 
 ## Numerical methods
 
@@ -351,6 +354,9 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
 21. **Inclined supports**: a `direction: [nx, ny]` support rotates the node's two translational degrees of freedom into the local frame `Q = [[nx, −ny], [ny, nx]]` with `K ← Qᵀ·K·Q` and `F ← Qᵀ·F`, constrains the local first component (`u·n = 0`) and rotates displacements, reactions and exported matrices back with `Q` (or `Qᵀ·K·Q` in reverse for the stiffness). A 45° bar with a roller perpendicular to its axis therefore extends by `PL/EA` along the bar, carries no roller reaction, and its exported global stiffness is the standard `k·[[c², cs], …]` bar matrix.
 22. **Matrix export**: `solve_matrices(model)` assembles the same active-degree-of-freedom system the solver uses, exposes the dense global `K` (with the inclined-support rotation undone) and the diagonal lumped `M`, and labels every row with its node and component (`ux`, `uy`, `uz` or `rz`) plus whether a support constrains it. A bar's axial `EA/L` terms, a cantilever's `12EI/L³`, `6EI/L²`, `4EI/L` and `2EI/L` terms and the `ρAL/2` / `ρIL/2` masses are asserted directly.
 23. **Response spectrum**: `solve_response_spectrum(model, modes, axis, spectrum)` reuses the mass-normalised modal solution, reads `Sa(T)` by linear interpolation (constant beyond the first and last point), converts it to `Sd = Sa/ω²`, scales each mode by the signed participation factor `Γ` in the requested direction and combines the nodal contributions with SRSS. A single free translational degree of freedom therefore peaks at the static-equivalent `Sd = Sa·m/k`, which is asserted together with the interpolation and validation errors.
+24. **Harmonic frequency response**: `solve_frequency_response(model, modes, axis, damping, start_hz, end_hz, points)` treats the document's static load vector as the harmonic excitation `f(t) = f·sin(ωt)` of the requested direction. With the mass-normalised shapes of the modal solver the modal force is `p_r = φ_rᵀ·f` and the steady-state complex amplitude is `Σ_r φ_r·p_r / (ω_r² − ω² + 2iζω_rω)`; nodal amplitudes are the modulus of the summed translations. The response is read at `points` equally spaced frequencies, the peak is the largest sampled amplitude, and every node's peak frequency/amplitude is reported. The damping ratio is modal and must be positive (zero damping is unbounded at resonance), prescribed non-zero displacements and inclined supports are rejected, and the report names the peak as a **sampled** value, so a finer sweep resolves it better. A single free degree of freedom reproduces the static `F/k` at 0 Hz and the resonant `(F/k)/(2ζ)` exactly.
+25. **Construction stages**: `solve_construction_stages(model, stages)` clones the model per stage, keeps only the elements listed in that stage (omitting the list keeps every element), scales nodal/element loads and gravity with `loads`/`gravity` exactly like a load combination, validates and solves the active submodel, and reports the applied resultant, largest displacement and node, extreme axial force/moment and elements, strain energy and equilibrium flag. Stage names must be unique and non-empty, active element identifiers must exist and `elements: []` is rejected. It is a stage-by-stage linear analysis of the active topology: internal forces are **not** locked in from earlier stages, so erection screens are supported but stress-history/creep-transfer analysis is not.
+26. **Geometric-nonlinear truss**: `solve_nonlinear(model, increments, max_iterations, tolerance)` supports large displacement of truss members only (a beam element returns `capability/not-implemented`). Each bar is treated as a corotational bar with axial force `N = E·A·(L − L₀)/L₀` from the current chord, and the exact tangent `K = E·A/L₀·n·nᵀ + N/L·(I − n·nᵀ)` is assembled. The load and self-weight are split into equal increments; each increment runs Newton until `‖r_free‖ ≤ tolerance·max(1, ‖λf‖)`, and the report contains the total iteration count, final residual and displacements. This formulation includes geometric stiffening/softening (a shallow two-bar truss settles onto its nonlinear equilibrium), but excludes material plasticity, member buckling, beam bending and inclined supports.
 
 ## Validation and tests
 
@@ -448,6 +454,12 @@ pnpm --filter @wae/open-cae run typecheck
 - the exported matrix round-trips through the inclined frame: the global bar stiffness `k·[[c², cs], …]`, the constrained local row and a bar's `EA/L`, `12EI/L³` and `4EI/L` terms plus the lumped `ρAL/2`/`ρIL/2` masses (`1e-12`);
 - a single free translational degree of freedom peaks at `Sd = Sa·m/k` with `Γ = √m` (`1e-9`), the spectrum is linearly interpolated, and empty/negative-period spectra and unavailable axes are rejected.
 
+`projects/crates/cae-model/tests/frequency_response.rs`, `tests/construction_stages.rs` and `tests/nonlinear.rs` assert the newer capabilities:
+
+- the single-degree-of-freedom bar reproduces the static `F/k` at 0 Hz and the resonant amplitude `(F/k)/(2ζ)` at the natural frequency (`1e-9`), with the peak frequency equal to the analytic `f_n`; zero modes, fewer than two points, an empty range, zero damping and an unavailable axis are rejected;
+- activation of only the first of two beam elements gives the cantilever `PL³/3EI`, activating both gives the propped-cantilever `7P(2L)³/768EI`, doubling the stage factor doubles the displacement and quadruples the strain energy (`1e-9`); empty, duplicate, unnamed, non-finite and unknown-element stages are rejected;
+- a bar under axial load reproduces `PL/EA`, and a shallow two-bar truss settles onto the scalar nonlinear equilibrium (`|u_y| = v`, bisection reference, `1e-6`) with a small final residual; beam models, zero increments/iterations and a non-positive tolerance are rejected.
+
 For the single-bar benchmark (L=1000 mm, E=210000 MPa, A=100 mm², P=1000 N) the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`; the tests assert against the analytical expressions with a relative error threshold of `1e-9`.
 
 ## Repository structure
@@ -460,7 +472,7 @@ projects/
     src/model.rs         data model and document I/O
     src/library.rs       built-in material presets and section properties
     src/validate.rs      validation rules and mechanism detection
-    src/solver.rs        truss/beam stiffness, DOF activation, Gaussian elimination, Jacobi modal/buckling solvers, internal forces and stress recovery
+    src/solver.rs        truss/beam stiffness, DOF activation, Gaussian elimination, Jacobi modal/buckling solvers, harmonic response, construction stages, large-displacement truss Newton, internal forces and stress recovery
     src/export.rs        CSV / VTK / Markdown / HTML export and atomic writes
     src/bin/ocae.rs      thin CLI: argument parsing, API calls, printing and exit codes
     tests/cae_model.rs   truss model solve and export tests
@@ -478,9 +490,12 @@ projects/
     tests/inclined_support.rs  arbitrary-direction (inclined) support tests
     tests/matrices.rs    assembled stiffness and lumped mass matrix tests
     tests/response_spectrum.rs  SDOF spectral-acceleration and SRSS tests
+    tests/frequency_response.rs  harmonic sweep, resonance and validation tests
+    tests/construction_stages.rs  element activation and stage summary tests
+    tests/nonlinear.rs   large-displacement truss Newton tests
     tests/session.rs     CLI-equivalent path tests for the session API
   crates/napi/           `open-cae-napi`: orthogonal Node-API exports
-    src/lib.rs           version/capabilities/create/open/save/…/report
+    src/lib.rs           version/capabilities/…/frequencyResponse/constructionStages/geometricNonlinear/report
   packages/open-cae/     `@wae/open-cae` TypeScript SDK and `open-cae` CLI
     src/open-cae.ts      `new OpenCAE()` session
     src/document.ts      `CaeDocument` document
@@ -494,7 +509,9 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 ## Limitations
 
 - Beams are **2D Euler-Bernoulli only** (no shear deformation, no axial-bending coupling); bending-moment **end releases are supported** as condensed hinges. **3D beams/frames (beam3d / frame3d) are not implemented** and return `capability/not-implemented`.
-- Only **linear elastic, small deformation** analysis is supported; geometric/material nonlinearity, dynamic time history, heat transfer, contact and prestress are not supported. Prescribed displacements are supported as a single static kinematic boundary condition, not as a time-dependent or multi-step loading history.
+- Static analysis is **linear elastic, small deformation**, with one deliberate exception: `geometricNonlinear` runs a large-displacement Newton iteration for **truss models only**. Material nonlinearity, beam/frame large displacement, plasticity, dynamic time history, heat transfer, contact and prestress are not supported. Prescribed displacements are supported as a single static kinematic boundary condition, not as a time-dependent or multi-step loading history.
+- Construction stages solve each active topology **independently**: loads and gravity are scaled per stage, but internal forces are not locked into members that carry them onwards, so a true staged stress-history/creep analysis is not modelled.
+- The harmonic frequency response uses **modal superposition with one damping ratio for every mode** and reports peaks read from the sampled frequencies; it is not a direct complex solve, and zero damping, non-zero prescribed displacements and inclined supports are rejected.
 - Buckling is a **linearized eigenvalue analysis** (Euler buckling) based on the static axial forces of one load case. It does not track post-buckling behaviour, imperfection sensitivity, plasticity or load-history effects. Three-dimensional beams remain unsupported, so three-dimensional buckling is limited to truss models.
 - Loads are limited to **nodal concentrated forces/moments**, **element transverse loads that are uniform or linear along the member in the local `+y` direction** (optionally limited to part of the span), **uniform member temperature changes** (axial expansion only) and a **through-depth temperature gradient** (thermal bending). Heat transfer, arbitrary curved distributed loads and loads in a global direction are not supported; load combinations do not scale temperature changes.
 - Load combinations only scale the **single applied load set and self-weight**; independent named load patterns (separate live-load cases) are not modelled, so a combination cannot mix two different nodal load layouts.
@@ -502,7 +519,7 @@ The root `Cargo.toml` uses a workspace. Because Cargo treats the intermediate di
 - Spring supports are **linear elastic and two-way**: no tension-only/compression-only (gap) behaviour, no friction, no plasticity, and no nonlinear force-displacement law is modelled.
 - Inclined supports constrain **one translational direction** in two-dimensional documents; a prescribed settlement along that direction, a second independent normal at the same node, and three-dimensional inclined constraints are not modelled.
 - Beam stress recovery is **sampled** at the requested stations and uses the global material section. Shear stress distributions, stress concentrations and fibre-level plasticity are not modelled.
-- Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes. Response-spectrum analysis is available, but it uses the SRSS combination only (no CQC or complete quadratic combination), no rotational/rocking excitation, and no ductility or inelastic spectrum modification.
+- Modal analysis uses a **lumped mass matrix** and ignores constrained degrees of freedom; frequencies and mode shapes are finite element approximations. Results contain only the lowest few modes. Response-spectrum analysis is available, but it uses the SRSS combination only (no CQC or complete quadratic combination), no rotational/rocking excitation, and no ductility or inelastic spectrum modification. Harmonic response inherits the same mass matrix and shape approximation.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads** (beam transverse direction); this is exact in equilibrium and approximate in displacement, and does not replace a consistent mass matrix.
 - The solver is **dense**: memory `O(n²)` and time `O(n³)`, suitable for small models but not for large engineering models.
 - Mechanism detection is based on numerical pivot thresholds; extremely ill-conditioned but theoretically stable structures may be misclassified.
