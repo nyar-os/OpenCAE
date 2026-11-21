@@ -309,7 +309,7 @@ The file is UTF-8 JSON with camelCase fields:
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `elasticSupports`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` covers uniform member temperature changes only; it does not enable the `thermal` heat-transfer analysis, which remains unimplemented.
+The machine-readable version is printed by `ocae capabilities` and matches actual behaviour: `beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point, while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`, `thermalGradient`, `partialSpanLoad`, `elasticSupports`, `deflections`, `nodalStress` and `loadCases` are available through the Rust API, the native addon and the TypeScript SDK/CLI for the supported model families. `thermalExpansion` and `thermalGradient` cover member temperature actions only; they do not enable the `thermal` heat-transfer analysis, which remains unimplemented.
 
 ## Numerical methods
 

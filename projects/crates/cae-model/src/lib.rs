@@ -96,6 +96,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "materialLibrary": "supported",
     "elasticSupports": "supported",
     "thermalExpansion": "supported",
+    "thermalGradient": "supported",
+    "partialSpanLoad": "supported",
     "thermal": "unsupported"
   },
   "io": {
