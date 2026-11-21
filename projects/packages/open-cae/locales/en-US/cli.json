@@ -35,6 +35,7 @@
             "  ocae nodal-stresses <file> [--stations N] [--out report.json]",
             "  ocae load-cases <file> [--out report.json]",
             "  ocae matrices <file> [--out report.json]",
+            "  ocae spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]",
             "  ocae export <file> --format csv|vtk|md|html --out <dir|file>",
             "  ocae report <file>",
             "  ocae capabilities"
@@ -76,7 +77,10 @@
             "invalidStations": "`--stations` value `{value}` is not an integer of at least 2",
             "modesRequireModal": "`--modes` only applies to `--analysis modal` or `--analysis buckling`",
             "dimensionMismatch": "`--dimension {requested}` does not match document dimension {dimension}; change the document or drop the option",
-            "noFreedom": "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz`, `--rotation`, `--kx`, `--ky`, `--kz` or `--kr`, otherwise the support has no effect"
+            "noFreedom": "specify at least one of `--dx`, `--dy`, `--dz`, `--rz`, `--ux`, `--uy`, `--uz`, `--rotation`, `--kx`, `--ky`, `--kz` or `--kr`, otherwise the support has no effect",
+            "invalidSpectrumPoint": "spectrum point `{point}` must use the form `period:acceleration`",
+            "emptySpectrum": "provide at least one `period:acceleration` spectrum point",
+            "unknownSpectrumAxis": "unknown spectrum axis `{value}`; use `x`, `y` or `z`"
         }
     }
 }

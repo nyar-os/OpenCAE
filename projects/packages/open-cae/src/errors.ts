@@ -32,6 +32,8 @@ export const errorCodes = [
     'model/mechanism',
     'analysis/invalid-modes',
     'analysis/invalid-stations',
+    'analysis/invalid-axis',
+    'analysis/invalid-spectrum',
     'buckling/non-finite',
     'combination/invalid-name',
     'combination/invalid-factor',
@@ -65,6 +67,7 @@ export const errorCodes = [
     'cli/invalid-units',
     'cli/unknown-format',
     'cli/dimension-mismatch',
+    'cli/invalid-spectrum',
     'capability/not-implemented',
 ] as const;
 

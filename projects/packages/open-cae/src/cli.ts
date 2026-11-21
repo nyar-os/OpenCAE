@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import type { CaeDocument } from './document.js';
 import { NotImplementedError, OpenCAEError, type OpenCAEErrorCode } from './errors.js';
 import { OpenCAE } from './open-cae.js';
-import type { Analysis, Dimension, ElementKind, ExportFormat, Section, Units } from './types.js';
+import type { Analysis, Dimension, ElementKind, ExportFormat, Section, SpectrumPoint, Units } from './types.js';
 
 interface CliLocale {
     readonly cli: {
@@ -227,6 +227,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return loadCasesCommand(args.slice(1));
         case 'matrices':
             return matricesCommand(args.slice(1));
+        case 'spectrum':
+            return spectrumCommand(args.slice(1));
         case 'export':
             return exportCommand(args.slice(1));
         case 'report':
@@ -947,6 +949,56 @@ async function matricesCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.matrices({ out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+function parseSpectrum(value: string): readonly SpectrumPoint[] {
+    const points: SpectrumPoint[] = [];
+    for (const item of value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0)) {
+        const separator = item.indexOf(':');
+        if (separator < 0) {
+            throw failure('cli/invalid-spectrum', 'invalidSpectrumPoint', { point: item });
+        }
+        const period = Number(item.slice(0, separator).trim());
+        const acceleration = Number(item.slice(separator + 1).trim());
+        if (!Number.isFinite(period) || !Number.isFinite(acceleration)) {
+            throw failure('cli/invalid-spectrum', 'invalidSpectrumPoint', { point: item });
+        }
+        points.push({ period, acceleration });
+    }
+    if (points.length === 0) {
+        throw failure('cli/invalid-spectrum', 'emptySpectrum', {});
+    }
+    return points;
+}
+
+function spectrumAxisOption(parsed: Parsed): 'x' | 'y' | 'z' {
+    const raw = parsed.options.get('--axis') ?? 'x';
+    if (raw === 'x' || raw === 'y' || raw === 'z') {
+        return raw;
+    }
+    throw failure('cli/invalid-option', 'unknownSpectrumAxis', { value: raw });
+}
+
+async function spectrumCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--modes', '--axis', '--spectrum', '--out'], []);
+    const file = positional(
+        parsed,
+        0,
+        'spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]',
+    );
+    const spectrum = parseSpectrum(required(parsed, '--spectrum'));
+    const axis = spectrumAxisOption(parsed);
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.responseSpectrum({
+            modes: modesOption(parsed),
+            axis,
+            spectrum,
+            out: parsed.options.get('--out'),
+        });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });

@@ -42,6 +42,8 @@ import type {
     Report,
     ReactionOptions,
     ReactionSummary,
+    ResponseSpectrumOptions,
+    ResponseSpectrumSolution,
     Solution,
     SolveOptions,
     StressOptions,
@@ -282,6 +284,26 @@ export function loadCases(path: string, options: LoadCaseOptions = {}): LoadCase
         request === undefined
             ? binding('load.cases').load_cases(path)
             : binding('load.cases').load_cases(path, request),
+    );
+}
+
+/** Solves a response-spectrum analysis by modal superposition (SRSS). */
+export function responseSpectrum(path: string, options: ResponseSpectrumOptions): ResponseSpectrumSolution {
+    if (!Array.isArray(options.spectrum) || options.spectrum.length === 0) {
+        throw new OpenCAEError('session/argument-invalid', '`spectrum` must contain at least one point', {
+            details: { feature: 'spectrum' },
+        });
+    }
+    return decode<ResponseSpectrumSolution>(() =>
+        binding('spectrum.solve').response_spectrum(
+            path,
+            JSON.stringify({
+                modes: options.modes,
+                axis: options.axis,
+                spectrum: options.spectrum,
+                out: options.out,
+            }),
+        ),
     );
 }
 

@@ -73,6 +73,12 @@ pub const MATRIX_REPORT_VERSION: u32 = 1;
 /// Format tag of the assembled stiffness and mass matrix report.
 pub const MATRIX_REPORT_FORMAT: &str = "open-cae-matrix-report";
 
+/// Version of the JSON report produced by [`solve_response_spectrum`].
+pub const RESPONSE_SPECTRUM_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the response-spectrum JSON report.
+pub const RESPONSE_SPECTRUM_REPORT_FORMAT: &str = "open-cae-response-spectrum-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -330,6 +336,62 @@ pub struct ModalSolution {
     pub total_mass: [f64; 3],
     /// Modes in ascending frequency order.
     pub modes: Vec<Mode>,
+}
+
+/// One point of a response spectrum.
+///
+/// The spectrum gives the spectral acceleration of a single-degree-of-freedom
+/// oscillator as a function of its natural period; values between points are
+/// interpolated linearly and the end values are held constant beyond the first
+/// and last point.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpectrumPoint {
+    /// Natural period in seconds; must be finite and non-negative.
+    pub period: f64,
+    /// Spectral acceleration in document length per second squared.
+    pub acceleration: f64,
+}
+
+/// One mode of a response-spectrum analysis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpectrumMode {
+    /// Natural frequency in hertz.
+    pub frequency_hz: f64,
+    /// Natural period `1 / frequency` in seconds.
+    pub period: f64,
+    /// Spectral acceleration read from the input spectrum at `period`.
+    pub spectral_acceleration: f64,
+    /// Signed participation factor of the mode in the analysed direction.
+    pub participation_factor: f64,
+    /// Spectral displacement `Sa / ω²`.
+    pub spectral_displacement: f64,
+    /// Modal displacement amplitude `Γ · Sd`.
+    pub scale: f64,
+}
+
+/// Result of [`solve_response_spectrum`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseSpectrumSolution {
+    /// Report format tag, always `open-cae-response-spectrum-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Analysed global direction (`x`, `y` or `z`).
+    pub axis: String,
+    /// Requested number of modes.
+    pub requested: usize,
+    /// Modes used in the combination, in ascending frequency order.
+    pub modes: Vec<SpectrumMode>,
+    /// Combined nodal displacements after the square-root-of-sum-of-squares
+    /// (SRSS) modal combination.
+    pub nodes: Vec<NodeDisplacement>,
+    /// Nodal displacement with the largest SRSS magnitude.
+    pub max_displacement: NodeDisplacement,
 }
 
 /// One linear buckling mode.
@@ -1298,6 +1360,139 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
         total_mass,
         modes: result_modes,
     })
+}
+
+/// Solves a response-spectrum analysis by modal superposition.
+///
+/// The model must have a positive density and be solvable by [`solve_modal`],
+/// which supplies the mass-normalized mode shapes and signed participation
+/// factors. For every mode the spectral acceleration `Sa(T)` is read from
+/// `spectrum` at its natural period, converted into the spectral displacement
+/// `Sd = Sa / ω²`, and scaled by the participation factor `Γ` in the requested
+/// global direction (`0 = x`, `1 = y`, `2 = z`). The modal displacement
+/// contributions are combined with the square-root-of-sum-of-squares (SRSS)
+/// rule, so every node receives the peak displacement magnitude of the
+/// linearly elastic response.
+///
+/// Spectral accelerations use the document length unit per second squared, for
+/// example `mm/s²` with millimetre documents. An empty spectrum, a negative or
+/// non-finite period, a non-finite acceleration, an unavailable direction or a
+/// mode count of zero is rejected with a stable `analysis/...` code.
+pub fn solve_response_spectrum(
+    model: &Model,
+    modes: usize,
+    axis: usize,
+    spectrum: &[SpectrumPoint],
+) -> Result<ResponseSpectrumSolution, CaeError> {
+    let translations = if model.dimension == 3 { 3 } else { 2 };
+    if axis >= translations {
+        return Err(CaeError::new(
+            "analysis/invalid-axis",
+            format!(
+                "response-spectrum axis {axis} is not available in a {}-dimensional model; use axis 0 or 1",
+                model.dimension
+            ),
+        ));
+    }
+    if spectrum.is_empty() {
+        return Err(CaeError::new("analysis/invalid-spectrum", "the response spectrum requires at least one point"));
+    }
+    for point in spectrum {
+        if !point.period.is_finite() || point.period < 0.0 {
+            return Err(CaeError::new(
+                "analysis/invalid-spectrum",
+                format!("spectrum period must be finite and non-negative (currently {})", point.period),
+            ));
+        }
+        if !point.acceleration.is_finite() {
+            return Err(CaeError::new(
+                "analysis/invalid-spectrum",
+                format!("spectrum acceleration must be finite (currently {})", point.acceleration),
+            ));
+        }
+    }
+    let mut sorted = spectrum.to_vec();
+    sorted.sort_by(|left, right| left.period.partial_cmp(&right.period).unwrap_or(std::cmp::Ordering::Equal));
+
+    let modal = solve_modal(model, modes)?;
+    let mut accumulated = vec![[0.0_f64; 4]; model.nodes.len()];
+    let mut result_modes = Vec::with_capacity(modal.modes.len());
+    for mode in &modal.modes {
+        if !positive_finite(mode.frequency_hz) || !positive_finite(mode.eigenvalue) {
+            continue;
+        }
+        let period = 1.0 / mode.frequency_hz;
+        let spectral_acceleration = interpolate_spectrum(&sorted, period);
+        let spectral_displacement = spectral_acceleration / mode.eigenvalue;
+        let participation_factor = mode.participation_factor[axis];
+        let scale = participation_factor * spectral_displacement;
+        for (node, shape) in mode.shape.iter().enumerate() {
+            accumulated[node][0] += (scale * shape.ux).powi(2);
+            accumulated[node][1] += (scale * shape.uy).powi(2);
+            accumulated[node][2] += (scale * shape.uz).powi(2);
+            accumulated[node][3] += (scale * shape.rz).powi(2);
+        }
+        result_modes.push(SpectrumMode {
+            frequency_hz: mode.frequency_hz,
+            period,
+            spectral_acceleration,
+            participation_factor,
+            spectral_displacement,
+            scale,
+        });
+    }
+
+    let nodes: Vec<NodeDisplacement> = model
+        .nodes
+        .iter()
+        .zip(&accumulated)
+        .map(|(node, values)| {
+            let ux = values[0].sqrt();
+            let uy = values[1].sqrt();
+            let uz = if model.dimension == 3 { values[2].sqrt() } else { 0.0 };
+            let rz = if model.dimension == 2 { values[3].sqrt() } else { 0.0 };
+            NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
+        })
+        .collect();
+    let max_displacement = nodes
+        .iter()
+        .max_by(|left, right| left.magnitude.partial_cmp(&right.magnitude).unwrap_or(std::cmp::Ordering::Equal))
+        .cloned()
+        .ok_or_else(|| CaeError::new("model/no-nodes", "the model requires at least 1 node"))?;
+
+    Ok(ResponseSpectrumSolution {
+        format: RESPONSE_SPECTRUM_REPORT_FORMAT.to_string(),
+        version: RESPONSE_SPECTRUM_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        axis: ["x", "y", "z"][axis].to_string(),
+        requested: modes,
+        modes: result_modes,
+        nodes,
+        max_displacement,
+    })
+}
+
+/// Piecewise-linear spectral acceleration with constant end values.
+fn interpolate_spectrum(points: &[SpectrumPoint], period: f64) -> f64 {
+    let Some(first) = points.first()
+    else {
+        return 0.0;
+    };
+    if period <= first.period {
+        return first.acceleration;
+    }
+    for window in points.windows(2) {
+        let (left, right) = (window[0], window[1]);
+        if period <= right.period {
+            let span = right.period - left.period;
+            if span <= 0.0 {
+                return right.acceleration;
+            }
+            let fraction = (period - left.period) / span;
+            return left.acceleration + fraction * (right.acceleration - left.acceleration);
+        }
+    }
+    points.last().map(|point| point.acceleration).unwrap_or(0.0)
 }
 
 /// Solves the linear buckling eigenproblem `(K + λ·Kg)·φ = 0` for the lowest

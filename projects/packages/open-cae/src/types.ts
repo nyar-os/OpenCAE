@@ -526,6 +526,57 @@ export interface MatrixOptions {
     readonly out?: string;
 }
 
+/** One point of a response spectrum. */
+export interface SpectrumPoint {
+    /** Natural period in seconds; must be finite and non-negative. */
+    readonly period: number;
+    /** Spectral acceleration in document length per second squared. */
+    readonly acceleration: number;
+}
+
+/** One mode of a response-spectrum analysis. */
+export interface SpectrumMode {
+    readonly frequencyHz: number;
+    readonly period: number;
+    /** Spectral acceleration read from the input spectrum at `period`. */
+    readonly spectralAcceleration: number;
+    /** Signed participation factor in the analysed direction. */
+    readonly participationFactor: number;
+    /** Spectral displacement `Sa / ω²`. */
+    readonly spectralDisplacement: number;
+    /** Modal displacement amplitude `Γ · Sd`. */
+    readonly scale: number;
+}
+
+/** Result of `responseSpectrum()`. */
+export interface ResponseSpectrumSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Analysed global direction (`x`, `y` or `z`). */
+    readonly axis: string;
+    /** Requested number of modes. */
+    readonly requested: number;
+    /** Modes used in the combination, in ascending frequency order. */
+    readonly modes: readonly SpectrumMode[];
+    /** Combined nodal displacements after the SRSS modal combination. */
+    readonly nodes: readonly NodeDisplacement[];
+    /** Nodal displacement with the largest SRSS magnitude. */
+    readonly maxDisplacement: NodeDisplacement;
+}
+
+/** Options of `responseSpectrum()`. */
+export interface ResponseSpectrumOptions {
+    /** Number of modes; defaults to 5. */
+    readonly modes?: number;
+    /** Global direction of the excitation; defaults to `x`. */
+    readonly axis?: 'x' | 'y' | 'z';
+    /** Spectral acceleration points; values between points are interpolated linearly. */
+    readonly spectrum: readonly SpectrumPoint[];
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

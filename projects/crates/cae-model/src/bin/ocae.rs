@@ -12,7 +12,8 @@ use std::{
 };
 
 use cae_model::{
-    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, not_implemented,
+    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumPoint, Units,
+    not_implemented,
 };
 
 const USAGE: &str = "\
@@ -54,6 +55,7 @@ Usage:
   ocae nodal-stresses <file> [--stations N] [--out report.json]
   ocae load-cases <file> [--out report.json]
   ocae matrices <file> [--out report.json]
+  ocae spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]
   ocae export <file> --format csv|vtk|md|html --out <dir|file>
   ocae report <file>
   ocae capabilities
@@ -112,6 +114,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "nodal-stresses" => nodal_stresses_command(&args[1..]),
         "load-cases" => load_cases_command(&args[1..]),
         "matrices" => matrices_command(&args[1..]),
+        "spectrum" => spectrum_command(&args[1..]),
         "export" => export(&args[1..]),
         "report" => report(&args[1..]),
         "import" => Err(not_implemented("Abaqus .inp import")),
@@ -776,6 +779,61 @@ fn load_cases_command(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.load_cases(out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
+    Ok(0)
+}
+
+fn parse_spectrum(value: &str) -> Result<Vec<SpectrumPoint>, CaeError> {
+    let mut points = Vec::new();
+    for item in value.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+        let (period, acceleration) = item.split_once(':').ok_or_else(|| {
+            CaeError::new("cli/invalid-spectrum", format!("spectrum point `{item}` must use the form `period:acceleration`"))
+        })?;
+        let period = period.trim().parse::<f64>().map_err(|_| {
+            CaeError::new(
+                "cli/invalid-spectrum",
+                format!("period `{}` of spectrum point `{item}` is not a number", period.trim()),
+            )
+        })?;
+        let acceleration = acceleration.trim().parse::<f64>().map_err(|_| {
+            CaeError::new(
+                "cli/invalid-spectrum",
+                format!("acceleration `{}` of spectrum point `{item}` is not a number", acceleration.trim()),
+            )
+        })?;
+        points.push(SpectrumPoint { period, acceleration });
+    }
+    if points.is_empty() {
+        return Err(CaeError::new("cli/invalid-spectrum", "provide at least one `period:acceleration` spectrum point"));
+    }
+    Ok(points)
+}
+
+fn parse_axis(value: &str) -> Result<usize, CaeError> {
+    match value {
+        "x" => Ok(0),
+        "y" => Ok(1),
+        "z" => Ok(2),
+        other => {
+            Err(CaeError::new("cli/invalid-option", format!("unknown spectrum axis `{other}`; only x, y or z is supported")))
+        }
+    }
+}
+
+fn spectrum_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--modes", "--axis", "--spectrum", "--out"], &[])?;
+    let file = positional(&parsed, 0, "spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]")?;
+    let modes = parse_modes(&parsed)?;
+    let axis = match parsed.options.get("--axis") {
+        Some(value) => parse_axis(value)?,
+        None => 0,
+    };
+    let spectrum_value = required(&parsed, "--spectrum")?;
+    let spectrum = parse_spectrum(spectrum_value)?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let result = session.response_spectrum(modes, axis, &spectrum, out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(0)
 }
 

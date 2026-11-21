@@ -15,7 +15,8 @@
 use std::path::Path;
 
 use cae_model::{
-    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, Units, library_json,
+    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumPoint, Units,
+    library_json,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -603,6 +604,36 @@ fn load_cases(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Solves a response-spectrum analysis by modal superposition.
+///
+/// The request accepts `spectrum` (array of `{ period, acceleration }` points),
+/// optional `modes` (default 5), `axis` (`"x"`, `"y"` or `"z"`, default `"x"`)
+/// and an optional `out` path. Modes are combined with SRSS.
+#[function]
+fn response_spectrum(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let spectrum: Vec<SpectrumPoint> = match request.get("spectrum") {
+        Some(value) => {
+            serde_json::from_value(value.clone()).map_err(|error| argument_error(&format!("`spectrum` is invalid: {error}")))?
+        }
+        None => return Err(argument_error("`spectrum` is required")),
+    };
+    let modes = usize::try_from(request.get("modes").and_then(Value::as_u64).unwrap_or(5))
+        .map_err(|_| argument_error("`modes` must be a positive integer"))?;
+    let axis = match request.get("axis").and_then(Value::as_str).unwrap_or("x") {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        other => return Err(argument_error(&format!("`axis` must be `x`, `y` or `z`, not `{other}`"))),
+    };
+    let out = request.get("out").and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.response_spectrum(modes, axis, &spectrum, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Exports the assembled global stiffness and lumped mass matrices and returns
 /// the report.
 ///
@@ -668,6 +699,7 @@ register_module![
     nodal_stresses,
     load_cases,
     matrices,
+    response_spectrum,
     export,
     report
 ];

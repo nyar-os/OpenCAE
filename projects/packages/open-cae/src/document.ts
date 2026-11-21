@@ -41,6 +41,8 @@ import type {
     ReactionOptions,
     ReactionSummary,
     Report,
+    ResponseSpectrumOptions,
+    ResponseSpectrumSolution,
     Solution,
     SolveOptions,
     StressOptions,
@@ -259,6 +261,12 @@ export class CaeDocument {
     matrices(options: MatrixOptions = {}): SystemMatrices {
         this.assertOpen();
         return service.matrices(this.path, options);
+    }
+
+    /** Solves a response-spectrum analysis and combines the modes with SRSS. */
+    responseSpectrum(options: ResponseSpectrumOptions): ResponseSpectrumSolution {
+        this.assertOpen();
+        return service.responseSpectrum(this.path, options);
     }
 
     /** Solves the document and returns the full report. */
