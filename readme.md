@@ -1,13 +1,13 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, modal and linear buckling analysis. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, load combinations, modal (with effective mass) and linear buckling analysis. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
 - teaching, algorithm validation and small regression models in CI;
 - workflows that store models as plain-text JSON and reproduce results from the command line.
 
-It is **not** a general-purpose commercial finite element package: 3D beams/frames, nonlinear, thermal and contact analysis are not implemented. Every unimplemented capability fails explicitly (`capability/not-implemented`, exit code `2`) instead of degrading silently. Modal analysis uses a lumped mass matrix, so frequencies are finite element approximations; the readme and tests state the error bounds against analytical solutions.
+It is **not** a general-purpose commercial finite element package: 3D beams/frames, shell/solid elements, nonlinear, thermal and contact analysis are not implemented. Every unimplemented capability fails explicitly (`capability/not-implemented`, exit code `2`) instead of degrading silently. Modal analysis uses a lumped mass matrix, so frequencies and effective masses are finite element approximations; the readme and tests state the error bounds against analytical solutions.
 
 ## Architecture: the API is the core and the CLI only parses arguments
 
@@ -58,6 +58,10 @@ document.addSupport({ node: 'n1', dx: true, dy: true, rz: true });
 document.setGravity({ gy: -9810 });                 // optional: self-weight
 const modal = document.solve({ analysis: 'modal', modes: 5 });
 document.export('md', 'out/report.md');              // deterministic Markdown report
+
+document.addCombination({ name: 'D+L', loads: 1, gravity: 1 });
+const combinations = document.solveCombinations();   // solutions + envelope
+const forces = document.internalForces({ stations: 11 }); // N/V/M diagrams
 ```
 
 - Sessions: `capabilities()`, `create(path, options?)`, `open(path)`, `dispose()`.

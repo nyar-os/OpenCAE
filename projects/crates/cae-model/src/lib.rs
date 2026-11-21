@@ -81,7 +81,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "csv": "supported",
     "vtk": "supported",
     "md": "supported",
-    "svg": "supported",
+    "svg": "unsupported",
     "inp": "unsupported",
     "step": "unsupported"
   }
