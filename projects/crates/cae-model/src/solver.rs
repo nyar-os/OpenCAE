@@ -67,6 +67,12 @@ pub const LOAD_CASE_REPORT_VERSION: u32 = 1;
 /// Format tag of the load-case summary JSON report.
 pub const LOAD_CASE_REPORT_FORMAT: &str = "open-cae-load-case-report";
 
+/// Version of the JSON report produced by [`solve_matrices`].
+pub const MATRIX_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the assembled stiffness and mass matrix report.
+pub const MATRIX_REPORT_FORMAT: &str = "open-cae-matrix-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -679,6 +685,39 @@ pub struct LoadCaseSummary {
     pub cases: Vec<LoadCaseResult>,
 }
 
+/// One active degree of freedom of an assembled system.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixDof {
+    /// Node identifier.
+    pub node: String,
+    /// Component name (`ux`, `uy`, `uz` or `rz`).
+    pub component: String,
+    /// `true` when a support constrains this degree of freedom.
+    pub constrained: bool,
+}
+
+/// Assembled global stiffness and mass matrices in active degree-of-freedom
+/// order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMatrices {
+    /// Report format tag, always `open-cae-matrix-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of active degrees of freedom.
+    pub size: usize,
+    /// Degree-of-freedom labels in matrix row/column order.
+    pub dofs: Vec<MatrixDof>,
+    /// Dense global stiffness matrix in `dofs` order.
+    pub stiffness: Vec<Vec<f64>>,
+    /// Dense global mass matrix; the lumped mass model is diagonal.
+    pub mass: Vec<Vec<f64>>,
+}
+
 /// One solved load combination.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1078,6 +1117,65 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
         max_axial_force,
         max_moment,
     })
+}
+
+/// Exports the assembled global stiffness and lumped mass matrices.
+///
+/// Every active degree of freedom of the model is included, in the same order
+/// the solver uses, and each row records whether a support constrains it. The
+/// matrices are dense and expressed in the global coordinate system, so their
+/// rows and columns can be checked against hand-assembled values. The mass
+/// matrix follows the lumped model of [`solve_modal`] and is diagonal; a
+/// density of zero therefore yields a zero mass matrix rather than an error.
+pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
+    if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
+        return Err(CaeError::new(issue.code, issue.message));
+    }
+    let system = assemble(model)?;
+    let layout = &system.layout;
+    let size = layout.size;
+    let mass = mass_matrix(model, layout)?;
+    let mut dofs = Vec::with_capacity(size);
+    for node in 0..model.nodes.len() {
+        for component in 0..layout.slots {
+            let Some(dof) = layout.index.get(node * layout.slots + component).copied().flatten()
+            else {
+                continue;
+            };
+            let name = component_name(model, layout, component);
+            dofs.push(MatrixDof {
+                node: model.nodes[node].id.clone(),
+                component: name.to_string(),
+                constrained: system.constrained[dof],
+            });
+        }
+    }
+    let stiffness = (0..size).map(|row| system.stiffness[row * size..(row + 1) * size].to_vec()).collect();
+    let mut mass_rows = vec![vec![0.0; size]; size];
+    for (index, value) in mass.iter().enumerate().take(size) {
+        mass_rows[index][index] = *value;
+    }
+    Ok(SystemMatrices {
+        format: MATRIX_REPORT_FORMAT.to_string(),
+        version: MATRIX_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        size,
+        dofs,
+        stiffness,
+        mass: mass_rows,
+    })
+}
+
+fn component_name(model: &Model, layout: &Layout, component: usize) -> &'static str {
+    if model.dimension == 3 {
+        ["ux", "uy", "uz"][component]
+    }
+    else if layout.uses_rotation {
+        ["ux", "uy", "rz"][component]
+    }
+    else {
+        ["ux", "uy"][component]
+    }
 }
 
 /// Solves the generalized eigenproblem `K·φ = ω²·M·φ` with a diagonal mass

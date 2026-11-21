@@ -22,8 +22,9 @@ use crate::{
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, DeflectionSolution, InternalForceSolution,
         LoadCaseSummary, ModalSolution, NodalStressSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, Solution,
-        StressSolution, solve, solve_buckling, solve_buckling_combinations, solve_combinations, solve_deflection,
-        solve_internal_forces, solve_modal, solve_nodal_stress, solve_stress, summarize_load_cases,
+        StressSolution, SystemMatrices, solve, solve_buckling, solve_buckling_combinations, solve_combinations,
+        solve_deflection, solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_stress,
+        summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -807,6 +808,20 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(combinations)
+    }
+
+    /// Exports the assembled global stiffness and lumped mass matrices.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn matrices(&self, out: Option<&Path>) -> Result<SystemMatrices, CaeError> {
+        let model = &self.current()?.model;
+        let matrices = solve_matrices(model)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&matrices)
+                .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize matrix report: {error}")))?;
+            write_atomic(path, &json)?;
+        }
+        Ok(matrices)
     }
 
     /// Solves the open document and exports the result.

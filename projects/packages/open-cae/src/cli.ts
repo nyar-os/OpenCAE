@@ -225,6 +225,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return nodalStressesCommand(args.slice(1));
         case 'load-cases':
             return loadCasesCommand(args.slice(1));
+        case 'matrices':
+            return matricesCommand(args.slice(1));
         case 'export':
             return exportCommand(args.slice(1));
         case 'report':
@@ -934,6 +936,17 @@ async function loadCasesCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.loadCases({ out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function matricesCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--out'], []);
+    const file = positional(parsed, 0, 'matrices <file> [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.matrices({ out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });

@@ -33,6 +33,7 @@ import type {
     Material,
     MaterialPresetRequest,
     MaterialSetRequest,
+    MatrixOptions,
     ModalSolution,
     NodeAddRequest,
     NodalStressOptions,
@@ -45,6 +46,7 @@ import type {
     StressOptions,
     StressSolution,
     SupportAddRequest,
+    SystemMatrices,
     Units,
     ValidationReport,
 } from './types.js';
@@ -251,6 +253,12 @@ export class CaeDocument {
     loadCases(options: LoadCaseOptions = {}): LoadCaseSummary {
         this.assertOpen();
         return service.loadCases(this.path, options);
+    }
+
+    /** Exports the assembled global stiffness and lumped mass matrices. */
+    matrices(options: MatrixOptions = {}): SystemMatrices {
+        this.assertOpen();
+        return service.matrices(this.path, options);
     }
 
     /** Solves the document and returns the full report. */

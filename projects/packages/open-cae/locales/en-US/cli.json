@@ -34,6 +34,7 @@
             "  ocae deflections <file> [--stations N] [--out report.json]",
             "  ocae nodal-stresses <file> [--stations N] [--out report.json]",
             "  ocae load-cases <file> [--out report.json]",
+            "  ocae matrices <file> [--out report.json]",
             "  ocae export <file> --format csv|vtk|md|html --out <dir|file>",
             "  ocae report <file>",
             "  ocae capabilities"

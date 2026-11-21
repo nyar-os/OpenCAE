@@ -496,6 +496,36 @@ export interface LoadCaseOptions {
     readonly out?: string;
 }
 
+/** One active degree of freedom of an assembled system. */
+export interface MatrixDof {
+    readonly node: string;
+    /** Component name: `ux`, `uy`, `uz` or `rz`. */
+    readonly component: 'ux' | 'uy' | 'uz' | 'rz';
+    /** `true` when a support constrains this degree of freedom. */
+    readonly constrained: boolean;
+}
+
+/** Assembled global stiffness and mass matrices in active degree-of-freedom order. */
+export interface SystemMatrices {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Number of active degrees of freedom. */
+    readonly size: number;
+    /** Degree-of-freedom labels in matrix row/column order. */
+    readonly dofs: readonly MatrixDof[];
+    /** Dense global stiffness matrix in `dofs` order. */
+    readonly stiffness: readonly (readonly number[])[];
+    /** Dense global mass matrix; the lumped mass model is diagonal. */
+    readonly mass: readonly (readonly number[])[];
+}
+
+/** Options of `matrices()`. */
+export interface MatrixOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

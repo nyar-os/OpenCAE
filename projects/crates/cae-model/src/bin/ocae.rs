@@ -53,6 +53,7 @@ Usage:
   ocae deflections <file> [--stations N] [--out report.json]
   ocae nodal-stresses <file> [--stations N] [--out report.json]
   ocae load-cases <file> [--out report.json]
+  ocae matrices <file> [--out report.json]
   ocae export <file> --format csv|vtk|md|html --out <dir|file>
   ocae report <file>
   ocae capabilities
@@ -110,6 +111,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "deflections" => deflections_command(&args[1..]),
         "nodal-stresses" => nodal_stresses_command(&args[1..]),
         "load-cases" => load_cases_command(&args[1..]),
+        "matrices" => matrices_command(&args[1..]),
         "export" => export(&args[1..]),
         "report" => report(&args[1..]),
         "import" => Err(not_implemented("Abaqus .inp import")),
@@ -774,6 +776,17 @@ fn load_cases_command(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.load_cases(out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
+    Ok(0)
+}
+
+fn matrices_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--out"], &[])?;
+    let file = positional(&parsed, 0, "matrices <file> [--out report.json]")?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let matrices = session.matrices(out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&matrices).unwrap_or_default());
     Ok(0)
 }
 

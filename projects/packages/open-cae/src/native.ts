@@ -39,6 +39,7 @@ export interface NativeBinding {
     deflections(path: string, requestJson?: string): string;
     nodal_stresses(path: string, requestJson?: string): string;
     load_cases(path: string, requestJson?: string): string;
+    matrices(path: string, requestJson?: string): string;
     export(path: string, format: string, target: string): string;
     report(path: string): string;
 }

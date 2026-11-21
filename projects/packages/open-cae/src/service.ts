@@ -33,6 +33,7 @@ import type {
     MaterialLibrary,
     MaterialPresetRequest,
     MaterialSetRequest,
+    MatrixOptions,
     ModalSolution,
     NodeAddRequest,
     NodalStressOptions,
@@ -46,6 +47,7 @@ import type {
     StressOptions,
     StressSolution,
     SupportAddRequest,
+    SystemMatrices,
     ValidationReport,
 } from './types.js';
 
@@ -280,6 +282,14 @@ export function loadCases(path: string, options: LoadCaseOptions = {}): LoadCase
         request === undefined
             ? binding('load.cases').load_cases(path)
             : binding('load.cases').load_cases(path, request),
+    );
+}
+
+/** Exports the assembled global stiffness and lumped mass matrices. */
+export function matrices(path: string, options: MatrixOptions = {}): SystemMatrices {
+    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    return decode<SystemMatrices>(() =>
+        request === undefined ? binding('matrix.export').matrices(path) : binding('matrix.export').matrices(path, request),
     );
 }
 
