@@ -636,6 +636,52 @@ export interface FrequencyResponseOptions {
     readonly out?: string;
 }
 
+/** One construction stage: the active element subset and load factors. */
+export interface ConstructionStage {
+    /** Unique, non-empty stage name. */
+    readonly name: string;
+    /** Active element identifiers; omitted or `undefined` keeps every element. */
+    readonly elements?: readonly string[];
+    /** Factor applied to nodal and element applied loads; defaults to 1. */
+    readonly loads?: number;
+    /** Factor applied to the gravity vector; defaults to 0. */
+    readonly gravity?: number;
+}
+
+/** Summary of one solved construction stage. */
+export interface ConstructionStageResult {
+    readonly name: string;
+    /** Number of active elements in the stage. */
+    readonly activeElements: number;
+    readonly loads: number;
+    readonly gravity: number;
+    /** Sum of the applied external loads of the stage. */
+    readonly applied: ForceResultant;
+    readonly maxDisplacement: number;
+    readonly maxDisplacementNode: string;
+    readonly maxAxialForce: number;
+    readonly maxAxialElement: string;
+    readonly maxAbsMoment: number;
+    readonly maxMomentElement: string;
+    readonly strainEnergy: number;
+    /** `true` when `reaction + applied` is within tolerance. */
+    readonly balanced: boolean;
+}
+
+/** Result of `constructionStages()`. */
+export interface ConstructionStageSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly stages: readonly ConstructionStageResult[];
+}
+
+/** Options of `constructionStages()`. */
+export interface ConstructionStageOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

@@ -16,6 +16,9 @@ import type {
     CombinationAddRequest,
     CombinationSolveOptions,
     CombinationSolution,
+    ConstructionStage,
+    ConstructionStageOptions,
+    ConstructionStageSolution,
     DeflectionOptions,
     DeflectionSolution,
     Dimension,
@@ -275,6 +278,12 @@ export class CaeDocument {
     frequencyResponse(options: FrequencyResponseOptions): FrequencyResponseSolution {
         this.assertOpen();
         return service.frequencyResponse(this.path, options);
+    }
+
+    /** Solves construction stages by activating and deactivating elements. */
+    constructionStages(stages: readonly ConstructionStage[], options: ConstructionStageOptions = {}): ConstructionStageSolution {
+        this.assertOpen();
+        return service.constructionStages(this.path, stages, options);
     }
 
     /** Solves the document and returns the full report. */

@@ -15,8 +15,8 @@
 use std::path::Path;
 
 use cae_model::{
-    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumPoint, Units,
-    library_json,
+    CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section,
+    SpectrumPoint, Units, library_json,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -696,6 +696,27 @@ fn frequency_response(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Solves construction stages by activating and deactivating elements.
+///
+/// The request accepts a required `stages` array of
+/// `{ name, elements?, loads?, gravity? }` objects and an optional `out` path.
+#[function]
+fn construction_stages(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let stages: Vec<ConstructionStage> = match request.get("stages") {
+        Some(value) => {
+            serde_json::from_value(value.clone()).map_err(|error| argument_error(&format!("`stages` is invalid: {error}")))?
+        }
+        None => return Err(argument_error("`stages` is required")),
+    };
+    let out = request.get("out").and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.construction_stages(&stages, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Exports a solved document as `csv`, `vtk` or `md`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
@@ -748,6 +769,7 @@ register_module![
     matrices,
     response_spectrum,
     frequency_response,
+    construction_stages,
     export,
     report
 ];

@@ -85,6 +85,12 @@ pub const FREQUENCY_RESPONSE_REPORT_VERSION: u32 = 1;
 /// Format tag of the harmonic frequency-response JSON report.
 pub const FREQUENCY_RESPONSE_REPORT_FORMAT: &str = "open-cae-frequency-response-report";
 
+/// Version of the JSON report produced by [`solve_construction_stages`].
+pub const CONSTRUCTION_STAGE_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the construction-stage JSON report.
+pub const CONSTRUCTION_STAGE_REPORT_FORMAT: &str = "open-cae-construction-stage-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -452,6 +458,78 @@ pub struct FrequencyResponseSolution {
     pub peak: FrequencyResponsePoint,
     /// Peak amplitude of every node over the sampled range.
     pub nodes: Vec<NodeFrequencyResponse>,
+}
+
+/// One construction stage of a staged (birth/death) analysis.
+///
+/// `elements` lists the element identifiers that are active in this stage;
+/// omitting it keeps every element active, so leaving an element out is the
+/// deactivation (death) operation. `loads` and `gravity` scale the applied
+/// loads and self-weight of the stage exactly like a load combination.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstructionStage {
+    /// Unique, non-empty stage name.
+    pub name: String,
+    /// Active element identifiers; `None` keeps all elements active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elements: Option<Vec<String>>,
+    /// Factor applied to nodal and element applied loads (default 1).
+    #[serde(default = "default_stage_loads")]
+    pub loads: f64,
+    /// Factor applied to the gravity vector (default 0).
+    #[serde(default)]
+    pub gravity: f64,
+}
+
+fn default_stage_loads() -> f64 {
+    1.0
+}
+
+/// Summary of one solved construction stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstructionStageResult {
+    /// Stage name.
+    pub name: String,
+    /// Number of elements active in the stage.
+    pub active_elements: usize,
+    /// Factor applied to nodal and element applied loads.
+    pub loads: f64,
+    /// Factor applied to the gravity vector.
+    pub gravity: f64,
+    /// Sum of the applied external loads of this stage.
+    pub applied: ForceResultant,
+    /// Largest nodal displacement magnitude.
+    pub max_displacement: f64,
+    /// Node that carries `max_displacement`.
+    pub max_displacement_node: String,
+    /// Signed axial force with the largest magnitude.
+    pub max_axial_force: f64,
+    /// Element that carries `max_axial_force`.
+    pub max_axial_element: String,
+    /// Largest absolute bending moment.
+    pub max_abs_moment: f64,
+    /// Element that carries `max_abs_moment`.
+    pub max_moment_element: String,
+    /// Total strain energy of the stage.
+    pub strain_energy: f64,
+    /// `true` when `reaction + applied` is within tolerance.
+    pub balanced: bool,
+}
+
+/// Result of [`solve_construction_stages`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstructionStageSolution {
+    /// Report format tag, always `open-cae-construction-stage-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Stage summaries in the requested order.
+    pub stages: Vec<ConstructionStageResult>,
 }
 
 /// One linear buckling mode.
@@ -2734,6 +2812,91 @@ pub fn summarize_load_cases(model: &Model) -> Result<LoadCaseSummary, CaeError> 
         version: LOAD_CASE_REPORT_VERSION,
         units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
         cases,
+    })
+}
+
+/// Solves a sequence of construction stages by element activation and
+/// deactivation.
+///
+/// Each stage keeps only the elements listed in [`ConstructionStage::elements`]
+/// (all elements when the list is omitted), scales the applied loads and gravity
+/// by the stage factors exactly like a load combination, and performs one
+/// linear static solve of that active submodel. The stages are solved in the
+/// requested order and every row reports the applied resultant, the largest
+/// displacement and its node, the extreme axial force and bending moment with
+/// their elements, the strain energy and the reaction balance.
+///
+/// This is a stage-by-stage linear analysis of the active topology: internal
+/// forces are not locked into the members that carry them into later stages, so
+/// a true creep/shake-down style staged construction with locked-in stress is
+/// outside this build. The summary is intended for erection sequencing checks
+/// and deactivation screens, not for a multi-step stress-history analysis.
+pub fn solve_construction_stages(model: &Model, stages: &[ConstructionStage]) -> Result<ConstructionStageSolution, CaeError> {
+    if stages.is_empty() {
+        return Err(CaeError::new("stage/none", "no construction stages are defined; add at least one stage before solving"));
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut rows = Vec::with_capacity(stages.len());
+    for stage in stages {
+        if stage.name.trim().is_empty() {
+            return Err(CaeError::new("stage/invalid-name", "a construction stage requires a non-empty name"));
+        }
+        if !names.insert(stage.name.as_str()) {
+            return Err(CaeError::new(
+                "stage/duplicate-name",
+                format!("construction stage `{}` is defined more than once", stage.name),
+            ));
+        }
+        if !stage.loads.is_finite() || !stage.gravity.is_finite() {
+            return Err(CaeError::new(
+                "stage/invalid-factor",
+                format!("construction stage `{}` requires finite loads and gravity factors", stage.name),
+            ));
+        }
+        let mut active_model = model.clone();
+        if let Some(ids) = &stage.elements {
+            if ids.is_empty() {
+                return Err(CaeError::new(
+                    "stage/no-elements",
+                    format!("construction stage `{}` activates no element; omit `elements` to keep every element", stage.name),
+                ));
+            }
+            let mut active = std::collections::HashSet::with_capacity(ids.len());
+            for id in ids {
+                if !active_model.elements.iter().any(|element| &element.id == id) {
+                    return Err(CaeError::new(
+                        "stage/unknown-element",
+                        format!("construction stage `{}` references unknown element `{id}`", stage.name),
+                    ));
+                }
+                active.insert(id.as_str());
+            }
+            active_model.elements.retain(|element| active.contains(element.id.as_str()));
+        }
+        let active_elements = active_model.elements.len();
+        let scaled = scaled_model(&active_model, stage.loads, stage.gravity);
+        let solution = solve(&scaled)?;
+        rows.push(ConstructionStageResult {
+            name: stage.name.clone(),
+            active_elements,
+            loads: stage.loads,
+            gravity: stage.gravity,
+            applied: solution.reaction_summary.applied,
+            max_displacement: solution.max_displacement.magnitude,
+            max_displacement_node: solution.max_displacement.id.clone(),
+            max_axial_force: solution.max_axial_force.axial_force,
+            max_axial_element: solution.max_axial_force.element.clone(),
+            max_abs_moment: solution.max_moment.moment.abs(),
+            max_moment_element: solution.max_moment.element.clone(),
+            strain_energy: solution.strain_energy,
+            balanced: solution.reaction_summary.balanced,
+        });
+    }
+    Ok(ConstructionStageSolution {
+        format: CONSTRUCTION_STAGE_REPORT_FORMAT.to_string(),
+        version: CONSTRUCTION_STAGE_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        stages: rows,
     })
 }
 

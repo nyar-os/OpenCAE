@@ -22,6 +22,8 @@
 //! * linear elastic translational and rotational spring supports;
 //! * built-in material presets and parametric rectangular, circular and
 //!   I-section properties;
+//! * construction-stage (element birth/death) summaries that solve the active
+//!   subset of elements stage by stage;
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
@@ -55,20 +57,22 @@ pub use crate::{
     solver::{
         BUCKLING_COMBINATION_REPORT_FORMAT, BUCKLING_COMBINATION_REPORT_VERSION, BUCKLING_REPORT_FORMAT,
         BUCKLING_REPORT_VERSION, BucklingCase, BucklingCombinationSolution, BucklingEnvelope, BucklingMode, BucklingSolution,
-        COMBINATION_REPORT_FORMAT, COMBINATION_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution,
-        DEFLECTION_REPORT_FORMAT, DEFLECTION_REPORT_VERSION, DeflectionGoverning, DeflectionSolution, DeflectionStation,
-        ElementDeflection, ElementDiagram, ElementEnvelope, ElementResult, ElementStress, EndForces, EnvelopeValue,
-        FREQUENCY_RESPONSE_REPORT_FORMAT, FREQUENCY_RESPONSE_REPORT_VERSION, ForceResultant, FrequencyResponsePoint,
-        FrequencyResponseSolution, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution,
-        LOAD_CASE_REPORT_FORMAT, LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT,
-        MATRIX_REPORT_VERSION, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MatrixDof, MaxAxialForce, MaxMoment, ModalSolution,
-        Mode, ModeShape, NODAL_STRESS_REPORT_FORMAT, NODAL_STRESS_REPORT_VERSION, NodalStressGoverning, NodalStressSolution,
-        NodeDisplacement, NodeEnvelope, NodeFrequencyResponse, NodeReaction, NodeStress, REPORT_FORMAT, REPORT_VERSION,
+        COMBINATION_REPORT_FORMAT, COMBINATION_REPORT_VERSION, CONSTRUCTION_STAGE_REPORT_FORMAT,
+        CONSTRUCTION_STAGE_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution, ConstructionStage,
+        ConstructionStageResult, ConstructionStageSolution, DEFLECTION_REPORT_FORMAT, DEFLECTION_REPORT_VERSION,
+        DeflectionGoverning, DeflectionSolution, DeflectionStation, ElementDeflection, ElementDiagram, ElementEnvelope,
+        ElementResult, ElementStress, EndForces, EnvelopeValue, FREQUENCY_RESPONSE_REPORT_FORMAT,
+        FREQUENCY_RESPONSE_REPORT_VERSION, ForceResultant, FrequencyResponsePoint, FrequencyResponseSolution,
+        INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, LOAD_CASE_REPORT_FORMAT,
+        LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT, MATRIX_REPORT_VERSION,
+        MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MatrixDof, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape,
+        NODAL_STRESS_REPORT_FORMAT, NODAL_STRESS_REPORT_VERSION, NodalStressGoverning, NodalStressSolution, NodeDisplacement,
+        NodeEnvelope, NodeFrequencyResponse, NodeReaction, NodeStress, REPORT_FORMAT, REPORT_VERSION,
         RESPONSE_SPECTRUM_REPORT_FORMAT, RESPONSE_SPECTRUM_REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution,
         STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION, SectionForces, Solution, SpectrumMode, SpectrumPoint, StationStress,
         StressGoverning, StressSolution, SupportReaction, SystemMatrices, solve, solve_buckling, solve_buckling_combinations,
-        solve_combinations, solve_deflection, solve_frequency_response, solve_internal_forces, solve_matrices, solve_modal,
-        solve_nodal_stress, solve_response_spectrum, solve_stress, summarize_load_cases,
+        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces,
+        solve_matrices, solve_modal, solve_nodal_stress, solve_response_spectrum, solve_stress, summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -103,6 +107,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "matrixExport": "supported",
     "responseSpectrum": "supported",
     "frequencyResponse": "supported",
+    "constructionStages": "supported",
     "thermalExpansion": "supported",
     "thermalGradient": "supported",
     "partialSpanLoad": "supported",

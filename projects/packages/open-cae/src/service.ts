@@ -16,6 +16,9 @@ import type {
     CombinationAddRequest,
     CombinationSolveOptions,
     CombinationSolution,
+    ConstructionStage,
+    ConstructionStageOptions,
+    ConstructionStageSolution,
     CreateOptions,
     DeflectionOptions,
     DeflectionSolution,
@@ -329,6 +332,22 @@ export function frequencyResponse(path: string, options: FrequencyResponseOption
                 out: options.out,
             }),
         ),
+    );
+}
+
+/** Solves construction stages by activating and deactivating elements. */
+export function constructionStages(
+    path: string,
+    stages: readonly ConstructionStage[],
+    options: ConstructionStageOptions = {},
+): ConstructionStageSolution {
+    if (stages.length === 0) {
+        throw new OpenCAEError('session/argument-invalid', '`stages` must contain at least one stage', {
+            details: { feature: 'stage.solve' },
+        });
+    }
+    return decode<ConstructionStageSolution>(() =>
+        binding('stage.solve').construction_stages(path, JSON.stringify({ stages, out: options.out })),
     );
 }
 
