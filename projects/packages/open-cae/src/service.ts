@@ -17,6 +17,8 @@ import type {
     CombinationSolveOptions,
     CombinationSolution,
     CreateOptions,
+    DeflectionOptions,
+    DeflectionSolution,
     DocumentSummary,
     ElementAddRequest,
     ElementReleaseRequest,
@@ -240,6 +242,18 @@ export function stresses(path: string, options: StressOptions = {}): StressSolut
         : JSON.stringify({ stations: options.stations, out: options.out });
     return decode<StressSolution>(() =>
         request === undefined ? binding('internal.stresses').stresses(path) : binding('internal.stresses').stresses(path, request),
+    );
+}
+
+/** Samples the deflected centreline of every element. */
+export function deflections(path: string, options: DeflectionOptions = {}): DeflectionSolution {
+    const request = options.stations === undefined && options.out === undefined
+        ? undefined
+        : JSON.stringify({ stations: options.stations, out: options.out });
+    return decode<DeflectionSolution>(() =>
+        request === undefined
+            ? binding('deflection.sample').deflections(path)
+            : binding('deflection.sample').deflections(path, request),
     );
 }
 

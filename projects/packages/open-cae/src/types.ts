@@ -354,6 +354,62 @@ export interface StressOptions {
     readonly out?: string;
 }
 
+/** Deflected-shape sample at one station along an element. */
+export interface DeflectionStation {
+    /** Distance from the `from` node along the member. */
+    readonly position: number;
+    /** Local axial displacement, positive from `from` to `to`. */
+    readonly axial: number;
+    /** Local transverse deflection, positive along the local `+y` axis. */
+    readonly transverse: number;
+    /** Section rotation about the local z axis in radians. */
+    readonly rotation: number;
+    /** Deformed global X coordinate of the centreline sample. */
+    readonly x: number;
+    /** Deformed global Y coordinate of the centreline sample. */
+    readonly y: number;
+    /** Deformed global Z coordinate of the centreline sample. */
+    readonly z: number;
+}
+
+/** Deflected shape of one element. */
+export interface ElementDeflection {
+    readonly id: string;
+    readonly from: string;
+    readonly to: string;
+    readonly kind: ElementKind;
+    readonly length: number;
+    /** Largest absolute transverse deflection among the stations. */
+    readonly maxAbsTransverse: number;
+    readonly stations: readonly DeflectionStation[];
+}
+
+/** Governing transverse deflection of a deflected-shape report. */
+export interface DeflectionGoverning {
+    readonly element: string;
+    readonly position: number;
+    /** Signed local transverse deflection at that position. */
+    readonly transverse: number;
+}
+
+/** Result of `deflections()`. */
+export interface DeflectionSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly stations: number;
+    readonly governing: DeflectionGoverning;
+    readonly elements: readonly ElementDeflection[];
+}
+
+/** Options of `deflections()`. */
+export interface DeflectionOptions {
+    /** Number of stations per element including both ends; defaults to 11. */
+    readonly stations?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

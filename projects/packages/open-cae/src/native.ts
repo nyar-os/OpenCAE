@@ -36,6 +36,7 @@ export interface NativeBinding {
     reactions(path: string, requestJson?: string): string;
     internal_forces(path: string, requestJson?: string): string;
     stresses(path: string, requestJson?: string): string;
+    deflections(path: string, requestJson?: string): string;
     export(path: string, format: string, target: string): string;
     report(path: string): string;
 }

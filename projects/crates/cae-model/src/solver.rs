@@ -49,6 +49,12 @@ pub const BUCKLING_COMBINATION_REPORT_VERSION: u32 = 1;
 /// Format tag of the buckling-combination JSON report.
 pub const BUCKLING_COMBINATION_REPORT_FORMAT: &str = "open-cae-buckling-combination-report";
 
+/// Version of the JSON report produced by [`solve_deflection`].
+pub const DEFLECTION_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the deflected-shape JSON report.
+pub const DEFLECTION_REPORT_FORMAT: &str = "open-cae-deflection-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -479,6 +485,76 @@ pub struct StressSolution {
     pub governing: StressGoverning,
     /// Per-element stresses in model element order.
     pub elements: Vec<ElementStress>,
+}
+
+/// Deflected-shape sample at one station along an element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeflectionStation {
+    /// Distance from the `from` node along the member.
+    pub position: f64,
+    /// Local axial displacement `u`, positive from `from` to `to`.
+    pub axial: f64,
+    /// Local transverse deflection `v`, positive along the local `+y` axis.
+    pub transverse: f64,
+    /// Section rotation about the local z axis in radians.
+    pub rotation: f64,
+    /// Deformed global X coordinate of the centreline sample.
+    pub x: f64,
+    /// Deformed global Y coordinate of the centreline sample.
+    pub y: f64,
+    /// Deformed global Z coordinate of the centreline sample.
+    pub z: f64,
+}
+
+/// Deflected shape of one element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementDeflection {
+    /// Element identifier.
+    pub id: String,
+    /// Start node identifier.
+    pub from: String,
+    /// End node identifier.
+    pub to: String,
+    /// Element formulation (`truss` or `beam`).
+    pub kind: ElementKind,
+    /// Element length.
+    pub length: f64,
+    /// Largest absolute local transverse deflection among the stations.
+    pub max_abs_transverse: f64,
+    /// Sampled stations from the `from` node to the `to` node.
+    pub stations: Vec<DeflectionStation>,
+}
+
+/// Governing transverse deflection of a deflected-shape report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeflectionGoverning {
+    /// Element that carries the largest absolute transverse deflection.
+    pub element: String,
+    /// Position along that element.
+    pub position: f64,
+    /// Signed local transverse deflection at that position.
+    pub transverse: f64,
+}
+
+/// Result of [`solve_deflection`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeflectionSolution {
+    /// Report format tag, always `open-cae-deflection-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of stations sampled per element, including both ends.
+    pub stations: usize,
+    /// Element with the largest absolute transverse deflection.
+    pub governing: DeflectionGoverning,
+    /// Per-element shapes in model element order.
+    pub elements: Vec<ElementDeflection>,
 }
 
 /// One solved load combination.
@@ -1463,6 +1539,176 @@ pub fn solve_stress(model: &Model, stations: usize) -> Result<StressSolution, Ca
         units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
         stations,
         allowable_stress: allowable,
+        governing,
+        elements,
+    })
+}
+
+/// Samples the deflected centreline of every element at equally spaced
+/// stations.
+///
+/// For beams the transverse deflection and rotation are recovered exactly from
+/// the nodal solution: the cubic Hermite interpolation of the end
+/// displacements and rotations is completed by the fixed-end particular
+/// solution of the member's linearly varying transverse load,
+/// `EI·v'''' = q(x)`. The axial displacement adds the quadratic term of a
+/// uniform axial (self-weight) load to the linear interpolation. Released ends
+/// use the recovered internal hinge rotation, so a hinged member keeps its
+/// physical shape. Truss elements are sampled as straight members with a linear
+/// axial displacement and no transverse deflection.
+///
+/// Each station reports the local axial and transverse displacement, the
+/// section rotation and the deformed global coordinates, so the result can be
+/// plotted directly. `stations` counts both ends and must be at least `2`.
+pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolution, CaeError> {
+    if stations < 2 {
+        return Err(CaeError::new(
+            "analysis/invalid-stations",
+            format!("deflection sampling requires at least 2 stations, but {stations} were requested"),
+        ));
+    }
+    let solution = solve(model)?;
+    let system = assemble(model)?;
+    let mut elements = Vec::with_capacity(system.elements.len());
+    let mut governing: Option<DeflectionGoverning> = None;
+
+    for (index, (element, result)) in system.elements.iter().zip(&solution.elements).enumerate() {
+        let start = &model.nodes[element.from];
+        let end = &model.nodes[element.to];
+        let delta = [end.x - start.x, end.y - start.y, end.z - start.z];
+        let length = element.length;
+        let c = delta[0] / length;
+        let s = delta[1] / length;
+        let tz = delta[2] / length;
+        let from = &solution.nodes[element.from];
+        let to = &solution.nodes[element.to];
+
+        let (u1, v1, theta1, u2, v2, theta2) = match &element.model {
+            ElementModel::Truss { direction, components, .. } => {
+                let axial = |node: &NodeDisplacement| {
+                    let mut value = 0.0;
+                    for (component, cosine) in direction.iter().enumerate().take(*components) {
+                        let displacement = match component {
+                            0 => node.ux,
+                            1 => node.uy,
+                            _ => node.uz,
+                        };
+                        value += displacement * cosine;
+                    }
+                    value
+                };
+                (axial(from), 0.0, 0.0, axial(to), 0.0, 0.0)
+            }
+            ElementModel::Beam(beam) => {
+                let global = [from.ux, from.uy, from.rz, to.ux, to.uy, to.rz];
+                let mut local = [0.0; 6];
+                for (row, value) in local.iter_mut().enumerate() {
+                    *value = (0..6).map(|column| beam.transform[row][column] * global[column]).sum();
+                }
+                restore_released_rotations(beam, &mut local);
+                (local[0], local[1], local[2], local[3], local[4], local[5])
+            }
+        };
+
+        let mut flexural_rigidity = 0.0;
+        let mut load_start = 0.0;
+        let mut load_end = 0.0;
+        let mut axial_uniform = 0.0;
+        if let ElementModel::Beam(beam) = &element.model {
+            let inertia = resolve_inertia(model, &model.elements[index]).ok_or_else(|| {
+                CaeError::new(
+                    "element/invalid-inertia",
+                    format!("beam element `{}` requires a positive finite inertia", element.id),
+                )
+            })?;
+            flexural_rigidity = element.youngs_modulus * inertia;
+            load_start = beam.transverse_start;
+            load_end = beam.transverse_end;
+            axial_uniform = beam.axial_uniform;
+        }
+        let load_slope = (load_end - load_start) / length;
+        let quartic = load_start / (24.0 * flexural_rigidity.max(f64::MIN_POSITIVE));
+        let quintic = load_slope / (120.0 * flexural_rigidity.max(f64::MIN_POSITIVE));
+        let fixed_cubic = -length * (2.0 * quartic + 3.0 * quintic * length);
+        let fixed_quadratic = length * length * (quartic + 2.0 * quintic * length);
+
+        let mut samples = Vec::with_capacity(stations);
+        let mut maximum = 0.0_f64;
+        let mut maximum_signed = 0.0;
+        let mut maximum_position = 0.0;
+        for sample in 0..stations {
+            let position = length * sample as f64 / (stations - 1) as f64;
+            let xi = position / length;
+            let xi2 = xi * xi;
+            let xi3 = xi2 * xi;
+            let n1 = 1.0 - 3.0 * xi2 + 2.0 * xi3;
+            let n2 = length * (xi - 2.0 * xi2 + xi3);
+            let n3 = 3.0 * xi2 - 2.0 * xi3;
+            let n4 = length * (-xi2 + xi3);
+            let d1 = (-6.0 * xi + 6.0 * xi2) / length;
+            let d2 = 1.0 - 4.0 * xi + 3.0 * xi2;
+            let d3 = (6.0 * xi - 6.0 * xi2) / length;
+            let d4 = -2.0 * xi + 3.0 * xi2;
+            let power3 = position * position * position;
+            let power4 = power3 * position;
+            let particular =
+                quartic * power4 + quintic * power4 * position + fixed_cubic * power3 + fixed_quadratic * position * position;
+            let particular_slope = 4.0 * quartic * power3
+                + 5.0 * quintic * power4
+                + 3.0 * fixed_cubic * position * position
+                + 2.0 * fixed_quadratic * position;
+            let transverse = n1 * v1 + n2 * theta1 + n3 * v2 + n4 * theta2 + particular;
+            let rotation = d1 * v1 + d2 * theta1 + d3 * v2 + d4 * theta2 + particular_slope;
+            let axial_particular = if element.youngs_modulus > 0.0 && element.area > 0.0 {
+                axial_uniform * position * (length - position) / (2.0 * element.youngs_modulus * element.area)
+            }
+            else {
+                0.0
+            };
+            let axial = u1 + (u2 - u1) * xi + axial_particular;
+            let normal_x = -s;
+            let normal_y = c;
+            samples.push(DeflectionStation {
+                position,
+                axial,
+                transverse,
+                rotation,
+                x: start.x + (position + axial) * c + transverse * normal_x,
+                y: start.y + (position + axial) * s + transverse * normal_y,
+                z: start.z + (position + axial) * tz,
+            });
+            if transverse.abs() > maximum {
+                maximum = transverse.abs();
+                maximum_signed = transverse;
+                maximum_position = position;
+            }
+        }
+
+        if governing.as_ref().is_none_or(|current| maximum > current.transverse.abs()) {
+            governing = Some(DeflectionGoverning {
+                element: element.id.clone(),
+                position: maximum_position,
+                transverse: maximum_signed,
+            });
+        }
+
+        elements.push(ElementDeflection {
+            id: element.id.clone(),
+            from: result.from.clone(),
+            to: result.to.clone(),
+            kind: element.kind,
+            length,
+            max_abs_transverse: maximum,
+            stations: samples,
+        });
+    }
+
+    let governing = governing.ok_or_else(|| CaeError::new("model/no-elements", "the model requires at least 1 element"))?;
+    Ok(DeflectionSolution {
+        format: DEFLECTION_REPORT_FORMAT.to_string(),
+        version: DEFLECTION_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        stations,
         governing,
         elements,
     })

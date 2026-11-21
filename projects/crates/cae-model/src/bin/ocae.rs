@@ -48,6 +48,7 @@ Usage:
   ocae buckling-combinations <file> [--modes N] [--out report.json]
   ocae forces <file> [--stations N] [--out report.json]
   ocae stresses <file> [--stations N] [--out report.json]
+  ocae deflections <file> [--stations N] [--out report.json]
   ocae export <file> --format csv|vtk|md|html --out <dir|file>
   ocae report <file>
   ocae capabilities
@@ -102,6 +103,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "buckling-combinations" => buckling_combinations_command(&args[1..]),
         "forces" => forces_command(&args[1..]),
         "stresses" => stresses_command(&args[1..]),
+        "deflections" => deflections_command(&args[1..]),
         "export" => export(&args[1..]),
         "report" => report(&args[1..]),
         "import" => Err(not_implemented("Abaqus .inp import")),
@@ -684,6 +686,18 @@ fn stresses_command(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let stresses = session.stresses(stations, out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&stresses).unwrap_or_default());
+    Ok(0)
+}
+
+fn deflections_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--stations", "--out"], &[])?;
+    let file = positional(&parsed, 0, "deflections <file> [--stations N] [--out report.json]")?;
+    let stations = parse_stations(&parsed)?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let deflections = session.deflections(stations, out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&deflections).unwrap_or_default());
     Ok(0)
 }
 

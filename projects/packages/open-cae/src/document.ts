@@ -16,6 +16,8 @@ import type {
     CombinationAddRequest,
     CombinationSolveOptions,
     CombinationSolution,
+    DeflectionOptions,
+    DeflectionSolution,
     Dimension,
     DocumentSummary,
     ElementAddRequest,
@@ -227,6 +229,12 @@ export class CaeDocument {
     stresses(options: StressOptions = {}): StressSolution {
         this.assertOpen();
         return service.stresses(this.path, options);
+    }
+
+    /** Samples the deflected centreline of every element. */
+    deflections(options: DeflectionOptions = {}): DeflectionSolution {
+        this.assertOpen();
+        return service.deflections(this.path, options);
     }
 
     /** Solves the document and returns the full report. */
