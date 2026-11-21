@@ -26,6 +26,7 @@
             "  ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]",
             "  ocae modal <file> [--modes N] [--out report.json]",
             "  ocae buckling <file> [--modes N] [--out report.json]",
+            "  ocae buckling-combinations <file> [--modes N] [--out report.json]",
             "  ocae reactions <file> [--out report.json]",
             "  ocae forces <file> [--stations N] [--out report.json]",
             "  ocae stresses <file> [--stations N] [--out report.json]",

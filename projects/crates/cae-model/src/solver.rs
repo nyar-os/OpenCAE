@@ -43,6 +43,12 @@ pub const STRESS_REPORT_VERSION: u32 = 1;
 /// Format tag of the beam stress-recovery JSON report.
 pub const STRESS_REPORT_FORMAT: &str = "open-cae-stress-report";
 
+/// Version of the JSON report produced by [`solve_buckling_combinations`].
+pub const BUCKLING_COMBINATION_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the buckling-combination JSON report.
+pub const BUCKLING_COMBINATION_REPORT_FORMAT: &str = "open-cae-buckling-combination-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -559,6 +565,54 @@ pub struct CombinationSolution {
     pub combinations: Vec<CombinationCase>,
     /// Envelope of all solved combinations.
     pub envelope: CombinationEnvelope,
+}
+
+/// One solved buckling load combination.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucklingCase {
+    /// Combination name.
+    pub name: String,
+    /// Factor applied to nodal and element applied loads.
+    pub loads: f64,
+    /// Factor applied to the gravity vector.
+    pub gravity: f64,
+    /// Buckling solution of the scaled model.
+    pub solution: BucklingSolution,
+}
+
+/// Governing combination of a buckling envelope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucklingEnvelope {
+    /// Combination with the lowest first buckling factor.
+    pub combination: String,
+    /// First (lowest) buckling load factor of that combination.
+    pub factor: f64,
+}
+
+/// Result of [`solve_buckling_combinations`].
+///
+/// Each combination is scaled independently and solved as its own linear
+/// buckling case, so factors always multiply that combination's load set rather
+/// than the unscaled document loads. `envelope` is the combination whose first
+/// factor is lowest; it is `None` when no combination produces a positive
+/// factor at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucklingCombinationSolution {
+    /// Report format tag, always `open-cae-buckling-combination-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Requested number of modes per combination.
+    pub requested: usize,
+    /// Solved combinations in the requested order.
+    pub combinations: Vec<BucklingCase>,
+    /// Governing combination and its first buckling factor.
+    pub envelope: Option<BucklingEnvelope>,
 }
 
 /// Two-dimensional field layout with explicit degree-of-freedom activation.
@@ -1114,6 +1168,74 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
         requested: modes,
         skipped,
         modes: result_modes,
+    })
+}
+
+/// Solves the linear buckling eigenproblem for every load combination.
+///
+/// Each combination scales the applied nodal and element loads by `loads` and
+/// the gravity vector by `gravity`, then runs [`solve_buckling`] on the scaled
+/// model, so every factor multiplies that combination's load set. Prescribed
+/// displacements are boundary conditions and stay unchanged.
+///
+/// An empty list is rejected with `combination/none`, `modes` must be at least
+/// one, and every combination is validated by the static reference solve.
+/// `envelope` reports the combination with the lowest first factor; it is
+/// `None` when no combination yields a positive factor.
+pub fn solve_buckling_combinations(
+    model: &Model,
+    combinations: &[LoadCombination],
+    modes: usize,
+) -> Result<BucklingCombinationSolution, CaeError> {
+    if modes == 0 {
+        return Err(CaeError::new("analysis/invalid-modes", "buckling mode count must be at least 1"));
+    }
+    if combinations.is_empty() {
+        return Err(CaeError::new(
+            "combination/none",
+            "no load combinations are defined; add at least one combination before solving buckling",
+        ));
+    }
+    let mut cases = Vec::with_capacity(combinations.len());
+    for combination in combinations {
+        if combination.name.trim().is_empty() {
+            return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
+        }
+        if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+            return Err(CaeError::new(
+                "combination/invalid-factor",
+                format!("load combination `{}` factors must be finite", combination.name),
+            ));
+        }
+        let scaled = scaled_model(model, combination.loads, combination.gravity);
+        let solution = solve_buckling(&scaled, modes)?;
+        cases.push(BucklingCase {
+            name: combination.name.clone(),
+            loads: combination.loads,
+            gravity: combination.gravity,
+            solution,
+        });
+    }
+
+    let mut envelope: Option<BucklingEnvelope> = None;
+    for case in &cases {
+        let Some(first) = case.solution.modes.first()
+        else {
+            continue;
+        };
+        let lower = envelope.as_ref().is_none_or(|current| first.factor < current.factor);
+        if lower {
+            envelope = Some(BucklingEnvelope { combination: case.name.clone(), factor: first.factor });
+        }
+    }
+
+    Ok(BucklingCombinationSolution {
+        format: BUCKLING_COMBINATION_REPORT_FORMAT.to_string(),
+        version: BUCKLING_COMBINATION_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        requested: modes,
+        combinations: cases,
+        envelope,
     })
 }
 

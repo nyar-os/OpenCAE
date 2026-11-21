@@ -10,6 +10,8 @@
 import { NotImplementedError, OpenCAEError, errorCodes, type OpenCAEErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    BucklingCombinationOptions,
+    BucklingCombinationSolution,
     BucklingSolution,
     CombinationAddRequest,
     CombinationSolveOptions,
@@ -188,6 +190,22 @@ export function solveCombinations(path: string, options: CombinationSolveOptions
         request === undefined
             ? binding('combination.solve').solve_combinations(path)
             : binding('combination.solve').solve_combinations(path, request),
+    );
+}
+
+/** Solves linear buckling for every load combination and returns the factors. */
+export function solveBucklingCombinations(
+    path: string,
+    options: BucklingCombinationOptions = {},
+): BucklingCombinationSolution {
+    const request =
+        options.modes === undefined && options.out === undefined
+            ? undefined
+            : JSON.stringify({ modes: options.modes, out: options.out });
+    return decode<BucklingCombinationSolution>(() =>
+        request === undefined
+            ? binding('combination.buckling').solve_buckling_combinations(path)
+            : binding('combination.buckling').solve_buckling_combinations(path, request),
     );
 }
 

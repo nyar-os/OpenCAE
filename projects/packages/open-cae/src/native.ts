@@ -29,6 +29,7 @@ export interface NativeBinding {
     combination_add(path: string, requestJson: string): string;
     combination_remove(path: string, requestJson: string): string;
     solve_combinations(path: string, requestJson?: string): string;
+    solve_buckling_combinations(path: string, requestJson?: string): string;
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
     reactions(path: string, requestJson?: string): string;

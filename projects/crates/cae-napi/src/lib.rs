@@ -431,6 +431,23 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
     }
 }
 
+/// Solves the linear buckling eigenproblem for every stored load combination.
+///
+/// The request accepts `modes` (default 5) and an optional `out` path for the
+/// JSON report.
+#[function]
+fn solve_buckling_combinations(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let modes = request.as_ref().and_then(|request| request.get("modes")).and_then(Value::as_u64);
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let modes = usize::try_from(modes.unwrap_or(5)).map_err(|_| argument_error("`modes` must be a positive integer"))?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.solve_buckling_combinations(modes, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Samples internal axial force, shear and bending moment and returns the
 /// diagram report.
 ///
@@ -521,6 +538,7 @@ register_module![
     combination_add,
     combination_remove,
     solve_combinations,
+    solve_buckling_combinations,
     validate,
     solve,
     reactions,

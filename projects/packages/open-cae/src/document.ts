@@ -10,6 +10,8 @@
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
+    BucklingCombinationOptions,
+    BucklingCombinationSolution,
     BucklingSolution,
     CombinationAddRequest,
     CombinationSolveOptions,
@@ -191,6 +193,12 @@ export class CaeDocument {
     solveCombinations(options: CombinationSolveOptions = {}): CombinationSolution {
         this.assertOpen();
         return service.solveCombinations(this.path, options);
+    }
+
+    /** Solves linear buckling for every load combination and returns the factors. */
+    solveBucklingCombinations(options: BucklingCombinationOptions = {}): BucklingCombinationSolution {
+        this.assertOpen();
+        return service.solveBucklingCombinations(this.path, options);
     }
 
     /** Samples internal forces at equally spaced stations along each element. */

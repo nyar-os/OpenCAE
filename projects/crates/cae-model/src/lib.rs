@@ -14,7 +14,7 @@
 //!   Jacobi eigen-solver;
 //! * linear buckling of two- and three-dimensional truss models and
 //!   two-dimensional beam models using a geometric stiffness assembled from
-//!   the static axial forces;
+//!   the static axial forces, including per-load-combination buckling;
 //! * support reaction summaries with a global force equilibrium check;
 //! * linear elastic translational and rotational spring supports;
 //! * built-in material presets and parametric rectangular, circular and
@@ -50,14 +50,15 @@ pub use crate::{
         DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
     },
     solver::{
-        BUCKLING_REPORT_FORMAT, BUCKLING_REPORT_VERSION, BucklingMode, BucklingSolution, COMBINATION_REPORT_FORMAT,
-        COMBINATION_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution, ElementDiagram, ElementEnvelope,
-        ElementResult, ElementStress, EndForces, EnvelopeValue, ForceResultant, INTERNAL_FORCE_REPORT_FORMAT,
-        INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce,
-        MaxMoment, ModalSolution, Mode, ModeShape, NodeDisplacement, NodeEnvelope, NodeReaction, REPORT_FORMAT, REPORT_VERSION,
-        ReactionSummary, STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION, SectionForces, Solution, StationStress, StressGoverning,
-        StressSolution, SupportReaction, solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
-        solve_stress,
+        BUCKLING_COMBINATION_REPORT_FORMAT, BUCKLING_COMBINATION_REPORT_VERSION, BUCKLING_REPORT_FORMAT,
+        BUCKLING_REPORT_VERSION, BucklingCase, BucklingCombinationSolution, BucklingEnvelope, BucklingMode, BucklingSolution,
+        COMBINATION_REPORT_FORMAT, COMBINATION_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution,
+        ElementDiagram, ElementEnvelope, ElementResult, ElementStress, EndForces, EnvelopeValue, ForceResultant,
+        INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, MODAL_REPORT_FORMAT,
+        MODAL_REPORT_VERSION, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape, NodeDisplacement, NodeEnvelope,
+        NodeReaction, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION,
+        SectionForces, Solution, StationStress, StressGoverning, StressSolution, SupportReaction, solve, solve_buckling,
+        solve_buckling_combinations, solve_combinations, solve_internal_forces, solve_modal, solve_stress,
     },
     validate::{Issue, Severity},
 };
@@ -79,6 +80,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "prescribedDisplacement": "supported",
     "nonlinear": "unsupported",
     "buckling": "supported",
+    "bucklingCombinations": "supported",
     "internalForces": "supported",
     "stressRecovery": "supported",
     "loadCombinations": "supported",

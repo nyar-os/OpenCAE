@@ -488,6 +488,41 @@ export interface BucklingSolution {
     readonly modes: readonly BucklingMode[];
 }
 
+/** One solved buckling load combination. */
+export interface BucklingCase {
+    readonly name: string;
+    readonly loads: number;
+    readonly gravity: number;
+    /** Buckling solution of the scaled model. */
+    readonly solution: BucklingSolution;
+}
+
+/** Governing combination of a buckling envelope. */
+export interface BucklingEnvelope {
+    readonly combination: string;
+    readonly factor: number;
+}
+
+/** Result of `solveBucklingCombinations()`. */
+export interface BucklingCombinationSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Requested number of modes per combination. */
+    readonly requested: number;
+    readonly combinations: readonly BucklingCase[];
+    /** Lowest first buckling factor, or `null` when no factor is positive. */
+    readonly envelope: BucklingEnvelope | null;
+}
+
+/** Options of `solveBucklingCombinations()`. */
+export interface BucklingCombinationOptions {
+    /** Number of modes per combination; defaults to 5. */
+    readonly modes?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Full report returned by `report()`. */
 export interface Report {
     readonly format: string;

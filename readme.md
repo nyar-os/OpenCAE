@@ -1,6 +1,6 @@
 # OpenCAE
 
-OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, linear elastic spring supports, load combinations, modal (with effective mass) and linear buckling analysis, plus a built-in material and parametric-section library. It targets:
+OpenCAE is a **narrowly scoped and verifiable** linear-elastic analysis tool for 2D/3D trusses and 2D Euler-Bernoulli beams, supporting linear static, self-weight, prescribed displacements, linearly varying distributed loads, internal force diagrams, beam stress recovery, support reaction summaries with a force-equilibrium check, linear elastic spring supports, load combinations, modal (with effective mass) and linear buckling analysis (single load case and per load combination), plus a built-in material and parametric-section library. It targets:
 
 - trusses, space frames and bracing systems that carry axial force only;
 - bending problems such as planar beams, cantilever beams and simply supported beams;
@@ -62,12 +62,13 @@ document.export('md', 'out/report.md');              // deterministic Markdown r
 
 document.addCombination({ name: 'D+L', loads: 1, gravity: 1 });
 const combinations = document.solveCombinations();   // solutions + envelope
+const buckling = document.solveBucklingCombinations(); // factors per combination + governing case
 const forces = document.internalForces({ stations: 11 }); // N/V/M diagrams
 const stresses = document.stresses({ stations: 11 });     // sigma = N/A +/- M/S, utilization
 ```
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/reactions/internalForces/stresses/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/export/report/save/close`; every edit operation writes atomically to the file.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
@@ -142,6 +143,8 @@ cargo run -p cae-model --bin ocae --offline -- load add beam.ocae --node n2 --fy
 cargo run -p cae-model --bin ocae --offline -- model gravity beam.ocae --gy -9810
 cargo run -p cae-model --bin ocae --offline -- solve beam.ocae --analysis modal --modes 5
 cargo run -p cae-model --bin ocae --offline -- buckling beam.ocae --modes 2
+cargo run -p cae-model --bin ocae --offline -- combination add beam.ocae --name P --loads 1
+cargo run -p cae-model --bin ocae --offline -- buckling-combinations beam.ocae --modes 2
 cargo run -p cae-model --bin ocae --offline -- export beam.ocae --format md --out out/report.md
 ```
 
@@ -185,6 +188,7 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae solve <file> [--out report.json] [--analysis static\|modal\|buckling] [--modes N] [--dimension 2\|3]` | Run a static, modal or linear buckling solve and print JSON; `--modes` is modal/buckling-only and defaults to 5 |
 | `ocae modal <file> [--modes N] [--out report.json]` | Shortcut for a modal solve |
 | `ocae buckling <file> [--modes N] [--out report.json]` | Shortcut for a linear buckling solve |
+| `ocae buckling-combinations <file> [--modes N] [--out report.json]` | Solve the linear buckling eigenproblem for every stored load combination and print the factors plus the governing combination |
 | `ocae forces <file> [--stations N] [--out report.json]` | Print sampled axial force, shear and bending moment per element; `--stations` counts both ends and defaults to 11 |
 | `ocae stresses <file> [--stations N] [--out report.json]` | Recover extreme-fibre stresses, governing station and utilisation; a beam model needs a material section |
 | `ocae export <file> --format csv --out <dir>` | Write `<dir>/nodes.csv`, `<dir>/elements.csv` and `<dir>/reactions.csv`; node columns include `x,y,z` and `ux,uy,uz` |
@@ -270,6 +274,7 @@ The file is UTF-8 JSON with camelCase fields:
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi, effective modal mass) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
+| buckling under load combinations (`bucklingCombinations`, scaled cases + governing envelope) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | beam stress recovery and utilisation (`stresses`) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
@@ -304,7 +309,7 @@ The machine-readable version is printed by `ocae capabilities` and matches actua
    - `solve_internal_forces(model, stations)` (CLI `ocae forces`) recovers section forces by equilibrium from the end forces and the applied linear/gravity loads: `N(x) = −n1 − p·x`, `V(x) = v1 + ∫q`, `M(x) = −m1 + v1·x + ∫q(x−s)ds`, sampled at equally spaced stations; the end stations reproduce the end forces exactly;
    - total strain energy `Σ ½·dᵀKd` is reported as `strainEnergy`.
 7. **Modal analysis**: uses the same `K` as the original problem and a diagonal lumped mass matrix — `ρAL/2` for translational degrees of freedom and `ρIL/2` (rotary inertia) for beam rotational degrees of freedom. It forms the symmetric matrix `A = M^(−1/2)·K·M^(−1/2)`, computes eigenvalues with symmetric Jacobi iterations (off-diagonal tolerance `1e-12·max|A|`, at most 100 sweeps) and frequencies `f = √λ/(2π)`. Zero, negative or non-finite eigenvalues are skipped and counted in `skipped`; NaN is never emitted. Each mode reports the effective modal mass `(φᵀ·M·r)²` in X/Y/Z, and `totalMass` reports the total translational mass so the effective mass fraction can be obtained by division; the fixed-free axial bar first mode approaches the analytical `8/π²` fraction.
-8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Two-dimensional beams and two- or three-dimensional trusses are assembled.
+8. **Linear buckling**: first solves the same static load case and reads the signed axial force `N` of every member. The geometric stiffness is assembled from that reference state: beams use the consistent 6×6 `N/L` matrix (`6/5`, `L/10`, `2L²/15`, …) transformed to global coordinates, and trusses use the transverse projector `(N/L)·(I − n·nᵀ)` at both ends. The eigenproblem `(K + λ·Kg)·φ = 0` is reduced to a standard symmetric form with a Cholesky factor of `K_ff`, solved by the same Jacobi iteration and reported as ascending positive load factors `λ`; non-positive or non-finite factors are skipped. Modes are normalized so the largest absolute nodal value is one. Two-dimensional beams and two- or three-dimensional trusses are assembled. Buckling under load combinations scales each combination's loads (and gravity) exactly like the static combination solver and runs this analysis per case; the reported factors therefore always multiply that combination's load set, and the envelope names the combination with the lowest first factor.
 9. **Mechanism detection**: every solve performs a numerical rank check on the free-degree-of-freedom stiffness matrix (whether `K_ff` has full rank); on failure it reports `model/mechanism` and lists as many unconstrained nodes as possible.
 10. **Load combinations**: each combination clones the model, multiplies every nodal load and element distributed load by `loads`, multiplies the gravity vector by `gravity` (clearing it when the result is the zero vector), solves the scaled model and keeps the full static solution. The envelope reports the governing nodal displacement, signed axial force/moment maxima and per-node/per-element extremes with the combination names that produced them. Prescribed displacements are not scaled.
 11. **Material and section library**: presets store Young's modulus and density in `mm` units and convert by `1e6` (Pa) and `1e12` (kg/m³). Sections compute `A`, `I_strong = b h³/12` (rectangle), `I_weak`, the extreme-fibre distance `c` and a Saint-Venant torsion constant (`J ≈ a b³/3·(1 − 0.63 b/a + 0.052 (b/a)⁵)` for rectangles, `π d⁴/32` for circles and a thin-walled sum for I-sections). The elastic section modulus is `I_strong / c`; a beam may omit `inertia` and inherit `I_strong` from the section.
@@ -374,6 +379,14 @@ pnpm --filter @wae/open-cae run typecheck
 - a beam without a material section is rejected with `material/missing-section`, and fewer than two stations with `analysis/invalid-stations`;
 - the session writes a valid `open-cae-stress-report` JSON file.
 
+`projects/crates/cae-model/tests/buckling_combinations.rs` asserts buckling under several load combinations:
+
+- a pinned-pinned column under `P` and `2P` reports Euler factors `π²EI/(L²·P)` and `π²EI/(2L²·P)`, whose ratio is exactly two (`1e-3`);
+- the envelope selects `2P` and repeats its first factor (`1e-12`);
+- a zero-load combination produces no positive factor, is skipped and cannot win the envelope;
+- an empty combination list (`combination/none`) and `modes = 0` (`analysis/invalid-modes`) are rejected;
+- the session writes a valid `open-cae-buckling-combination-report` JSON file.
+
 `projects/crates/cae-model/tests/springs.rs` asserts linear elastic spring supports:
 
 - an axial bar with an end spring reproduces `u = P/(EA/L + k)`, the fixed reaction `−EA·u/L`, the spring force `−k·u` and a balanced reaction summary (`1e-12`);
@@ -408,6 +421,7 @@ projects/
     tests/beam_modal.rs  analytical beam, self-weight, modal and buckling tests
     tests/prescribed.rs  analytical prescribed-displacement and settlement tests
     tests/combinations.rs linear load-combination and envelope tests
+    tests/buckling_combinations.rs per-combination buckling tests
     tests/library.rs     material-preset and section-property tests
     tests/stress.rs      beam stress-recovery tests
     tests/reactions.rs   support-reaction summary and CSV tests

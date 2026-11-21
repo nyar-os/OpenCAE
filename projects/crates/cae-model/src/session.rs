@@ -20,9 +20,9 @@ use crate::{
     library::material_preset,
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
-        BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION,
-        ReactionSummary, Solution, StressSolution, solve, solve_buckling, solve_combinations, solve_internal_forces,
-        solve_modal, solve_stress,
+        BucklingCombinationSolution, BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution,
+        REPORT_FORMAT, REPORT_VERSION, ReactionSummary, Solution, StressSolution, solve, solve_buckling,
+        solve_buckling_combinations, solve_combinations, solve_internal_forces, solve_modal, solve_stress,
     },
     validate::{Issue, Severity},
 };
@@ -601,6 +601,28 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(buckling)
+    }
+
+    /// Solves the linear buckling eigenproblem for every stored load
+    /// combination and returns the individual factors plus the governing
+    /// combination.
+    ///
+    /// Each factor multiplies that combination's load set. When `out` is given
+    /// the JSON report is written atomically to that path.
+    pub fn solve_buckling_combinations(
+        &self,
+        modes: usize,
+        out: Option<&Path>,
+    ) -> Result<BucklingCombinationSolution, CaeError> {
+        let model = &self.current()?.model;
+        let result = solve_buckling_combinations(model, &model.combinations, modes)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&result).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize buckling combination result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(result)
     }
 
     /// Solves the open document and samples internal forces at `stations`

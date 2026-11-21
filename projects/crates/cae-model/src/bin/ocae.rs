@@ -42,6 +42,7 @@ Usage:
                    [--element truss|beam] [--dimension 2|3]
   ocae modal <file> [--modes N] [--out report.json]
   ocae buckling <file> [--modes N] [--out report.json]
+  ocae buckling-combinations <file> [--modes N] [--out report.json]
   ocae forces <file> [--stations N] [--out report.json]
   ocae stresses <file> [--stations N] [--out report.json]
   ocae export <file> --format csv|vtk|md --out <dir|file>
@@ -95,6 +96,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "reactions" => reactions_command(&args[1..]),
         "modal" => modal_command(&args[1..]),
         "buckling" => buckling_command(&args[1..]),
+        "buckling-combinations" => buckling_combinations_command(&args[1..]),
         "forces" => forces_command(&args[1..]),
         "stresses" => stresses_command(&args[1..]),
         "export" => export(&args[1..]),
@@ -604,6 +606,18 @@ fn buckling_command(args: &[String]) -> Result<i32, CaeError> {
     let out = parsed.options.get("--out").map(PathBuf::from);
     let buckling = session.solve_buckling(modes, out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&buckling).unwrap_or_default());
+    Ok(0)
+}
+
+fn buckling_combinations_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--modes", "--out"], &[])?;
+    let file = positional(&parsed, 0, "buckling-combinations <file> [--modes N] [--out report.json]")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let modes = parse_modes(&parsed)?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let result = session.solve_buckling_combinations(modes, out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(0)
 }
 

@@ -203,6 +203,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return combinationCommand(args.slice(1));
         case 'combinations':
             return combinationsCommand(args.slice(1));
+        case 'buckling-combinations':
+            return bucklingCombinationsCommand(args.slice(1));
         case 'validate':
             return validate(args.slice(1));
         case 'solve':
@@ -675,6 +677,20 @@ async function combinationsCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.solveCombinations({ out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function bucklingCombinationsCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--modes', '--out'], []);
+    const file = positional(parsed, 0, 'buckling-combinations <file> [--modes N] [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.solveBucklingCombinations({
+            modes: modesOption(parsed),
+            out: parsed.options.get('--out'),
+        });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });
