@@ -221,6 +221,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return stressesCommand(args.slice(1));
         case 'deflections':
             return deflectionsCommand(args.slice(1));
+        case 'nodal-stresses':
+            return nodalStressesCommand(args.slice(1));
         case 'export':
             return exportCommand(args.slice(1));
         case 'report':
@@ -895,6 +897,17 @@ async function deflectionsCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.deflections({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function nodalStressesCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--stations', '--out'], []);
+    const file = positional(parsed, 0, 'nodal-stresses <file> [--stations N] [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.nodalStresses({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });

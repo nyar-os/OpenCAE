@@ -21,8 +21,9 @@ use crate::{
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, DeflectionSolution, InternalForceSolution,
-        ModalSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, Solution, StressSolution, solve, solve_buckling,
-        solve_buckling_combinations, solve_combinations, solve_deflection, solve_internal_forces, solve_modal, solve_stress,
+        ModalSolution, NodalStressSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, Solution, StressSolution, solve,
+        solve_buckling, solve_buckling_combinations, solve_combinations, solve_deflection, solve_internal_forces, solve_modal,
+        solve_nodal_stress, solve_stress,
     },
     validate::{Issue, Severity},
 };
@@ -741,6 +742,21 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(deflections)
+    }
+
+    /// Averages element-end stresses at shared nodes and reports the extremes.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn nodal_stresses(&self, stations: usize, out: Option<&Path>) -> Result<NodalStressSolution, CaeError> {
+        let model = &self.current()?.model;
+        let stresses = solve_nodal_stress(model, stations)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&stresses).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize nodal stress result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(stresses)
     }
 
     /// Solves every load combination stored in the open document and returns

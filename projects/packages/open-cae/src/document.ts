@@ -33,6 +33,8 @@ import type {
     MaterialSetRequest,
     ModalSolution,
     NodeAddRequest,
+    NodalStressOptions,
+    NodalStressSolution,
     ReactionOptions,
     ReactionSummary,
     Report,
@@ -235,6 +237,12 @@ export class CaeDocument {
     deflections(options: DeflectionOptions = {}): DeflectionSolution {
         this.assertOpen();
         return service.deflections(this.path, options);
+    }
+
+    /** Averages element-end stresses at shared nodes and reports the extremes. */
+    nodalStresses(options: NodalStressOptions = {}): NodalStressSolution {
+        this.assertOpen();
+        return service.nodalStresses(this.path, options);
     }
 
     /** Solves the document and returns the full report. */

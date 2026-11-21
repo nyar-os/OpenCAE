@@ -410,6 +410,55 @@ export interface DeflectionOptions {
     readonly out?: string;
 }
 
+/**
+ * Averaged stress state at one node. Element-end stresses from every
+ * connected member are averaged at the node, while `minStress` and
+ * `maxStress` keep the extremes of the connected ends.
+ */
+export interface NodeStress {
+    readonly node: string;
+    /** Number of connected element ends that contributed. */
+    readonly connectedElements: number;
+    /** Arithmetic mean of the axial stresses at the connected ends. */
+    readonly meanAxialStress: number;
+    /** Smallest extreme-fibre stress among the connected ends. */
+    readonly minStress: number;
+    /** Largest extreme-fibre stress among the connected ends. */
+    readonly maxStress: number;
+    /** Largest absolute extreme-fibre stress among the connected ends. */
+    readonly maxAbsStress: number;
+    /** Element that produced `maxAbsStress`. */
+    readonly governingElement: string;
+}
+
+/** Governing node of an averaged nodal-stress report. */
+export interface NodalStressGoverning {
+    readonly node: string;
+    readonly element: string;
+    readonly maxAbsStress: number;
+    readonly utilization: number | null;
+}
+
+/** Result of `nodalStresses()`. */
+export interface NodalStressSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Number of stations sampled per element before averaging. */
+    readonly stations: number;
+    readonly allowableStress: number | null;
+    readonly governing: NodalStressGoverning;
+    readonly nodes: readonly NodeStress[];
+}
+
+/** Options of `nodalStresses()`. */
+export interface NodalStressOptions {
+    /** Number of stations per element including both ends; defaults to 11. */
+    readonly stations?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

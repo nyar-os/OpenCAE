@@ -55,6 +55,12 @@ pub const DEFLECTION_REPORT_VERSION: u32 = 1;
 /// Format tag of the deflected-shape JSON report.
 pub const DEFLECTION_REPORT_FORMAT: &str = "open-cae-deflection-report";
 
+/// Version of the JSON report produced by [`solve_nodal_stress`].
+pub const NODAL_STRESS_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the averaged nodal-stress JSON report.
+pub const NODAL_STRESS_REPORT_FORMAT: &str = "open-cae-nodal-stress-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -555,6 +561,65 @@ pub struct DeflectionSolution {
     pub governing: DeflectionGoverning,
     /// Per-element shapes in model element order.
     pub elements: Vec<ElementDeflection>,
+}
+
+/// Averaged stress state at one node.
+///
+/// Element-end stresses from every connected member are averaged at the node.
+/// `min_stress` and `max_stress` are the extreme values of the connected
+/// element ends, so they bound the stress range at the node instead of
+/// averaging it away.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeStress {
+    /// Node identifier.
+    pub node: String,
+    /// Number of connected element ends that contributed.
+    pub connected_elements: usize,
+    /// Arithmetic mean of the axial stresses at the connected element ends.
+    pub mean_axial_stress: f64,
+    /// Smallest extreme-fibre stress among the connected element ends.
+    pub min_stress: f64,
+    /// Largest extreme-fibre stress among the connected element ends.
+    pub max_stress: f64,
+    /// Largest absolute extreme-fibre stress among the connected element ends.
+    pub max_abs_stress: f64,
+    /// Element that produced `max_abs_stress`.
+    pub governing_element: String,
+}
+
+/// Governing node of an averaged nodal-stress report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodalStressGoverning {
+    /// Node with the largest absolute extreme-fibre stress.
+    pub node: String,
+    /// Element that produced that stress at the node.
+    pub element: String,
+    /// Largest absolute extreme-fibre stress.
+    pub max_abs_stress: f64,
+    /// `maxAbsStress / allowableStress` when the material defines one.
+    pub utilization: Option<f64>,
+}
+
+/// Result of [`solve_nodal_stress`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodalStressSolution {
+    /// Report format tag, always `open-cae-nodal-stress-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of stations sampled per element before averaging.
+    pub stations: usize,
+    /// Allowable stress used for utilisation checks, when declared.
+    pub allowable_stress: Option<f64>,
+    /// Governing node.
+    pub governing: NodalStressGoverning,
+    /// Per-node averaged stresses in model node order.
+    pub nodes: Vec<NodeStress>,
 }
 
 /// One solved load combination.
@@ -1711,6 +1776,108 @@ pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolu
         stations,
         governing,
         elements,
+    })
+}
+
+struct NodeStressAccumulator {
+    ends: usize,
+    axial_sum: f64,
+    min_stress: f64,
+    max_stress: f64,
+    max_abs_stress: f64,
+    governing_element: String,
+}
+
+/// Averages element-end stresses at shared nodes and reports the extremes.
+///
+/// Each connected element contributes the stress state of its end station
+/// (the `from` end to the `from` node and the `to` end to the `to` node). A
+/// node therefore receives the arithmetic mean of the axial stresses and the
+/// minimum/maximum extreme-fibre stresses of all connected ends, together with
+/// the element that produces the largest absolute value. This turns a
+/// per-element sampled field into a compact nodal summary for screening and
+/// for comparing against allowable stress.
+///
+/// Beam elements require a parametric material section, exactly as
+/// [`solve_stress`] does. `stations` counts both ends and must be at least `2`.
+pub fn solve_nodal_stress(model: &Model, stations: usize) -> Result<NodalStressSolution, CaeError> {
+    let stress = solve_stress(model, stations)?;
+    let positions: HashMap<&str, usize> =
+        model.nodes.iter().enumerate().map(|(position, node)| (node.id.as_str(), position)).collect();
+    let mut accumulators: Vec<Option<NodeStressAccumulator>> = (0..model.nodes.len()).map(|_| None).collect();
+
+    for (element, result) in model.elements.iter().zip(&stress.elements) {
+        let Some(first) = result.stations.first()
+        else {
+            continue;
+        };
+        let Some(last) = result.stations.last()
+        else {
+            continue;
+        };
+        for (node_id, station) in [(&element.from, first), (&element.to, last)] {
+            let Some(&position) = positions.get(node_id.as_str())
+            else {
+                continue;
+            };
+            let accumulator = accumulators[position].get_or_insert_with(|| NodeStressAccumulator {
+                ends: 0,
+                axial_sum: 0.0,
+                min_stress: f64::INFINITY,
+                max_stress: f64::NEG_INFINITY,
+                max_abs_stress: 0.0,
+                governing_element: String::new(),
+            });
+            accumulator.ends += 1;
+            accumulator.axial_sum += station.axial_stress;
+            accumulator.min_stress = accumulator.min_stress.min(station.min_stress);
+            accumulator.max_stress = accumulator.max_stress.max(station.max_stress);
+            let absolute = station.min_stress.abs().max(station.max_stress.abs());
+            if absolute > accumulator.max_abs_stress || accumulator.governing_element.is_empty() {
+                accumulator.max_abs_stress = absolute;
+                accumulator.governing_element = element.id.clone();
+            }
+        }
+    }
+
+    let nodes: Vec<NodeStress> = model
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(position, node)| {
+            accumulators[position].as_ref().map(|accumulator| NodeStress {
+                node: node.id.clone(),
+                connected_elements: accumulator.ends,
+                mean_axial_stress: accumulator.axial_sum / accumulator.ends as f64,
+                min_stress: accumulator.min_stress,
+                max_stress: accumulator.max_stress,
+                max_abs_stress: accumulator.max_abs_stress,
+                governing_element: accumulator.governing_element.clone(),
+            })
+        })
+        .collect();
+
+    let mut governing: Option<&NodeStress> = None;
+    for node in &nodes {
+        if governing.is_none_or(|current| node.max_abs_stress > current.max_abs_stress) {
+            governing = Some(node);
+        }
+    }
+    let governing = governing.ok_or_else(|| CaeError::new("model/no-elements", "the model requires at least 1 element"))?;
+    let allowable = stress.allowable_stress;
+    Ok(NodalStressSolution {
+        format: NODAL_STRESS_REPORT_FORMAT.to_string(),
+        version: NODAL_STRESS_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        stations,
+        allowable_stress: allowable,
+        governing: NodalStressGoverning {
+            node: governing.node.clone(),
+            element: governing.governing_element.clone(),
+            max_abs_stress: governing.max_abs_stress,
+            utilization: allowable.map(|allowable| governing.max_abs_stress / allowable),
+        },
+        nodes,
     })
 }
 

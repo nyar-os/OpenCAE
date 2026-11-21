@@ -33,6 +33,8 @@ import type {
     MaterialSetRequest,
     ModalSolution,
     NodeAddRequest,
+    NodalStressOptions,
+    NodalStressSolution,
     OpenCAECapabilities,
     Report,
     ReactionOptions,
@@ -254,6 +256,18 @@ export function deflections(path: string, options: DeflectionOptions = {}): Defl
         request === undefined
             ? binding('deflection.sample').deflections(path)
             : binding('deflection.sample').deflections(path, request),
+    );
+}
+
+/** Averages element-end stresses at shared nodes and reports the extremes. */
+export function nodalStresses(path: string, options: NodalStressOptions = {}): NodalStressSolution {
+    const request = options.stations === undefined && options.out === undefined
+        ? undefined
+        : JSON.stringify({ stations: options.stations, out: options.out });
+    return decode<NodalStressSolution>(() =>
+        request === undefined
+            ? binding('stress.nodal').nodal_stresses(path)
+            : binding('stress.nodal').nodal_stresses(path, request),
     );
 }
 
