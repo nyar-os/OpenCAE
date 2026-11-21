@@ -254,6 +254,66 @@ export interface InternalForceOptions {
     readonly out?: string;
 }
 
+/** Section stress recovered at one station. */
+export interface StationStress {
+    readonly position: number;
+    readonly axialForce: number;
+    readonly moment: number;
+    /** Axial stress `N/A`. */
+    readonly axialStress: number;
+    /** Signed bending stress `M/S` at the extreme fibre. */
+    readonly bendingStress: number;
+    /** Smaller extreme-fibre stress `N/A − |M|/S`. */
+    readonly minStress: number;
+    /** Larger extreme-fibre stress `N/A + |M|/S`. */
+    readonly maxStress: number;
+}
+
+/** Recovered stresses of one element. */
+export interface ElementStress {
+    readonly id: string;
+    readonly from: string;
+    readonly to: string;
+    readonly kind: ElementKind;
+    readonly length: number;
+    readonly area: number;
+    /** Elastic section modulus `I/c`; zero for trusses. */
+    readonly sectionModulus: number;
+    readonly maxAbsStress: number;
+    readonly governingStation: number;
+    readonly governingPosition: number;
+    /** `maxAbsStress / allowableStress` when the material defines one. */
+    readonly utilization: number | null;
+    readonly stations: readonly StationStress[];
+}
+
+/** Governing element and station of a stress report. */
+export interface StressGoverning {
+    readonly element: string;
+    readonly position: number;
+    readonly maxAbsStress: number;
+    readonly utilization: number | null;
+}
+
+/** Result of `stresses()`. */
+export interface StressSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly stations: number;
+    readonly allowableStress: number | null;
+    readonly governing: StressGoverning;
+    readonly elements: readonly ElementStress[];
+}
+
+/** Options of `stresses()`. */
+export interface StressOptions {
+    /** Number of stations per element including both ends; defaults to 11. */
+    readonly stations?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Linear combination of applied loads and self-weight. */
 export interface LoadCombination {
     readonly name: string;

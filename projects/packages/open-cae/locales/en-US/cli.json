@@ -25,6 +25,7 @@
             "  ocae modal <file> [--modes N] [--out report.json]",
             "  ocae buckling <file> [--modes N] [--out report.json]",
             "  ocae forces <file> [--stations N] [--out report.json]",
+            "  ocae stresses <file> [--stations N] [--out report.json]",
             "  ocae export <file> --format csv|vtk|md --out <dir|file>",
             "  ocae report <file>",
             "  ocae capabilities"

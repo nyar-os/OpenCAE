@@ -37,6 +37,12 @@ pub const COMBINATION_REPORT_VERSION: u32 = 1;
 /// Format tag of the load combination JSON report.
 pub const COMBINATION_REPORT_FORMAT: &str = "open-cae-combination-report";
 
+/// Version of the JSON report produced by [`solve_stress`].
+pub const STRESS_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the beam stress-recovery JSON report.
+pub const STRESS_REPORT_FORMAT: &str = "open-cae-stress-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -377,6 +383,94 @@ pub struct InternalForceSolution {
     pub stations: usize,
     /// Diagrams in model element order.
     pub elements: Vec<ElementDiagram>,
+}
+
+/// Section stress recovered at one station of an element.
+///
+/// `minStress` and `maxStress` are the two extreme fibre stresses
+/// `N/A ± |M|/S`, where `S = I/c` is the elastic section modulus. Both equal
+/// the axial stress for truss elements, which carry no bending.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StationStress {
+    /// Distance from the `from` node along the element.
+    pub position: f64,
+    /// Axial force, positive in tension.
+    pub axial_force: f64,
+    /// Bending moment.
+    pub moment: f64,
+    /// Axial stress `N/A`.
+    pub axial_stress: f64,
+    /// Signed bending stress `M/S` at the extreme fibre.
+    pub bending_stress: f64,
+    /// Smaller extreme-fibre stress.
+    pub min_stress: f64,
+    /// Larger extreme-fibre stress.
+    pub max_stress: f64,
+}
+
+/// Recovered stresses of one element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementStress {
+    /// Element identifier.
+    pub id: String,
+    /// Start node identifier.
+    pub from: String,
+    /// End node identifier.
+    pub to: String,
+    /// Element formulation (`truss` or `beam`).
+    pub kind: ElementKind,
+    /// Element length.
+    pub length: f64,
+    /// Cross-sectional area used by `N/A`.
+    pub area: f64,
+    /// Elastic section modulus `I/c`; zero for truss elements.
+    pub section_modulus: f64,
+    /// Largest absolute extreme-fibre stress among the sampled stations.
+    pub max_abs_stress: f64,
+    /// Index of the governing station in `stations`.
+    pub governing_station: usize,
+    /// Position of the governing station.
+    pub governing_position: f64,
+    /// `maxAbsStress / allowableStress` when the material defines one.
+    pub utilization: Option<f64>,
+    /// Sampled stations from the `from` node to the `to` node.
+    pub stations: Vec<StationStress>,
+}
+
+/// Governing element and station of a stress-recovery report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StressGoverning {
+    /// Element that carries the largest absolute extreme-fibre stress.
+    pub element: String,
+    /// Position along that element.
+    pub position: f64,
+    /// Largest absolute extreme-fibre stress.
+    pub max_abs_stress: f64,
+    /// `maxAbsStress / allowableStress` when the material defines one.
+    pub utilization: Option<f64>,
+}
+
+/// Result of [`solve_stress`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StressSolution {
+    /// Report format tag, always `open-cae-stress-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of stations sampled per element, including both ends.
+    pub stations: usize,
+    /// Allowable stress used for utilisation checks, when declared.
+    pub allowable_stress: Option<f64>,
+    /// Governing element and station.
+    pub governing: StressGoverning,
+    /// Per-element stresses in model element order.
+    pub elements: Vec<ElementStress>,
 }
 
 /// One solved load combination.
@@ -1099,6 +1193,134 @@ impl InternalForceSolution {
             elements: Vec::new(),
         }
     }
+}
+
+/// Recovers extreme-fibre stresses from the sampled internal forces.
+///
+/// Each station reports `σ = N/A ± |M|/S` with the elastic section modulus
+/// `S = I/c`. Beams take `I` from their own `inertia` or from the material
+/// section, and `c` always comes from the material section. A model that
+/// contains beams without a material section is rejected with
+/// `material/missing-section`, because the extreme-fibre distance is unknown.
+/// Truss elements report the axial stress only.
+///
+/// `stations` counts both ends and must be at least `2`. When the material
+/// declares `allowableStress`, each element and the governing result also
+/// report `maxAbsStress / allowableStress`.
+pub fn solve_stress(model: &Model, stations: usize) -> Result<StressSolution, CaeError> {
+    if stations < 2 {
+        return Err(CaeError::new(
+            "analysis/invalid-stations",
+            format!("stress recovery requires at least 2 stations, but {stations} were requested"),
+        ));
+    }
+    let solution = solve(model)?;
+    let diagram = solve_internal_forces(model, stations)?;
+    let properties = match model.material.section {
+        Some(section) => Some(section.properties()?),
+        None => None,
+    };
+    let has_beam = model.elements.iter().any(|element| element.kind == ElementKind::Beam);
+    if has_beam && properties.is_none() {
+        return Err(CaeError::new(
+            "material/missing-section",
+            "stress recovery for beam elements requires a parametric material section (`material.section`) to provide the extreme-fibre distance",
+        ));
+    }
+    let allowable = model.material.allowable_stress;
+
+    let mut elements = Vec::with_capacity(diagram.elements.len());
+    for ((element, result), element_diagram) in model.elements.iter().zip(&solution.elements).zip(&diagram.elements) {
+        let area = element.material.as_ref().and_then(|material| material.area).unwrap_or(model.material.area);
+        let section_modulus = match element.kind {
+            ElementKind::Truss => 0.0,
+            ElementKind::Beam => {
+                let properties = properties.as_ref().ok_or_else(|| {
+                    CaeError::new(
+                        "material/missing-section",
+                        format!("beam element `{}` needs a parametric material section for stress recovery", element.id),
+                    )
+                })?;
+                let inertia = resolve_inertia(model, element).ok_or_else(|| {
+                    CaeError::new(
+                        "element/invalid-inertia",
+                        format!("beam element `{}` requires a positive finite inertia", element.id),
+                    )
+                })?;
+                inertia / properties.extreme_fiber
+            }
+        };
+
+        let mut samples = Vec::with_capacity(element_diagram.stations.len());
+        let mut governing_station = 0;
+        let mut max_abs_stress = 0.0_f64;
+        for (index, station) in element_diagram.stations.iter().enumerate() {
+            let axial_stress = station.axial_force / area;
+            let bending_stress = if section_modulus > 0.0 { station.moment / section_modulus } else { 0.0 };
+            let half = bending_stress.abs();
+            let min_stress = axial_stress - half;
+            let max_stress = axial_stress + half;
+            let absolute = min_stress.abs().max(max_stress.abs());
+            if absolute > max_abs_stress {
+                max_abs_stress = absolute;
+                governing_station = index;
+            }
+            samples.push(StationStress {
+                position: station.position,
+                axial_force: station.axial_force,
+                moment: station.moment,
+                axial_stress,
+                bending_stress,
+                min_stress,
+                max_stress,
+            });
+        }
+        let governing_position = samples.get(governing_station).map(|station| station.position).unwrap_or(0.0);
+        elements.push(ElementStress {
+            id: result.id.clone(),
+            from: result.from.clone(),
+            to: result.to.clone(),
+            kind: element.kind,
+            length: element_diagram.length,
+            area,
+            section_modulus,
+            max_abs_stress,
+            governing_station,
+            governing_position,
+            utilization: allowable.map(|allowable| max_abs_stress / allowable),
+            stations: samples,
+        });
+    }
+
+    let governing_element = elements
+        .iter()
+        .max_by(|left, right| left.max_abs_stress.partial_cmp(&right.max_abs_stress).unwrap_or(std::cmp::Ordering::Equal))
+        .ok_or_else(|| CaeError::new("model/no-elements", "the model requires at least 1 element"))?;
+    let governing = StressGoverning {
+        element: governing_element.id.clone(),
+        position: governing_element.governing_position,
+        max_abs_stress: governing_element.max_abs_stress,
+        utilization: governing_element.utilization,
+    };
+
+    Ok(StressSolution {
+        format: STRESS_REPORT_FORMAT.to_string(),
+        version: STRESS_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        stations,
+        allowable_stress: allowable,
+        governing,
+        elements,
+    })
+}
+
+fn resolve_inertia(model: &Model, element: &Element) -> Option<f64> {
+    element
+        .inertia
+        .or_else(|| {
+            model.material.section.and_then(|section| section.properties().ok()).map(|properties| properties.inertia_strong)
+        })
+        .filter(|value| positive_finite(*value))
 }
 
 /// Solves every provided load combination and returns each solution plus an

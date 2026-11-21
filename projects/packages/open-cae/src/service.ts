@@ -32,6 +32,8 @@ import type {
     Report,
     Solution,
     SolveOptions,
+    StressOptions,
+    StressSolution,
     SupportAddRequest,
     ValidationReport,
 } from './types.js';
@@ -194,6 +196,16 @@ export function internalForces(path: string, options: InternalForceOptions = {})
         : JSON.stringify({ stations: options.stations, out: options.out });
     return decode<InternalForceSolution>(() =>
         request === undefined ? binding('internal.forces').internal_forces(path) : binding('internal.forces').internal_forces(path, request),
+    );
+}
+
+/** Recovers extreme-fibre stresses and utilisation per element. */
+export function stresses(path: string, options: StressOptions = {}): StressSolution {
+    const request = options.stations === undefined && options.out === undefined
+        ? undefined
+        : JSON.stringify({ stations: options.stations, out: options.out });
+    return decode<StressSolution>(() =>
+        request === undefined ? binding('internal.stresses').stresses(path) : binding('internal.stresses').stresses(path, request),
     );
 }
 

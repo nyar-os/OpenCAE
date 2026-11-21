@@ -31,6 +31,8 @@ import type {
     Report,
     Solution,
     SolveOptions,
+    StressOptions,
+    StressSolution,
     SupportAddRequest,
     Units,
     ValidationReport,
@@ -193,6 +195,12 @@ export class CaeDocument {
     internalForces(options: InternalForceOptions = {}): InternalForceSolution {
         this.assertOpen();
         return service.internalForces(this.path, options);
+    }
+
+    /** Recovers extreme-fibre stresses and utilisation per element. */
+    stresses(options: StressOptions = {}): StressSolution {
+        this.assertOpen();
+        return service.stresses(this.path, options);
     }
 
     /** Solves the document and returns the full report. */

@@ -32,6 +32,7 @@ export interface NativeBinding {
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
     internal_forces(path: string, requestJson?: string): string;
+    stresses(path: string, requestJson?: string): string;
     export(path: string, format: string, target: string): string;
     report(path: string): string;
 }

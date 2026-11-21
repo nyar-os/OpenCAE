@@ -213,6 +213,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return bucklingCommand(args.slice(1));
         case 'forces':
             return forcesCommand(args.slice(1));
+        case 'stresses':
+            return stressesCommand(args.slice(1));
         case 'export':
             return exportCommand(args.slice(1));
         case 'report':
@@ -796,6 +798,17 @@ async function forcesCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.internalForces({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function stressesCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--stations', '--out'], []);
+    const file = positional(parsed, 0, 'stresses <file> [--stations N] [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.stresses({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });

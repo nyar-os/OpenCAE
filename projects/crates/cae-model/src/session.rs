@@ -21,7 +21,7 @@ use crate::{
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
         BucklingSolution, CombinationSolution, InternalForceSolution, ModalSolution, REPORT_FORMAT, REPORT_VERSION, Solution,
-        solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
+        StressSolution, solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal, solve_stress,
     },
     validate::{Issue, Severity},
 };
@@ -593,6 +593,20 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(forces)
+    }
+
+    /// Recovers extreme-fibre stresses from the sampled internal forces.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn stresses(&self, stations: usize, out: Option<&Path>) -> Result<StressSolution, CaeError> {
+        let model = &self.current()?.model;
+        let stresses = solve_stress(model, stations)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&stresses)
+                .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize stress result: {error}")))?;
+            write_atomic(path, &json)?;
+        }
+        Ok(stresses)
     }
 
     /// Solves every load combination stored in the open document and returns

@@ -51,10 +51,12 @@ pub use crate::{
     solver::{
         BUCKLING_REPORT_FORMAT, BUCKLING_REPORT_VERSION, BucklingMode, BucklingSolution, COMBINATION_REPORT_FORMAT,
         COMBINATION_REPORT_VERSION, CombinationCase, CombinationEnvelope, CombinationSolution, ElementDiagram, ElementEnvelope,
-        ElementResult, EndForces, EnvelopeValue, ForceResultant, INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION,
-        InternalForceSolution, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce, MaxMoment, ModalSolution, Mode,
-        ModeShape, NodeDisplacement, NodeEnvelope, NodeReaction, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, SectionForces,
-        Solution, SupportReaction, solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
+        ElementResult, ElementStress, EndForces, EnvelopeValue, ForceResultant, INTERNAL_FORCE_REPORT_FORMAT,
+        INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MaxAxialForce,
+        MaxMoment, ModalSolution, Mode, ModeShape, NodeDisplacement, NodeEnvelope, NodeReaction, REPORT_FORMAT, REPORT_VERSION,
+        ReactionSummary, STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION, SectionForces, Solution, StationStress, StressGoverning,
+        StressSolution, SupportReaction, solve, solve_buckling, solve_combinations, solve_internal_forces, solve_modal,
+        solve_stress,
     },
     validate::{Issue, Severity},
 };
@@ -77,6 +79,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "nonlinear": "unsupported",
     "buckling": "supported",
     "internalForces": "supported",
+    "stressRecovery": "supported",
     "loadCombinations": "supported",
     "materialLibrary": "supported",
     "thermal": "unsupported"

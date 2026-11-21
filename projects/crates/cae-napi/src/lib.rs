@@ -444,6 +444,24 @@ fn internal_forces(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &forces)
 }
 
+/// Recovers extreme-fibre beam stresses from the sampled internal forces.
+///
+/// The request accepts `stations` (default 11, at least 2) and an optional
+/// `out` path for the JSON report.
+#[function]
+fn stresses(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let stations = request.as_ref().and_then(|request| request.get("stations")).and_then(Value::as_u64);
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let stations =
+        usize::try_from(stations.unwrap_or(11)).map_err(|_| argument_error("`stations` must be a positive integer"))?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.stresses(stations, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Exports a solved document as `csv`, `vtk` or `md`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
@@ -486,6 +504,7 @@ register_module![
     validate,
     solve,
     internal_forces,
+    stresses,
     export,
     report
 ];
