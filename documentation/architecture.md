@@ -58,7 +58,9 @@ OpenCae session (cae-model)      edit → validate → solve → export
 - `new OpenCAE()` opens nothing: no network, no disk scan, no file. Native
   initialisation happens inside async `create()` / `open()`.
 - Every editing call mutates the in-memory model, writes the document
-  atomically and returns a fresh `DocumentSummary`.
+  atomically and returns a fresh `DocumentSummary`. `element split` is one such
+  edit: it inserts or reuses an interior node, appends a second segment and
+  bumps `revision` once; its report also carries the node and both element ids.
 - Query and solve calls read the file by path, so the SDK, the CLI and the
   addon cannot drift apart.
 

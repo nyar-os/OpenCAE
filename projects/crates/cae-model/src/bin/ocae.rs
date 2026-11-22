@@ -32,6 +32,7 @@ Usage:
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
   ocae element update <file> --id <id> [--from <node>] [--to <node>]
+  ocae element split <file> --id <id> --at <fraction>
   ocae element remove <file> --id <id>
   ocae element forces <file> --id <id>
   ocae element release <file> --id <id> [--start] [--end]
@@ -389,6 +390,7 @@ fn element_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => element_add(&args[1..]),
         Some("update") => element_update(&args[1..]),
+        Some("split") => element_split(&args[1..]),
         Some("remove") => element_remove(&args[1..]),
         Some("forces") => element_forces(&args[1..]),
         Some("release") => element_release(&args[1..]),
@@ -397,14 +399,29 @@ fn element_command(args: &[String]) -> Result<i32, CaeError> {
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `element` does not exist; only `add`, `update`, `remove`, `forces`, `release`, `gradient` or `span` is supported"
+                "subcommand `{other}` of `element` does not exist; only `add`, `update`, `split`, `remove`, `forces`, `release`, `gradient` or `span` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`element` is missing a subcommand; only `add`, `update`, `remove`, `forces`, `release`, `gradient` or `span` is supported",
+            "`element` is missing a subcommand; only `add`, `update`, `split`, `remove`, `forces`, `release`, `gradient` or `span` is supported",
         )),
     }
+}
+
+fn element_split(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--at"], &[])?;
+    let file = positional(&parsed, 0, "element split <file> --id <id> --at <fraction>")?;
+    let id = required(&parsed, "--id")?;
+    let at = required_number(&parsed, "--at")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let report = session.split_element(id, at)?;
+    println!(
+        "element `{id}` split at {at}: node `{}`, elements `{}` and `{}` (revision {})",
+        report.split.node, report.split.first, report.split.second, report.summary.revision
+    );
+    Ok(0)
 }
 
 fn element_remove(args: &[String]) -> Result<i32, CaeError> {

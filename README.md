@@ -89,6 +89,7 @@ Every solve prints JSON to stdout; add `--out report.json` to keep a copy. Exit 
 - **Load combinations** with load/gravity factors, envelopes and per-case summaries.
 - **Rich support modelling**: rigid, spring, inclined, prescribed-displacement and construction-stage element activation.
 - **Member actions**: distributed and partial-span loads, end releases, uniform temperature change, through-depth temperature gradient and tension-only cables.
+- **Topology edits**: in-place node moves, element reconnection, node merging and parametric member splitting that reuses coincident nodes and keeps material, section and uniform loads.
 - **Result queries and exports**: internal-force, stress, deflection and nodal-stress sampling, assembled stiffness/mass matrices, and CSV, VTK, Markdown and HTML reports plus deterministic SVG drawings of the model and deformed shape.
 
 Static results include a force-equilibrium check, and reports are deterministic: repeated Markdown, HTML and SVG exports are byte-identical because they contain no timestamps.

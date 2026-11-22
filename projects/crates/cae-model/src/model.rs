@@ -405,6 +405,20 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// Identifiers produced by [`Model::split_element`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementSplit {
+    /// Interior node at the split point; a new node or an existing one.
+    pub node: String,
+    /// First segment from the original start node; it keeps the element id.
+    pub first: String,
+    /// Second segment towards the original end node.
+    pub second: String,
+    /// `true` when an existing node at the split point was reused.
+    pub reused_node: bool,
+}
+
 /// Enforced (prescribed) values of the constrained degrees of freedom of a
 /// support.
 ///
@@ -995,6 +1009,108 @@ impl Model {
         self.elements[index].to = to;
         self.bump_revision();
         Ok(())
+    }
+
+    /// Splits an existing element at the fraction `at` of its length and bumps
+    /// the revision.
+    ///
+    /// The split point is `from + at · (to − from)`. An existing node at exactly
+    /// that position is reused; otherwise a node is created with the
+    /// deterministic id `<element>-mid` (with a numeric suffix when that id is
+    /// taken). The first segment keeps the original element id and the second is
+    /// appended with the id `<element>-b` (again suffixed when needed).
+    ///
+    /// Both segments inherit the material overrides, kind, inertia, uniform
+    /// distributed load, uniform temperature and tension-only flag. End releases
+    /// move to the outer ends so the interior node stays continuous. The
+    /// fraction must be finite and strictly inside `(0, 1)`. Partial-span loads,
+    /// linearly varying distributed loads and through-depth temperature
+    /// gradients cannot be split losslessly and report
+    /// `element/split-unsupported-load`. Nodal loads and supports are untouched.
+    pub fn split_element(&mut self, id: &str, at: f64) -> Result<ElementSplit, CaeError> {
+        if !at.is_finite() || at <= 0.0 || at >= 1.0 {
+            return Err(CaeError::new(
+                "element/invalid-fraction",
+                format!("split fraction of element `{id}` must be finite and strictly between 0 and 1 (currently {at})"),
+            ));
+        }
+        let index = self
+            .elements
+            .iter()
+            .position(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        let original = self.elements[index].clone();
+        if original.distributed_load_from.is_some() || original.distributed_load_to.is_some() {
+            return Err(CaeError::new(
+                "element/split-unsupported-load",
+                format!("element `{id}` carries a partial-span distributed load that cannot be split losslessly"),
+            ));
+        }
+        if let Some(end) = original.distributed_load_end {
+            if end != original.distributed_load.unwrap_or(0.0) {
+                return Err(CaeError::new(
+                    "element/split-unsupported-load",
+                    format!("element `{id}` carries a linearly varying distributed load that cannot be split losslessly"),
+                ));
+            }
+        }
+        if original.temperature_gradient.is_some() {
+            return Err(CaeError::new(
+                "element/split-unsupported-load",
+                format!("element `{id}` carries a through-depth temperature gradient that cannot be split losslessly"),
+            ));
+        }
+        let start = self.node(&original.from).map(|node| (node.x, node.y, node.z)).ok_or_else(|| {
+            CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{}`", original.from))
+        })?;
+        let end = self.node(&original.to).map(|node| (node.x, node.y, node.z)).ok_or_else(|| {
+            CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{}`", original.to))
+        })?;
+        let x = start.0 + at * (end.0 - start.0);
+        let y = start.1 + at * (end.1 - start.1);
+        let z = start.2 + at * (end.2 - start.2);
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err(CaeError::new(
+                "element/invalid-fraction",
+                format!("splitting element `{id}` at {at} does not produce finite coordinates"),
+            ));
+        }
+        if (x, y, z) == start || (x, y, z) == end {
+            return Err(CaeError::new(
+                "element/zero-length",
+                format!("splitting element `{id}` at {at} would collapse a segment to zero length"),
+            ));
+        }
+        let existing = self.nodes.iter().find(|node| node.x == x && node.y == y && node.z == z).map(|node| node.id.clone());
+        let (node_id, reused_node) = match existing {
+            Some(node) => (node, true),
+            None => {
+                let node = unique_identifier(&format!("{}-mid", original.id), |candidate| self.node(candidate).is_some());
+                self.nodes.push(Node { id: node.clone(), x, y, z, mass: 0.0, temperature: None, heat: 0.0 });
+                (node, false)
+            }
+        };
+        let second_id = unique_identifier(&format!("{}-b", original.id), |candidate| {
+            self.elements.iter().any(|element| element.id == candidate)
+        });
+        let first_release = original
+            .release
+            .map(|release| EndRelease { start: release.start, end: false })
+            .filter(|release| !release.is_empty());
+        let second_release =
+            original.release.map(|release| EndRelease { start: false, end: release.end }).filter(|release| !release.is_empty());
+        let first = &mut self.elements[index];
+        first.to = node_id.clone();
+        first.distributed_load_end = None;
+        first.release = first_release;
+        let mut second = original;
+        second.id = second_id.clone();
+        second.from = node_id.clone();
+        second.distributed_load_end = None;
+        second.release = second_release;
+        self.elements.push(second);
+        self.bump_revision();
+        Ok(ElementSplit { node: node_id, first: id.to_string(), second: second_id, reused_node })
     }
 
     /// Replaces the global material data, keeping the current density.
@@ -1866,6 +1982,21 @@ fn merge_supports(target: Support, extra: Support) -> Result<Support, CaeError> 
 impl Default for Model {
     fn default() -> Self {
         Self::new(Units::Millimeter)
+    }
+}
+
+/// Returns `base`, or `base-2`, `base-3`, ... when the identifier is taken.
+fn unique_identifier(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(base) {
+        return base.to_string();
+    }
+    let mut index = 2_u32;
+    loop {
+        let candidate = format!("{base}-{index}");
+        if !taken(&candidate) {
+            return candidate;
+        }
+        index += 1;
     }
 }
 

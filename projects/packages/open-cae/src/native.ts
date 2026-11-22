@@ -27,6 +27,7 @@ export interface NativeBinding {
     node_remove(path: string, requestJson: string): string;
     element_add(path: string, requestJson: string): string;
     element_update(path: string, requestJson: string): string;
+    element_split(path: string, requestJson: string): string;
     element_remove(path: string, requestJson: string): string;
     element_release(path: string, requestJson: string): string;
     element_tension_only(path: string, requestJson: string): string;

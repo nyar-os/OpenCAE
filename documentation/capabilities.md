@@ -15,6 +15,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | 3D truss linear static (`truss3d`) | ✅ supported |
 | 2D Euler-Bernoulli beam (`beam2d`, including axial force/shear/bending moment, distributed loads, end moments, end releases) | ✅ supported |
 | partial-span distributed loads (`distributedLoadFrom`/`distributedLoadTo`, uniform or linear over part of a member) | ✅ supported |
+| parametric element splitting (`element split`, `splitElement()`; interior node + two segments) | ✅ supported |
 | beam end moment releases (`endRelease`, static condensation of hinges) | ✅ supported |
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | uniform member temperature change (`thermalExpansion`, `α·ΔT` thermal strain + equivalent nodal loads) | ✅ supported |
@@ -55,7 +56,9 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
 `nodalStress` and `loadCases` are available through the Rust API, the native
-addon and the TypeScript SDK.
+addon and the TypeScript SDK. Parametric element splitting is the `edits`
+entry `elementSplit` of the capability matrix and is available at the same
+three entry points plus the CLI (`open-cae element split`).
 
 `thermalExpansion` and `thermalGradient` cover member temperature actions and
 feed the structural solver only. `heat` is a separate, uncoupled steady-state
@@ -352,6 +355,24 @@ be finite and positive and a model without nodes is rejected with
     singular component. Units are never converted, so a millimetre document
     must supply a length-consistent conductivity.
 
+29. **Parametric element splitting**: `split_element(id, at)` (CLI
+    `open-cae element split --id <id> --at <fraction>`, SDK
+    `splitElement()`) inserts an interior node at
+    `from + at · (to − from)`. The fraction must be finite and strictly inside
+    `(0, 1)`. An existing node at exactly those coordinates is reused; otherwise
+    a node is created with the deterministic id `<element>-mid` (suffixed with
+    `-2`, `-3`, ... when taken). The first segment keeps the original element id
+    and the second is appended as `<element>-b` (same suffix rule). Both
+    segments inherit the material overrides, kind, inertia, uniform distributed
+    load, uniform temperature and tension-only flag; end releases move to the
+    outer ends so the interior node stays continuous. Only a uniform
+    distributed load (no `distributedLoadEnd` or an equal start/end intensity)
+    can be divided losslessly: the two segments carry the same intensity and the
+    total resultant is unchanged. Partial-span loads, linearly varying
+    distributed loads and through-depth temperature gradients report
+    `element/split-unsupported-load`. Nodal loads, supports and masses are
+    untouched, and the edit bumps `revision` exactly once.
+
 ## Validation and tests
 
 ```shell
@@ -412,6 +433,13 @@ persists the ordered removal.
 `tests/entity_updates.rs`: in-place node movement and element endpoint
 reconnection keep identifiers and references so a solved model can be edited
 without rebuilding its topology.
+
+`tests/element_split.rs`: a split axial bar keeps `PL/EA` and the same axial
+force, a split cantilever keeps `PL³/(3EI)` and the fixed-end moment, an
+existing node at the split point is reused, attributes and outer releases are
+copied, a uniform load keeps the total reaction, invalid fractions, unknown
+elements and partial-span/linear/gradient loads are rejected, and the session
+split persists across a reopen with a manual undo/redo path.
 
 `tests/result_queries.rs`: `nodeDisplacement`, `elementResult` and
 `nodeReaction` match the analytic bar solution, and unknown identifiers report
@@ -660,6 +688,12 @@ threshold of `1e-9`.
   or rewire a whole network, and a move that would collapse an element to zero
   length is rejected. Editing a node keeps every element, support and load
   reference to it.
+- `element split` inserts **one interior node** and only divides members whose
+  loads can be represented exactly by two segments. Partial-span loads,
+  linearly varying distributed loads and temperature gradients are rejected
+  with `element/split-unsupported-load`, and the operation does not split,
+  redistribute or renumber supports, nodal loads, masses or unrelated members.
+  It is a single atomic edit with one revision increment and no undo stack.
 - `node merge` is a topology cleanup: the `from` node is removed and the `into`
   node keeps its coordinates and id, even when the two nodes were not
   coincident. Loads and springs add component-wise; two different prescribed

@@ -313,6 +313,7 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["solver"]["partialSpanLoad"], "supported");
     assert_eq!(capabilities["solver"]["thermal"], "supported");
     assert_eq!(capabilities["solver"]["heatTransfer"], "supported");
+    assert_eq!(capabilities["edits"]["elementSplit"], "supported");
     assert_eq!(capabilities["io"]["csv"], "supported");
     assert_eq!(capabilities["io"]["vtk"], "supported");
     assert_eq!(capabilities["io"]["md"], "supported");

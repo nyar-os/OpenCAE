@@ -1077,6 +1077,7 @@ export interface ExportReport {
 export interface OpenCAECapabilities {
     readonly engine: { readonly package: string; readonly version: string };
     readonly solver: Readonly<Record<string, SupportLevel>>;
+    readonly edits: Readonly<Record<string, SupportLevel>>;
     readonly io: Readonly<Record<string, SupportLevel>>;
 }
 
@@ -1223,6 +1224,28 @@ export interface ElementUpdateRequest {
     readonly from?: string;
     /** New end node identifier. */
     readonly to?: string;
+}
+
+/** Request of `splitElement()`. */
+export interface ElementSplitRequest {
+    readonly id: string;
+    /** Fraction of the element length, strictly between `0` and `1`. */
+    readonly at: number;
+}
+
+/**
+ * Result of `splitElement()`: the document summary plus the interior node and
+ * both element identifiers.
+ */
+export interface ElementSplitReport extends DocumentSummary {
+    /** Interior node at the split point (created or reused). */
+    readonly node: string;
+    /** First segment from the original start node; it keeps the element id. */
+    readonly first: string;
+    /** Second segment towards the original end node. */
+    readonly second: string;
+    /** `true` when an existing node at the split point was reused. */
+    readonly reusedNode: boolean;
 }
 
 /** Request of `setMaterial()`. */

@@ -53,6 +53,7 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 |---------|-------|-------|
 | `open-cae element add <file>` | `--id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--tension-only]` | `beam` is 2D-only and needs positive `--I` or a material section. `--w`/`--w2` are local `+y` intensities at the start/end node. `--w-from`/`--w-to` limit the load to a length fraction (both or neither). `--dt` needs material `alpha`; `--dt-grad` also needs a section depth. `--tension-only` marks a truss as a cable. |
 | `open-cae element update <file>` | `--id <id> [--from <n>] [--to <n>]` | Reconnects endpoints and preserves material, loads, temperature and releases. |
+| `open-cae element split <file>` | `--id <id> --at <fraction>` | Splits a member at a length fraction strictly between 0 and 1, reusing or creating the interior node. Prints the interior node and both element ids. Uniform loads and temperatures are copied; partial-span/linear loads and gradients are rejected with `element/split-unsupported-load`. |
 | `open-cae element remove <file>` | `--id <id>` | Removes one element. |
 | `open-cae element forces <file>` | `--id <id>` | Prints the solved result of one element. |
 | `open-cae element release <file>` | `--id <id> [--start] [--end]` | Releases the bending moment at one or both beam ends; at least one flag is required. Trusses are rejected. |

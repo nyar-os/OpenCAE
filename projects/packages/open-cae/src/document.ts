@@ -26,6 +26,8 @@ import type {
     ElementAddRequest,
     ElementReleaseRequest,
     ElementResult,
+    ElementSplitReport,
+    ElementSplitRequest,
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
@@ -220,6 +222,20 @@ export class CaeDocument {
     updateElement(request: ElementUpdateRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.updateElement(this.path, request));
+    }
+
+    /**
+     * Splits an element at a fraction of its length and saves the file. An
+     * existing node at the split point is reused, otherwise one is created. Both
+     * segments keep the material, section, uniform load and temperature;
+     * partial-span, linearly varying and gradient loads are rejected with
+     * `element/split-unsupported-load`.
+     */
+    splitElement(request: ElementSplitRequest): ElementSplitReport {
+        this.assertOpen();
+        const report = service.splitElement(this.path, request);
+        this.adopt(report);
+        return report;
     }
 
     /** Removes an element and saves the file. */

@@ -26,6 +26,8 @@ import type {
     ElementAddRequest,
     ElementReleaseRequest,
     ElementResult,
+    ElementSplitReport,
+    ElementSplitRequest,
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
@@ -115,12 +117,15 @@ export function version(): string {
 
 /** Reads the capability matrix of the installed addon. */
 export function capabilities(): OpenCAECapabilities {
-    const matrix = decode<{ solver: Record<string, 'supported' | 'unsupported'>; io: Record<string, 'supported' | 'unsupported'> }>(
-        () => binding('capabilities').capabilities(),
-    );
+    const matrix = decode<{
+        solver: Record<string, 'supported' | 'unsupported'>;
+        edits: Record<string, 'supported' | 'unsupported'>;
+        io: Record<string, 'supported' | 'unsupported'>;
+    }>(() => binding('capabilities').capabilities());
     return {
         engine: { package: 'open-cae-napi', version: version() },
         solver: matrix.solver,
+        edits: matrix.edits,
         io: matrix.io,
     };
 }
@@ -182,6 +187,11 @@ export function elementAdd(path: string, request: ElementAddRequest): DocumentSu
 /** Reconnects an existing element to new endpoints and returns the updated summary. */
 export function updateElement(path: string, request: ElementUpdateRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('element.update').element_update(path, JSON.stringify(request)));
+}
+
+/** Splits one element at a length fraction and returns the split identifiers. */
+export function splitElement(path: string, request: ElementSplitRequest): ElementSplitReport {
+    return decode<ElementSplitReport>(() => binding('element.split').element_split(path, JSON.stringify(request)));
 }
 
 /** Removes a node and returns the updated summary. */

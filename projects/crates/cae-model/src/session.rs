@@ -18,7 +18,7 @@ use crate::{
     CAPABILITIES_JSON, CaeError,
     export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::material_preset,
-    model::{ElementKind, Material, Model, Section, Units},
+    model::{ElementKind, ElementSplit, Material, Model, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InternalForceSolution, LoadCaseSummary,
@@ -90,6 +90,21 @@ pub struct ValidationReport {
     pub ok: bool,
     /// Every finding, in the order the validator produced them.
     pub issues: Vec<Issue>,
+}
+
+/// Result of [`OpenCae::split_element`].
+///
+/// The document summary fields are flattened so the revision and link counts are
+/// read exactly like the summary returned by every other edit.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementSplitReport {
+    /// Summary of the document as written to disk.
+    #[serde(flatten)]
+    pub summary: DocumentSummary,
+    /// Identifiers produced by the split.
+    #[serde(flatten)]
+    pub split: ElementSplit,
 }
 
 /// Supported export formats.
@@ -469,6 +484,25 @@ impl OpenCae {
     /// rejected with `element/degenerate`.
     pub fn update_element(&mut self, id: &str, from: Option<&str>, to: Option<&str>) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.update_element_endpoints(id, from, to))
+    }
+
+    /// Splits an existing element at the fraction `at` of its length and saves
+    /// the document.
+    ///
+    /// The split point is `from + at · (to − from)`; an existing node there is
+    /// reused, otherwise one is created. Both segments keep the material,
+    /// section data, uniform distributed load, uniform temperature and
+    /// tension-only flag, and the end releases move to the outer ends. The
+    /// fraction must be finite and strictly inside `(0, 1)`. Partial-span loads,
+    /// linearly varying distributed loads and through-depth temperature
+    /// gradients are rejected with `element/split-unsupported-load` because they
+    /// cannot be divided losslessly. The report names the interior node and both
+    /// element ids and carries the new revision.
+    pub fn split_element(&mut self, id: &str, at: f64) -> Result<ElementSplitReport, CaeError> {
+        let document = self.current_mut()?;
+        let split = document.model.split_element(id, at)?;
+        document.model.save_atomic(&document.path)?;
+        Ok(ElementSplitReport { summary: document.summary(), split })
     }
 
     /// Sets or clears the loaded segment of an existing beam's distributed

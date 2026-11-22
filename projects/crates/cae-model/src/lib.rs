@@ -54,12 +54,12 @@ pub use crate::{
         MATERIAL_PRESETS, MaterialPreset, SectionProperties, SectionReport, library_json, material_preset, section_report,
     },
     model::{
-        Element, ElementKind, ElementMaterial, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
+        Element, ElementKind, ElementMaterial, ElementSplit, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
         PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
     },
     session::{
-        DocumentSummary, ExportFormat, ExportOptions, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport,
-        not_implemented,
+        DocumentSummary, ElementSplitReport, ExportFormat, ExportOptions, ExportReport, OpenCae, OpenCaeOptions, Report,
+        ValidationReport, not_implemented,
     },
     solver::{
         BUCKLING_COMBINATION_REPORT_FORMAT, BUCKLING_COMBINATION_REPORT_VERSION, BUCKLING_REPORT_FORMAT,
@@ -90,9 +90,9 @@ pub use crate::{
 
 /// Stable machine-readable capability matrix of this build.
 ///
-/// The value is a pretty-printed JSON object with two sections: `solver` and
-/// `io`. Supported entries are marked `"supported"`, everything else is
-/// `"unsupported"` and must not be silently treated as working.
+/// The value is a pretty-printed JSON object with three sections: `solver`,
+/// `edits` and `io`. Supported entries are marked `"supported"`, everything else
+/// is `"unsupported"` and must not be silently treated as working.
 pub const CAPABILITIES_JSON: &str = r#"{
   "solver": {
     "truss2d": "supported",
@@ -126,6 +126,9 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "partialSpanLoad": "supported",
     "thermal": "supported",
     "heatTransfer": "supported"
+  },
+  "edits": {
+    "elementSplit": "supported"
   },
   "io": {
     "ocae": "supported",

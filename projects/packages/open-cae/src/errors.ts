@@ -62,6 +62,8 @@ export const errorCodes = [
     'element/invalid-temperature',
     'element/invalid-release',
     'element/release-requires-beam',
+    'element/invalid-fraction',
+    'element/split-unsupported-load',
     'element/unknown-id',
     'support/unknown-node',
     'support/unknown-support',

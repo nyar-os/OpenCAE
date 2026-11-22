@@ -551,6 +551,9 @@ async function elementCommand(args: readonly string[]): Promise<number> {
     if (action === 'update') {
         return elementUpdate(args.slice(1));
     }
+    if (action === 'split') {
+        return elementSplit(args.slice(1));
+    }
     if (action === 'remove') {
         return elementRemove(args.slice(1));
     }
@@ -566,13 +569,38 @@ async function elementCommand(args: readonly string[]): Promise<number> {
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'element',
-            expected: 'add, update, remove, forces, release or tension-only',
+            expected: 'add, update, split, remove, forces, release or tension-only',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'element',
         action,
-        expected: 'add, update, remove, forces, release or tension-only',
+        expected: 'add, update, split, remove, forces, release or tension-only',
+    });
+}
+
+async function elementSplit(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id', '--at'], []);
+    const file = positional(parsed, 0, 'element split <file> --id <id> --at <fraction>');
+    const id = required(parsed, '--id');
+    const at = number(parsed, '--at');
+    if (at === undefined) {
+        throw failure('cli/missing-option', 'missingOption', { option: '--at' });
+    }
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const report = document.splitElement({ id, at });
+        console.log(
+            message('elementSplit', {
+                id,
+                at: String(at),
+                node: report.node,
+                first: report.first,
+                second: report.second,
+                revision: String(report.revision),
+            }),
+        );
+        return 0;
     });
 }
 

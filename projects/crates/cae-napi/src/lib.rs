@@ -326,6 +326,24 @@ fn element_update(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Splits one element at a fraction of its length and saves the document.
+///
+/// The request accepts `id` and `at` (a fraction strictly between `0` and `1`).
+/// The reply adds `node`, `first`, `second` and `reusedNode` to the document
+/// summary. A partial-span load, a linearly varying distributed load or a
+/// temperature gradient is rejected with `element/split-unsupported-load`.
+#[function]
+fn element_split(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let at = required_number_field(&request, "at")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let report = session.split_element(&id, at).map_err(fail)?;
+    respond(&ctx, &report)
+}
+
 /// Sets or clears the bending-moment releases of a beam element.
 ///
 /// The request accepts `id`, `start` and `end`. When both flags are `false` the
@@ -1069,6 +1087,7 @@ register_module![
     node_remove,
     element_add,
     element_update,
+    element_split,
     element_remove,
     element_release,
     element_tension_only,
