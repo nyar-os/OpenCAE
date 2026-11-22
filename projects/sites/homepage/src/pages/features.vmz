@@ -145,7 +145,7 @@
                         Truss members marked <code>tensionOnly</code> form cables.
                         An active-set iteration removes compressed members,
                         reassembles stiffness, self-weight and thermal loads, and
-                        reports iterations, each cable's state and a mechanism when
+                        reports iterations, each cable’s state and a mechanism when
                         the slack topology cannot carry the load.
                     </p>
                 </article>
