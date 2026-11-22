@@ -20,7 +20,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | uniform member temperature change (`thermalExpansion`, `α·ΔT` thermal strain + equivalent nodal loads) | ✅ supported |
 | through-depth temperature gradient (`thermalGradient`, linear ΔT across the section + equivalent end moments) | ✅ supported |
-| steady-state heat conduction (`heat`, truss axial `kA/L` conduction, fixed temperatures + nodal heat flows) | ✅ supported |
+| steady-state heat conduction (`heat`, truss axial `kA/L` conduction, fixed temperatures + nodal heat flows + optional surface convection) | ✅ supported |
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi, signed participation factors and effective modal mass) | ✅ supported |
 | concentrated nodal masses (`node mass`, translational lumped mass on top of element mass) | ✅ supported |
@@ -63,8 +63,10 @@ three entry points plus the CLI (`open-cae element split`).
 `thermalExpansion` and `thermalGradient` cover member temperature actions and
 feed the structural solver only. `heat` is a separate, uncoupled steady-state
 conduction analysis: it reports temperatures and heat flows, never uses
-displacements, and supports **conduction along truss/beam axes only** (no
-convection, radiation or time stepping). `geometricNonlinear` is limited to
+displacements, and supports **conduction along truss/beam axes only** with an
+optional **constant surface convection** to a model ambient temperature
+(`heatConvection` in the capability matrix); radiation and time stepping remain
+unsupported. `geometricNonlinear` is limited to
 truss models; the generic `nonlinear` entry (material nonlinearity,
 beam/frame large displacement) remains unimplemented. `tensionOnly` is
 likewise limited to truss members: it deactivates compressed cables, records
@@ -346,14 +348,36 @@ be finite and positive and a model without nodes is rejected with
     the node) loads the right-hand side. The same reduced dense solve as the
     structural path is used. Element flux is `q = k·A·(T_from − T_to)/L`,
     positive from `from` to `to`; a fixed node reports the boundary reaction
-    `K·T − Q`, so `Σreaction + Σapplied heat = 0`. The report is
+    `K·T − Q`, so `Σreaction + Σapplied heat = 0` for conduction-only models.
+
+    A member may additionally declare a surface convection coefficient `h`
+    (W/(m²·K)) and an exposed `perimeter` `P`; the model then supplies one
+    `ambientTemperature` `Ta`. The element matrix gains
+    `h·P·L/6·[[2, 1], [1, 2]]` and the right-hand side gains
+    `h·P·L·Ta/2·[1, 1]`, which is the consistent linear-element discretisation
+    of `h·P·(T − Ta)` along the member. The element report gains a
+    `convection` object `{coefficient, perimeter, ambientTemperature, heat}`
+    with `heat = h·P·L·(T_avg − Ta)` and `T_avg = (T_from + T_to)/2`, positive
+    out of the member; the object is omitted for conduction-only members, so
+    their JSON keeps the previous byte-for-byte shape. Summing the nodal
+    balances of a convection element gives exactly `h·P·L·(T_avg − Ta)`, hence
+    `Σfixed-temperature reaction + Σapplied nodal heat = Σconvective heat`:
+    without applied nodal heat the reaction equals the convective loss. A
+    negative or non-finite `h`, a non-positive or non-finite perimeter, a
+    convection member without a perimeter, and convection without a finite
+    ambient temperature report `heat/invalid-convection`,
+    `heat/invalid-perimeter`, `heat/missing-perimeter` and
+    `heat/missing-ambient`; a non-finite ambient reports `heat/invalid-ambient`.
+    Convection fields are ignored by every structural solve.
+
+    The report is
     `{format, version, analysis: "heat", units, temperatures, elementFlux,
     reactions, residual, ok}` in model node/element order, with no timestamp.
     Missing conductivity, non-finite heat, no fixed temperature, or an
     unconstrained component report `material/invalid-conductivity`,
     `load/invalid-heat`, `heat/no-fixed-temperature` or the same code for the
     singular component. Units are never converted, so a millimetre document
-    must supply a length-consistent conductivity.
+    must supply a length-consistent conductivity and perimeter.
 
 29. **Parametric element splitting**: `split_element(id, at)` (CLI
     `open-cae element split --id <id> --at <fraction>`, SDK
@@ -364,7 +388,8 @@ be finite and positive and a model without nodes is rejected with
     `-2`, `-3`, ... when taken). The first segment keeps the original element id
     and the second is appended as `<element>-b` (same suffix rule). Both
     segments inherit the material overrides, kind, inertia, uniform distributed
-    load, uniform temperature and tension-only flag; end releases move to the
+    load, uniform temperature, surface convection/perimeter and tension-only
+    flag; end releases move to the
     outer ends so the interior node stays continuous. Only a uniform
     distributed load (no `distributedLoadEnd` or an equal start/end intensity)
     can be divided losslessly: the two segments carry the same intensity and the
@@ -628,6 +653,26 @@ combinations:
   bit-for-bit unchanged, zero heat/absent temperature are omitted from JSON,
   and two heat solves serialize identically without timestamps.
 
+`tests/heat_convection.rs` asserts surface convection:
+
+- a two-node bar with one fixed end and a free end matches the hand-assembled
+  2×2 convection system (`T_free`, flux, reaction and `h·P·L·(T_avg − Ta)`) to
+  `1e-12`;
+- a multi-element fin converges to the analytic insulated-tip
+  `Ta + (T0 − Ta)·cosh(m(L − x))/cosh(mL)` solution under refinement
+  (2 → 10 → 40 elements, final relative error below `2e-3`);
+- the fixed-node reaction equals the summed convective loss, so the signed
+  balance `reaction − loss` vanishes;
+- missing ambient, missing perimeter, negative convection, zero perimeter and
+  non-finite ambient report `heat/missing-ambient`, `heat/missing-perimeter`,
+  `heat/invalid-convection`, `heat/invalid-perimeter` and `heat/invalid-ambient`,
+  and the setters reject invalid values;
+- without convection fields the document, the heat report and the structural
+  solution are unchanged, and `ambientTemperature` alone does not affect heat
+  results;
+- `convection`, `perimeter` and `ambientTemperature` survive a save/reopen and
+  reproduce the same heat solution.
+
 `tests/tension_only.rs` asserts the cable active set:
 
 - a tensioned cable stays active with `N = 500 N` in a two-bar collinear
@@ -674,10 +719,12 @@ threshold of `1e-9`.
   transverse loads that are uniform or linear along the member in the local
   `+y` direction** (optionally limited to part of the span), **uniform member
   temperature changes** (axial expansion only), a **through-depth
-  temperature gradient** (thermal bending), **fixed nodal temperatures** and
-  **concentrated nodal heat flows** (steady conduction only). Heat transfer
-  beyond axial conduction — convection, radiation, transient/time stepping,
-  contact conductance and coupled thermo-mechanical fields — is not supported,
+  temperature gradient** (thermal bending), **fixed nodal temperatures**,
+  **concentrated nodal heat flows** and a **constant surface convection with an
+  ambient temperature** (steady conduction only). Heat transfer beyond axial
+  conduction plus constant linear-element convection — radiation,
+  temperature-dependent `h`/`k`, transient/time stepping, contact conductance
+  and coupled thermo-mechanical fields — is not supported,
   and arbitrary curved distributed loads and loads in a global direction are
   also not supported; load combinations do not scale temperature changes.
 - Load combinations only scale the **single applied load set and self-weight**;

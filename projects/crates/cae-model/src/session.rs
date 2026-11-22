@@ -477,6 +477,26 @@ impl OpenCae {
         self.edit(|model| model.set_element_temperature(id, temperature))
     }
 
+    /// Sets or clears the surface convection coefficient of an existing element
+    /// and saves the document.
+    ///
+    /// The coefficient uses `W/(m²·K)` and is used only by
+    /// [`OpenCae::solve_heat`]; `None` removes it. A non-positive or non-finite
+    /// value is rejected with `heat/invalid-convection`.
+    pub fn set_element_convection(&mut self, id: &str, convection: Option<f64>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_element_convection(id, convection))
+    }
+
+    /// Sets or clears the exposed perimeter of an existing element and saves the
+    /// document.
+    ///
+    /// The perimeter uses the document length unit and is required when the
+    /// element declares convection. A non-positive or non-finite value is
+    /// rejected with `heat/invalid-perimeter`.
+    pub fn set_element_perimeter(&mut self, id: &str, perimeter: Option<f64>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_element_perimeter(id, perimeter))
+    }
+
     /// Reconnects an existing element to new endpoint nodes and saves the
     /// document.
     ///
@@ -617,6 +637,15 @@ impl OpenCae {
     /// The zero vector clears gravity.
     pub fn set_gravity(&mut self, gx: f64, gy: f64, gz: f64) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.set_gravity(gx, gy, gz))
+    }
+
+    /// Sets or clears the ambient temperature used by surface convection and
+    /// saves the document.
+    ///
+    /// The value is finite and uses the same scale as the fixed nodal
+    /// temperatures; `None` removes it.
+    pub fn set_ambient_temperature(&mut self, temperature: Option<f64>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_ambient_temperature(temperature))
     }
 
     /// Adds or merges a support entry and saves the document.

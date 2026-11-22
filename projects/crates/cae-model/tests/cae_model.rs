@@ -188,6 +188,8 @@ fn validation_reports_required_error_codes() {
         distributed_load_to: None,
         temperature: None,
         temperature_gradient: None,
+        convection: None,
+        perimeter: None,
         release: None,
         tension_only: false,
     });

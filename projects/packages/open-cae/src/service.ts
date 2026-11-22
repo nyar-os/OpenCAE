@@ -10,6 +10,7 @@
 import { NotImplementedError, OpenCAEError, errorCodes, type OpenCAEErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    AmbientTemperatureRequest,
     BucklingCombinationOptions,
     BucklingCombinationSolution,
     BucklingSolution,
@@ -261,6 +262,16 @@ export function loadRemove(path: string, node: string): DocumentSummary {
 /** Sets the gravity acceleration vector and returns the updated summary. */
 export function setGravity(path: string, request: GravitySetRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('gravity.set').gravity_set(path, JSON.stringify(request)));
+}
+
+/** Sets or clears the ambient temperature used by surface convection. */
+export function setAmbientTemperature(
+    path: string,
+    request: AmbientTemperatureRequest,
+): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        binding('ambient.temperature').ambient_temperature_set(path, JSON.stringify(request)),
+    );
 }
 
 /** Validates a document. */

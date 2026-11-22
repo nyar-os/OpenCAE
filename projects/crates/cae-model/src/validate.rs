@@ -148,6 +148,12 @@ impl Model {
                 ),
             ));
         }
+        if self.ambient_temperature.is_some_and(|value| !value.is_finite()) {
+            report.push(check_error(
+                "heat/invalid-ambient",
+                format!("ambient temperature must be finite (currently {:?})", self.ambient_temperature),
+            ));
+        }
         let section_inertia = match self.material.section {
             Some(section) => match section.properties() {
                 Ok(properties) => Some(properties.inertia_strong),
@@ -428,6 +434,43 @@ impl Model {
                         ),
                     ));
                 }
+            }
+            if let Some(convection) = element.convection {
+                if !positive_finite(convection) {
+                    report.push(check_error(
+                        "heat/invalid-convection",
+                        format!(
+                            "convection coefficient of element `{}` must be positive and finite (currently {convection})",
+                            element.id
+                        ),
+                    ));
+                }
+                match element.perimeter {
+                    None => report.push(check_error(
+                        "heat/missing-perimeter",
+                        format!("element `{}` declares convection but no perimeter", element.id),
+                    )),
+                    Some(perimeter) if !positive_finite(perimeter) => report.push(check_error(
+                        "heat/invalid-perimeter",
+                        format!("perimeter of element `{}` must be positive and finite (currently {perimeter})", element.id),
+                    )),
+                    Some(_) => {}
+                }
+                if self.ambient_temperature.is_none() {
+                    report.push(check_error(
+                        "heat/missing-ambient",
+                        "surface convection requires a finite model ambient temperature",
+                    ));
+                }
+            }
+            else if element.perimeter.is_some_and(|value| !positive_finite(value)) {
+                report.push(check_error(
+                    "heat/invalid-perimeter",
+                    format!(
+                        "perimeter of element `{}` must be positive and finite (currently {:?})",
+                        element.id, element.perimeter
+                    ),
+                ));
             }
             if let Some(release) = element.release {
                 if element.kind != ElementKind::Beam {

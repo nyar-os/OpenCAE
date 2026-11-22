@@ -252,8 +252,9 @@ fn node_remove(ctx: CallContext) -> Result<JsValue> {
 /// `inertia` (required for beams), `distributedLoad` (beam transverse load per
 /// unit length in local `+y` at the start node), `distributedLoadEnd` (the
 /// value at the end node, forming a linearly varying load), `temperature`
-/// (uniform temperature change in kelvin) and `temperatureGradient` (linear
-/// difference between the local `+y` and `-y` extreme fibres).
+/// (uniform temperature change in kelvin), `temperatureGradient` (linear
+/// difference between the local `+y` and `-y` extreme fibres), `convection`
+/// (surface convection `h`) and `perimeter` (exposed perimeter).
 #[function]
 fn element_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -271,6 +272,8 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let temperature_gradient = number_field(&request, "temperatureGradient")?;
     let distributed_load_from = number_field(&request, "distributedLoadFrom")?;
     let distributed_load_to = number_field(&request, "distributedLoadTo")?;
+    let convection = number_field(&request, "convection")?;
+    let perimeter = number_field(&request, "perimeter")?;
     let tension_only = request.get("tensionOnly").and_then(Value::as_bool).unwrap_or(false);
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
@@ -303,6 +306,12 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
         };
         session.set_element_load_span(&id, span).map_err(fail)?;
     }
+    if convection.is_some() {
+        summary = session.set_element_convection(&id, convection).map_err(fail)?;
+    }
+    if perimeter.is_some() {
+        summary = session.set_element_perimeter(&id, perimeter).map_err(fail)?;
+    }
     if tension_only {
         summary = session.set_element_tension_only(&id, true).map_err(fail)?;
     }
@@ -311,8 +320,9 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
 
 /// Reconnects an existing element of a document and saves it.
 ///
-/// The request accepts `id` and any of `from` or `to`; omitted endpoints keep
-/// their current node. Material, loads, temperature and releases are preserved.
+/// The request accepts `id` and any of `from`, `to`, `convection` or
+/// `perimeter`; omitted endpoints keep their current node. Material, loads,
+/// temperature and releases are preserved.
 #[function]
 fn element_update(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -320,9 +330,22 @@ fn element_update(ctx: CallContext) -> Result<JsValue> {
     let id = text_field(&request, "id")?;
     let from = request.get("from").and_then(Value::as_str);
     let to = request.get("to").and_then(Value::as_str);
+    let convection = number_field(&request, "convection")?;
+    let perimeter = number_field(&request, "perimeter")?;
+    if from.is_none() && to.is_none() && convection.is_none() && perimeter.is_none() {
+        return Err(argument_error("supply at least one of `from`, `to`, `convection` or `perimeter`"));
+    }
     let mut session = OpenCae::new(OpenCaeOptions::default());
-    session.open(Path::new(&path)).map_err(fail)?;
-    let summary = session.update_element(&id, from, to).map_err(fail)?;
+    let mut summary = session.open(Path::new(&path)).map_err(fail)?;
+    if from.is_some() || to.is_some() {
+        summary = session.update_element(&id, from, to).map_err(fail)?;
+    }
+    if convection.is_some() {
+        summary = session.set_element_convection(&id, convection).map_err(fail)?;
+    }
+    if perimeter.is_some() {
+        summary = session.set_element_perimeter(&id, perimeter).map_err(fail)?;
+    }
     respond(&ctx, &summary)
 }
 
@@ -604,6 +627,22 @@ fn gravity_set(ctx: CallContext) -> Result<JsValue> {
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session.set_gravity(gx, gy, gz).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Sets or clears the ambient temperature used by surface convection and saves
+/// the document.
+///
+/// The request accepts an optional `temperature`; a missing value or `null`
+/// clears it.
+#[function]
+fn ambient_temperature_set(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let temperature = number_field(&request, "temperature")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_ambient_temperature(temperature).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -1100,6 +1139,7 @@ register_module![
     load_add,
     load_remove,
     gravity_set,
+    ambient_temperature_set,
     combination_add,
     combination_remove,
     solve_combinations,

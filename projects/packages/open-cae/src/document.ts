@@ -10,6 +10,7 @@
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
+    AmbientTemperatureRequest,
     BucklingCombinationOptions,
     BucklingCombinationSolution,
     BucklingSolution,
@@ -299,6 +300,16 @@ export class CaeDocument {
     setGravity(request: GravitySetRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.setGravity(this.path, request));
+    }
+
+    /**
+     * Sets or clears the ambient temperature used by surface convection and
+     * saves the file. `temperature: null` removes it; the value is used only by
+     * {@link heat}.
+     */
+    setAmbientTemperature(request: AmbientTemperatureRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.setAmbientTemperature(this.path, request));
     }
 
     /** Validates the document without solving it. */

@@ -13,7 +13,8 @@
 //!   (`α·ΔT`) and the matching equivalent nodal loads;
 //! * prescribed (enforced) nodal displacements and support settlements;
 //! * steady-state axial heat conduction with fixed nodal temperatures,
-//!   concentrated nodal heat flows, element heat fluxes and boundary reactions;
+//!   concentrated nodal heat flows, optional surface convection to an ambient
+//!   temperature, element heat fluxes and boundary reactions;
 //! * modal analysis with a diagonal (lumped) mass matrix and a symmetric
 //!   Jacobi eigen-solver, including steady-state harmonic (frequency-response)
 //!   sweeps by modal superposition;
@@ -32,10 +33,10 @@
 //!   elimination solver written in this crate.
 //!
 //! Three-dimensional beams, frames, material nonlinearity, transient heat
-//! transfer (convection, radiation and time stepping), contact and
-//! solver-specific import formats (Abaqus `.inp`, STEP, ...) are **not**
-//! implemented. See [`CAPABILITIES_JSON`] for the machine-readable capability
-//! matrix and the repository Readme for the user facing description.
+//! transfer (radiation and time stepping), contact and solver-specific import
+//! formats (Abaqus `.inp`, STEP, ...) are **not** implemented. See
+//! [`CAPABILITIES_JSON`] for the machine-readable capability matrix and the
+//! repository Readme for the user facing description.
 
 #![deny(missing_docs)]
 
@@ -70,7 +71,7 @@ pub use crate::{
         DeflectionGoverning, DeflectionSolution, DeflectionStation, ElementDeflection, ElementDiagram, ElementEnvelope,
         ElementResult, ElementStress, EndForces, EnvelopeValue, FREQUENCY_RESPONSE_REPORT_FORMAT,
         FREQUENCY_RESPONSE_REPORT_VERSION, ForceResultant, FrequencyResponsePoint, FrequencyResponseSolution, HEAT_ANALYSIS,
-        HEAT_REPORT_FORMAT, HEAT_REPORT_VERSION, HeatElementFlux, HeatReaction, HeatSolution, HeatTemperature,
+        HEAT_REPORT_FORMAT, HEAT_REPORT_VERSION, HeatConvection, HeatElementFlux, HeatReaction, HeatSolution, HeatTemperature,
         INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, LOAD_CASE_REPORT_FORMAT,
         LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT, MATRIX_REPORT_VERSION,
         MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MatrixDof, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape,
@@ -125,7 +126,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "thermalGradient": "supported",
     "partialSpanLoad": "supported",
     "thermal": "supported",
-    "heatTransfer": "supported"
+    "heatTransfer": "supported",
+    "heatConvection": "supported"
   },
   "edits": {
     "elementSplit": "supported"

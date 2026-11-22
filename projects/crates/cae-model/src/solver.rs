@@ -315,6 +315,25 @@ pub struct HeatTemperature {
     pub fixed: bool,
 }
 
+/// Surface convection of one member in a heat-conduction solution.
+///
+/// The member loses `h·P·L·(T_avg − T_a)` to the surrounding medium, where
+/// `T_avg` is the mean of its two end temperatures. A positive `heat` leaves
+/// the member; the same positive value is supplied at a fixed-temperature
+/// boundary when no other heat enters or leaves the model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatConvection {
+    /// Convection coefficient `h` in `W/(m²·K)`.
+    pub coefficient: f64,
+    /// Exposed perimeter `P` in the document length unit.
+    pub perimeter: f64,
+    /// Ambient temperature `Ta` in kelvin or degrees Celsius.
+    pub ambient_temperature: f64,
+    /// Convective heat flow `h·P·L·(T_avg − Ta)`, positive out of the member.
+    pub heat: f64,
+}
+
 /// Steady-state axial heat flow of one member.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -338,6 +357,12 @@ pub struct HeatElementFlux {
     /// Axial heat flow `q = k·A·(T_from − T_to)/L`, positive from `from` to
     /// `to`.
     pub flux: f64,
+    /// Surface convection of the member, when the element declares it.
+    ///
+    /// The field is omitted from the JSON for conduction-only members, so
+    /// existing reports keep their exact shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convection: Option<HeatConvection>,
 }
 
 /// Heat flow supplied by one fixed-temperature boundary.
@@ -1696,12 +1721,24 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
 ///
 /// The reported element flux is `q = k·A·(T_from − T_to)/L`, positive when heat
 /// flows from `from` to `to`. A fixed-temperature reaction is the boundary heat
-/// the support supplies to the model, so `Σreaction + Σapplied heat = 0`.
+/// the support supplies to the model, so `Σreaction + Σapplied heat = 0` for
+/// conduction-only models.
+///
+/// A member that declares `convection` (and a `perimeter`) also exchanges heat
+/// with the model `ambient_temperature` `Ta`. Its element matrix becomes
+/// `k·A/L·[[1, -1], [-1, 1]] + h·P·L/6·[[2, 1], [1, 2]]` and its load vector
+/// receives `h·P·L·Ta/2·[1, 1]`. The member reports the convective heat
+/// `h·P·L·(T_avg − Ta)` with `T_avg = (T_from + T_to)/2`, positive out of the
+/// member. Summing the element nodal balances therefore gives
+/// `Σfixed-temperature reaction + Σapplied nodal heat = Σconvective heat`, so a
+/// convection-only model balances its reactions against the convective loss.
 ///
 /// The analysis is deterministic and contains no timestamps. It fails with
 /// `model/no-nodes`, `model/no-elements`, `material/invalid-conductivity`,
-/// `load/invalid-heat`, `node/invalid-temperature` or
-/// `heat/no-fixed-temperature` instead of approximating a solution.
+/// `load/invalid-heat`, `node/invalid-temperature`,
+/// `heat/no-fixed-temperature`, `heat/invalid-convection`,
+/// `heat/invalid-perimeter`, `heat/missing-perimeter`, `heat/missing-ambient`
+/// or `heat/invalid-ambient` instead of approximating a solution.
 pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
     if model.nodes.is_empty() {
         return Err(CaeError::new("model/no-nodes", "the model requires at least 1 node"));
@@ -1718,6 +1755,13 @@ pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
             ));
         }
     };
+    if model.ambient_temperature.is_some_and(|value| !value.is_finite()) {
+        return Err(CaeError::new(
+            "heat/invalid-ambient",
+            format!("ambient temperature must be finite (currently {:?})", model.ambient_temperature),
+        ));
+    }
+    let ambient = model.ambient_temperature;
     let size = model.nodes.len();
     let index: HashMap<&str, usize> =
         model.nodes.iter().enumerate().map(|(position, node)| (node.id.as_str(), position)).collect();
@@ -1749,7 +1793,7 @@ pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
     }
 
     let mut stiffness = vec![0.0; size * size];
-    let forces: Vec<f64> = model.nodes.iter().map(|node| node.heat).collect();
+    let mut forces: Vec<f64> = model.nodes.iter().map(|node| node.heat).collect();
     let mut conductors = Vec::with_capacity(model.elements.len());
     for element in &model.elements {
         let from = *index.get(element.from.as_str()).ok_or_else(|| {
@@ -1785,7 +1829,44 @@ pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
         stiffness[to * size + to] += conductance;
         stiffness[from * size + to] -= conductance;
         stiffness[to * size + from] -= conductance;
-        conductors.push((element.id.clone(), element.from.clone(), element.to.clone(), from, to, length, area));
+        let convection = match element.convection {
+            None => None,
+            Some(coefficient) => {
+                if !positive_finite(coefficient) {
+                    return Err(CaeError::new(
+                        "heat/invalid-convection",
+                        format!(
+                            "convection coefficient of element `{}` must be positive and finite (currently {coefficient})",
+                            element.id
+                        ),
+                    ));
+                }
+                let perimeter = element.perimeter.ok_or_else(|| {
+                    CaeError::new(
+                        "heat/missing-perimeter",
+                        format!("element `{}` declares convection but no perimeter", element.id),
+                    )
+                })?;
+                if !positive_finite(perimeter) {
+                    return Err(CaeError::new(
+                        "heat/invalid-perimeter",
+                        format!("perimeter of element `{}` must be positive and finite (currently {perimeter})", element.id),
+                    ));
+                }
+                let ambient = ambient.ok_or_else(|| {
+                    CaeError::new("heat/missing-ambient", "surface convection requires a finite model ambient temperature")
+                })?;
+                let surface = coefficient * perimeter * length;
+                stiffness[from * size + from] += surface / 3.0;
+                stiffness[from * size + to] += surface / 6.0;
+                stiffness[to * size + from] += surface / 6.0;
+                stiffness[to * size + to] += surface / 3.0;
+                forces[from] += surface * ambient / 2.0;
+                forces[to] += surface * ambient / 2.0;
+                Some((coefficient, perimeter, ambient))
+            }
+        };
+        conductors.push((element.id.clone(), element.from.clone(), element.to.clone(), from, to, length, area, convection));
     }
 
     let free: Vec<usize> = (0..size).filter(|position| !fixed[*position]).collect();
@@ -1819,9 +1900,18 @@ pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
     }
     let mut element_flux = Vec::with_capacity(conductors.len());
     let mut peak = 0.0_f64;
-    for (id, from_id, to_id, from, to, length, area) in conductors {
+    for (id, from_id, to_id, from, to, length, area, convection) in conductors {
         let flux = conductivity * area / length * (temperatures[from] - temperatures[to]);
         peak = peak.max(flux.abs());
+        let convection = convection.map(|(coefficient, perimeter, ambient_temperature)| {
+            let average = (temperatures[from] + temperatures[to]) / 2.0;
+            HeatConvection {
+                coefficient,
+                perimeter,
+                ambient_temperature,
+                heat: coefficient * perimeter * length * (average - ambient_temperature),
+            }
+        });
         element_flux.push(HeatElementFlux {
             id,
             from: from_id,
@@ -1832,6 +1922,7 @@ pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
             temperature_from: temperatures[from],
             temperature_to: temperatures[to],
             flux,
+            convection,
         });
     }
 

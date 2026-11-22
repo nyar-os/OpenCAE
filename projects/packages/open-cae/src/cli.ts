@@ -482,13 +482,29 @@ function elementKindOption(parsed: Parsed): ElementKind | undefined {
 async function elementAdd(args: readonly string[]): Promise<number> {
     const parsed = parse(
         args,
-        ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt', '--dt-grad', '--w-from', '--w-to'],
+        [
+            '--id',
+            '--from',
+            '--to',
+            '--E',
+            '--A',
+            '--kind',
+            '--I',
+            '--w',
+            '--w2',
+            '--dt',
+            '--dt-grad',
+            '--w-from',
+            '--w-to',
+            '--convection',
+            '--perimeter',
+        ],
         ['--tension-only'],
     );
     const file = positional(
         parsed,
         0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--tension-only]',
+        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]',
     );
     const id = required(parsed, '--id');
     const from = required(parsed, '--from');
@@ -503,6 +519,8 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     const temperatureGradient = number(parsed, '--dt-grad');
     const distributedLoadFrom = number(parsed, '--w-from');
     const distributedLoadTo = number(parsed, '--w-to');
+    const convection = number(parsed, '--convection');
+    const perimeter = number(parsed, '--perimeter');
     if ((distributedLoadFrom === undefined) !== (distributedLoadTo === undefined)) {
         throw failure('cli/missing-option', 'missingOption', { option: '--w-from and --w-to' });
     }
@@ -522,6 +540,8 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             distributedLoadTo,
             temperature,
             temperatureGradient,
+            convection,
+            perimeter,
             tensionOnly: parsed.flags.has('--tension-only') ? true : undefined,
         });
         console.log(message('elementAdded', { id, revision: String(summary.revision) }));
@@ -530,14 +550,20 @@ async function elementAdd(args: readonly string[]): Promise<number> {
 }
 
 async function elementUpdate(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--from', '--to'], []);
-    const file = positional(parsed, 0, 'element update <file> --id <id> [--from <node>] [--to <node>]');
+    const parsed = parse(args, ['--id', '--from', '--to', '--convection', '--perimeter'], []);
+    const file = positional(
+        parsed,
+        0,
+        'element update <file> --id <id> [--from <node>] [--to <node>] [--convection <h>] [--perimeter <P>]',
+    );
     const id = required(parsed, '--id');
     const from = parsed.options.get('--from');
     const to = parsed.options.get('--to');
+    const convection = number(parsed, '--convection');
+    const perimeter = number(parsed, '--perimeter');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.updateElement({ id, from, to });
+        const summary = document.updateElement({ id, from, to, convection, perimeter });
         console.log(message('elementUpdated', { id, revision: String(summary.revision) }));
         return 0;
     });
@@ -1016,12 +1042,39 @@ async function loadRemove(args: readonly string[]): Promise<number> {
 async function modelCommand(args: readonly string[]): Promise<number> {
     const action = args[0];
     if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'model', expected: 'gravity' });
+        throw failure('cli/missing-argument', 'missingSubcommand', {
+            group: 'model',
+            expected: 'gravity or ambient',
+        });
     }
-    if (action !== 'gravity') {
-        throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'model', action, expected: 'gravity' });
+    if (action === 'gravity') {
+        return gravity(args.slice(1));
     }
-    return gravity(args.slice(1));
+    if (action === 'ambient') {
+        return ambient(args.slice(1));
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', {
+        group: 'model',
+        action,
+        expected: 'gravity or ambient',
+    });
+}
+
+async function ambient(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--temperature'], ['--clear']);
+    const file = positional(parsed, 0, 'model ambient <file> [--temperature <Ta>] [--clear]');
+    const temperature = parsed.flags.has('--clear') ? null : requiredNumber(parsed, '--temperature');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.setAmbientTemperature({ temperature });
+        console.log(
+            message('ambientTemperatureSet', {
+                temperature: temperature === null ? 'cleared' : String(temperature),
+                revision: String(summary.revision),
+            }),
+        );
+        return 0;
+    });
 }
 
 async function gravity(args: readonly string[]): Promise<number> {

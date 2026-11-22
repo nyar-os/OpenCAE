@@ -384,6 +384,25 @@ pub struct Element {
     /// combined. Only valid on beam elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature_gradient: Option<f64>,
+    /// Surface convection coefficient `h` in `W/(m²·K)`.
+    ///
+    /// Together with [`Element::perimeter`] it adds the 1D surface-convection
+    /// matrix `h·P·L/6·[[2, 1], [1, 2]]` and the ambient load
+    /// `h·P·L·Ta/2·[1, 1]` to the steady-state heat-conduction analysis. It is
+    /// ignored by every structural analysis and never changes displacements,
+    /// forces or reactions. A member that declares `convection` must also
+    /// declare `perimeter`, and the model must declare
+    /// [`Model::ambient_temperature`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convection: Option<f64>,
+    /// Exposed perimeter `P` of the member surface in the document length
+    /// unit.
+    ///
+    /// It is the length of the cooled surface per unit member length, so a
+    /// round rod uses `π·d` and a rectangular bar uses the sum of its exposed
+    /// sides. It is required only when [`Element::convection`] is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perimeter: Option<f64>,
     /// Optional bending-moment releases at the beam ends.
     ///
     /// Only valid on beam elements; a member with both ends released carries no
@@ -606,6 +625,15 @@ pub struct Model {
     /// responsibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gravity: Option<[f64; 3]>,
+    /// Ambient temperature `Ta` of the surrounding medium, in kelvin or
+    /// degrees Celsius.
+    ///
+    /// It is required only when an element declares surface `convection` and is
+    /// ignored by every structural analysis. Temperatures are absolute values
+    /// in the same scale as the fixed nodal temperatures, so a `Ta` of `20`
+    /// with node temperatures in Celsius is consistent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ambient_temperature: Option<f64>,
     /// Optional linear load combinations used by the combination solver.
     ///
     /// An empty list keeps existing documents unchanged.
@@ -657,6 +685,7 @@ impl Model {
             supports: Vec::new(),
             loads: Vec::new(),
             gravity: None,
+            ambient_temperature: None,
             combinations: Vec::new(),
             revision: 0,
         }
@@ -961,6 +990,8 @@ impl Model {
             distributed_load_to: None,
             temperature: None,
             temperature_gradient: None,
+            convection: None,
+            perimeter: None,
             release: None,
             tension_only: false,
         });
@@ -1215,6 +1246,72 @@ impl Model {
             .find(|element| element.id == id)
             .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
         element.temperature = temperature;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the surface convection coefficient of an existing
+    /// element.
+    ///
+    /// The coefficient `h` uses `W/(m²·K)` and must be strictly positive and
+    /// finite; `None` removes the convection again. An invalid value is
+    /// rejected with `heat/invalid-convection` and an unknown element
+    /// identifier with `element/unknown-id`. The model must also declare an
+    /// ambient temperature and the element a perimeter before a heat solve
+    /// succeeds.
+    pub fn set_element_convection(&mut self, id: &str, convection: Option<f64>) -> Result<(), CaeError> {
+        if convection.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "heat/invalid-convection",
+                format!("convection coefficient of element `{id}` must be positive and finite (currently {convection:?})"),
+            ));
+        }
+        let element = self
+            .elements
+            .iter_mut()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        element.convection = convection;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the exposed perimeter of an existing element.
+    ///
+    /// The perimeter uses the document length unit and must be strictly
+    /// positive and finite; `None` removes it. An invalid value is rejected
+    /// with `heat/invalid-perimeter` and an unknown element identifier with
+    /// `element/unknown-id`.
+    pub fn set_element_perimeter(&mut self, id: &str, perimeter: Option<f64>) -> Result<(), CaeError> {
+        if perimeter.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "heat/invalid-perimeter",
+                format!("perimeter of element `{id}` must be positive and finite (currently {perimeter:?})"),
+            ));
+        }
+        let element = self
+            .elements
+            .iter_mut()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        element.perimeter = perimeter;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the ambient temperature of the surrounding medium.
+    ///
+    /// The value must be finite and uses the same scale as the fixed nodal
+    /// temperatures; `None` removes it. A non-finite value is rejected with
+    /// `heat/invalid-ambient`.
+    pub fn set_ambient_temperature(&mut self, temperature: Option<f64>) -> Result<(), CaeError> {
+        if temperature.is_some_and(|value| !value.is_finite()) {
+            return Err(CaeError::new(
+                "heat/invalid-ambient",
+                format!("ambient temperature must be finite (currently {temperature:?})"),
+            ));
+        }
+        self.ambient_temperature = temperature;
         self.bump_revision();
         Ok(())
     }

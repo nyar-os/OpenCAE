@@ -41,6 +41,7 @@ export interface NativeBinding {
     load_add(path: string, requestJson: string): string;
     load_remove(path: string, requestJson: string): string;
     gravity_set(path: string, requestJson: string): string;
+    ambient_temperature_set(path: string, requestJson: string): string;
     combination_add(path: string, requestJson: string): string;
     combination_remove(path: string, requestJson: string): string;
     solve_combinations(path: string, requestJson?: string): string;

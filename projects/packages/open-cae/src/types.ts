@@ -320,6 +320,20 @@ export interface HeatTemperature {
     readonly fixed: boolean;
 }
 
+/** Surface convection of one member in a heat-conduction result. */
+export interface HeatConvection {
+    /** Convection coefficient `h` in `W/(m²·K)`. */
+    readonly coefficient: number;
+    /** Exposed perimeter in the document length unit. */
+    readonly perimeter: number;
+    /** Ambient temperature in K or °C. */
+    readonly ambientTemperature: number;
+    /**
+     * `h·P·L·(T_avg − Ta)`, positive out of the member.
+     */
+    readonly heat: number;
+}
+
 /** Steady-state axial heat flow of one member. */
 export interface HeatElementFlux {
     readonly id: string;
@@ -334,6 +348,8 @@ export interface HeatElementFlux {
      * `q = k·A·(T_from − T_to)/L`, in watts, positive from `from` to `to`.
      */
     readonly flux: number;
+    /** Surface convection; omitted for conduction-only members. */
+    readonly convection?: HeatConvection;
 }
 
 /** Heat supplied by one fixed-temperature boundary; positive enters the model. */
@@ -1187,6 +1203,16 @@ export interface ElementAddRequest {
      */
     readonly temperatureGradient?: number;
     /**
+     * Surface convection coefficient `h` in `W/(m²·K)` for steady-state heat
+     * conduction. Requires `perimeter` and a model ambient temperature.
+     */
+    readonly convection?: number;
+    /**
+     * Exposed perimeter of the member surface in the document length unit;
+     * required when `convection` is set.
+     */
+    readonly perimeter?: number;
+    /**
      * Marks a truss member as tension-only (a cable). The tension-only analysis
      * removes members that carry compression. Only valid for `truss` elements.
      */
@@ -1224,6 +1250,10 @@ export interface ElementUpdateRequest {
     readonly from?: string;
     /** New end node identifier. */
     readonly to?: string;
+    /** Surface convection coefficient `h` in `W/(m²·K)`. */
+    readonly convection?: number;
+    /** Exposed perimeter in the document length unit. */
+    readonly perimeter?: number;
 }
 
 /** Request of `splitElement()`. */
@@ -1319,6 +1349,12 @@ export interface GravitySetRequest {
     readonly gx?: number;
     readonly gy?: number;
     readonly gz?: number;
+}
+
+/** Request of `setAmbientTemperature()`; `null` clears the ambient temperature. */
+export interface AmbientTemperatureRequest {
+    /** Ambient temperature in K or °C, or `null` to remove it. */
+    readonly temperature: number | null;
 }
 
 /** Options of `solve()`. */

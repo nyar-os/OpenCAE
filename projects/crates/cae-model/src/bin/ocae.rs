@@ -31,7 +31,9 @@ Usage:
   ocae node displacement <file> --id <id>
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
+                    [--convection <h>] [--perimeter <P>]
   ocae element update <file> --id <id> [--from <node>] [--to <node>]
+                    [--convection <h>] [--perimeter <P>]
   ocae element split <file> --id <id> --at <fraction>
   ocae element remove <file> --id <id>
   ocae element forces <file> --id <id>
@@ -53,6 +55,7 @@ Usage:
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
   ocae load remove <file> --node <node>
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
+  ocae model ambient <file> [--temperature <Ta>] [--clear]
   ocae self-weight <file> --g <g> [--axis x|y|z]
   ocae combination add <file> --name <name> [--loads <f>] [--gravity <f>]
   ocae combination remove <file> --name <name>
@@ -330,11 +333,15 @@ fn node_displacement(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn element_add(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w", "--w2", "--dt"], &[])?;
+    let parsed = parse(
+        args,
+        &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w", "--w2", "--dt", "--convection", "--perimeter"],
+        &[],
+    )?;
     let file = positional(
         &parsed,
         0,
-        "element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]",
+        "element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--convection <h>] [--perimeter <P>]",
     )?;
     let id = required(&parsed, "--id")?;
     let from = required(&parsed, "--from")?;
@@ -349,9 +356,11 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
     let distributed_load = number(&parsed, "--w")?;
     let distributed_load_end = number(&parsed, "--w2")?;
     let temperature = number(&parsed, "--dt")?;
+    let convection = number(&parsed, "--convection")?;
+    let perimeter = number(&parsed, "--perimeter")?;
     let mut session = session();
     session.open(Path::new(file))?;
-    let summary = session.add_element_thermal(
+    session.add_element_thermal(
         id,
         from,
         to,
@@ -363,26 +372,48 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
         distributed_load_end,
         temperature,
     )?;
+    if convection.is_some() {
+        session.set_element_convection(id, convection)?;
+    }
+    if perimeter.is_some() {
+        session.set_element_perimeter(id, perimeter)?;
+    }
+    let summary = session.summary()?;
     println!("element `{id}` added as {} (revision {})", kind.as_str(), summary.revision);
     Ok(0)
 }
 
 fn element_update(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--id", "--from", "--to"], &[])?;
-    let file = positional(&parsed, 0, "element update <file> --id <id> [--from <node>] [--to <node>]")?;
+    let parsed = parse(args, &["--id", "--from", "--to", "--convection", "--perimeter"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "element update <file> --id <id> [--from <node>] [--to <node>] [--convection <h>] [--perimeter <P>]",
+    )?;
     let id = required(&parsed, "--id")?;
     let from = parsed.options.get("--from").map(String::as_str);
     let to = parsed.options.get("--to").map(String::as_str);
-    if from.is_none() && to.is_none() {
+    let convection = number(&parsed, "--convection")?;
+    let perimeter = number(&parsed, "--perimeter")?;
+    if from.is_none() && to.is_none() && convection.is_none() && perimeter.is_none() {
         return Err(CaeError::new(
             "element/degenerate",
-            "specify `--from` and/or `--to`; an empty reconnect request would silently succeed",
+            "specify at least one of `--from`, `--to`, `--convection` or `--perimeter`; an empty request would silently succeed",
         ));
     }
     let mut session = session();
     session.open(Path::new(file))?;
-    let summary = session.update_element(id, from, to)?;
-    println!("element `{id}` reconnected (revision {})", summary.revision);
+    if from.is_some() || to.is_some() {
+        session.update_element(id, from, to)?;
+    }
+    if convection.is_some() {
+        session.set_element_convection(id, convection)?;
+    }
+    if perimeter.is_some() {
+        session.set_element_perimeter(id, perimeter)?;
+    }
+    let summary = session.summary()?;
+    println!("element `{id}` updated (revision {})", summary.revision);
     Ok(0)
 }
 
@@ -855,12 +886,30 @@ fn load_remove(args: &[String]) -> Result<i32, CaeError> {
 fn model_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("gravity") => gravity(&args[1..]),
+        Some("ambient") => ambient(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `model` does not exist; only `gravity` is supported"),
+            format!("subcommand `{other}` of `model` does not exist; only `gravity` or `ambient` is supported"),
         )),
-        None => Err(CaeError::new("cli/missing-argument", "`model` is missing a subcommand; only `gravity` is supported")),
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`model` is missing a subcommand; only `gravity` or `ambient` is supported",
+        )),
     }
+}
+
+fn ambient(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--temperature"], &["--clear"])?;
+    let file = positional(&parsed, 0, "model ambient <file> [--temperature <Ta>] [--clear]")?;
+    let temperature = if parsed.flags.contains("--clear") { None } else { number(&parsed, "--temperature")? };
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_ambient_temperature(temperature)?;
+    match temperature {
+        Some(value) => println!("ambient temperature set to {value} (revision {})", summary.revision),
+        None => println!("ambient temperature cleared (revision {})", summary.revision),
+    }
+    Ok(0)
 }
 
 fn gravity(args: &[String]) -> Result<i32, CaeError> {

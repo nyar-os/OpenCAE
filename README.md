@@ -19,7 +19,7 @@ A model is one JSON document: units, dimension, one material (with an optional p
 
 **OpenCAE is not:**
 
-- a 3D solid or shell finite element package — there are no solids, shells, plates, contact or heat-transfer elements;
+- a 3D solid or shell finite element package — there are no solids, shells, plates or contact elements, and heat analysis is limited to member axial conduction with optional surface convection;
 - a general commercial FEA pre/post-processor — there is no geometry kernel, mesher or viewer;
 - a place where an unsupported feature silently degrades — an unimplemented capability returns a stable error instead of an approximate result.
 
@@ -83,6 +83,7 @@ Every solve prints JSON to stdout; add `--out report.json` to keep a copy. Exit 
 ## ✨ Highlights
 
 - **Linear static analysis** of 2D frames/beams and 2D/3D trusses with axial force, shear, bending moment and a support-reaction equilibrium check.
+- **Steady-state heat conduction** along members with fixed temperatures, nodal heat flows and optional constant **surface convection** to an ambient temperature.
 - **Modal analysis** with signed participation factors, effective modal mass and concentrated nodal point masses.
 - **Linear buckling** for a single load case and per load combination, with a governing-case envelope.
 - **Response spectrum** (SDOF spectral acceleration + SRSS) and **harmonic frequency response** with sampled peaks.

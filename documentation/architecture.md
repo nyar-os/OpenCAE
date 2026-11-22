@@ -35,7 +35,9 @@ A model is one UTF-8 JSON document with `format: "open-cae-truss"` and
 
 Element-level overrides (`youngsModulus`, `area`), beam `inertia`,
 distributed loads, a uniform temperature change, a through-depth temperature
-gradient, end releases and `tensionOnly` live on the element. The model struct
+gradient, surface `convection`/`perimeter`, end releases and `tensionOnly`
+live on the element. The model also carries one optional `ambientTemperature`
+used by surface convection in the steady-state heat solve. The model struct
 in `projects/crates/cae-model/src/model.rs` is authoritative for the exact
 field list; the supported subset is listed in the
 [capability matrix](capabilities.md).
@@ -101,7 +103,8 @@ projects/
     src/validate.rs      validation rules and mechanism detection
     src/solver.rs        stiffness, DOF activation, elimination, Jacobi modal/buckling,
                          harmonic response, construction stages, truss Newton,
-                         tension-only active set, internal forces and stress recovery
+                         tension-only active set, axial heat conduction with optional
+                         surface convection, internal forces and stress recovery
     src/export.rs        CSV / VTK / Markdown / HTML export and atomic writes
     src/bin/ocae.rs      thin Rust CLI
     tests/               analytical and regression tests

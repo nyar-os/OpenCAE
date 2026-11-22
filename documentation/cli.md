@@ -51,8 +51,8 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae element add <file>` | `--id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--tension-only]` | `beam` is 2D-only and needs positive `--I` or a material section. `--w`/`--w2` are local `+y` intensities at the start/end node. `--w-from`/`--w-to` limit the load to a length fraction (both or neither). `--dt` needs material `alpha`; `--dt-grad` also needs a section depth. `--tension-only` marks a truss as a cable. |
-| `open-cae element update <file>` | `--id <id> [--from <n>] [--to <n>]` | Reconnects endpoints and preserves material, loads, temperature and releases. |
+| `open-cae element add <file>` | `--id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]` | `beam` is 2D-only and needs positive `--I` or a material section. `--w`/`--w2` are local `+y` intensities at the start/end node. `--w-from`/`--w-to` limit the load to a length fraction (both or neither). `--dt` needs material `alpha`; `--dt-grad` also needs a section depth. `--convection` is the surface coefficient `h` in `W/(m²·K)` and `--perimeter` the exposed perimeter `P`; both feed `heat` only and need a model ambient temperature. `--tension-only` marks a truss as a cable. |
+| `open-cae element update <file>` | `--id <id> [--from <n>] [--to <n>] [--convection <h>] [--perimeter <P>]` | Reconnects endpoints and/or replaces the convection data; preserves material, loads, temperature and releases. |
 | `open-cae element split <file>` | `--id <id> --at <fraction>` | Splits a member at a length fraction strictly between 0 and 1, reusing or creating the interior node. Prints the interior node and both element ids. Uniform loads and temperatures are copied; partial-span/linear loads and gradients are rejected with `element/split-unsupported-load`. |
 | `open-cae element remove <file>` | `--id <id>` | Removes one element. |
 | `open-cae element forces <file>` | `--id <id>` | Prints the solved result of one element. |
@@ -88,6 +88,7 @@ Section shapes and their geometry flags:
 | `open-cae load add <file>` | `--node <n> [--fx] [--fy] [--fz] [--mz]` | Adds or updates a nodal force/moment; `--mz` is beam-node-only and `--fz` is 3D-only. |
 | `open-cae load remove <file>` | `--node <n>` | Removes the nodal load. |
 | `open-cae model gravity <file>` | `[--gx] [--gy] [--gz]` | Sets the gravity vector; omitted components are 0. |
+| `open-cae model ambient <file>` | `[--temperature <Ta>] [--clear]` | Sets the ambient temperature used by surface convection in `heat`; `--clear` removes it. Ignored by structural analysis. |
 | `open-cae self-weight <file>` | `--g <g> [--axis x\|y\|z]` | Shorthand for gravity along one axis; `--axis` defaults to `y`. |
 
 ### Combinations
@@ -107,7 +108,7 @@ Section shapes and their geometry flags:
 | `open-cae modal <file>` | `[--modes <N>] [--out <file>]` | Modal solve. Needs a positive density or at least one positive nodal mass. |
 | `open-cae buckling <file>` | `[--modes <N>] [--out <file>]` | Linear buckling solve. |
 | `open-cae tension-only <file>` | `[--iterations <N>] [--tolerance <t>] [--out <file>]` | Cable active-set iteration; defaults are 20 and `1e-9`. |
-| `open-cae heat <file>` | `[--out <file>]` | Steady-state axial heat conduction. Requires at least one fixed node temperature and a positive material `conductivity`; prints temperatures, element fluxes and fixed-temperature reactions. `thermal` is an alias. Conduction only: no convection, radiation or transient stepping. |
+| `open-cae heat <file>` | `[--out <file>]` | Steady-state axial heat conduction. Requires at least one fixed node temperature and a positive material `conductivity`; prints temperatures, element fluxes and fixed-temperature reactions. Optional member `convection`/`perimeter` and `model ambient` add surface convection. `thermal` is an alias. No radiation or transient stepping. |
 
 Use the dedicated `tension-only` command for cables. The `solve` parser also
 accepts `--analysis tension-only`, but currently resolves it to a static
@@ -122,6 +123,17 @@ with `material/invalid-conductivity`. Element flux is
 `q = k·A·(T_from − T_to)/L`, positive from the `from` node to the `to` node.
 Units are never converted, so a `mm` document must supply a length-consistent
 conductivity.
+
+An element that declares `convection` `h` and `perimeter` `P` exchanges heat
+with the model `ambientTemperature` `Ta`: its matrix gains
+`h·P·L/6·[[2, 1], [1, 2]]` and its load vector `h·P·L·Ta/2·[1, 1]`. The element
+report gains `convection: {coefficient, perimeter, ambientTemperature, heat}`
+with `heat = h·P·L·(T_avg − Ta)`, positive out of the member and omitted when no
+convection is declared. Fixed reactions balance the convective loss:
+`Σreaction + Σapplied heat = Σconvective heat`. Missing `--perimeter` or a
+missing ambient reports `heat/missing-perimeter` or `heat/missing-ambient`; a
+negative convection coefficient or a non-positive perimeter reports
+`heat/invalid-convection` or `heat/invalid-perimeter`.
 
 ### Results
 
@@ -197,6 +209,19 @@ open-cae heat heat.ocae --out temperature.json
 The bar carries `q = kAΔT/L = 50 × 1e-4 × 100 = 0.5 W`; the fixed nodes
 report `+0.5 W` and `−0.5 W`. Clear a boundary with
 `open-cae node temperature heat.ocae --id n2 --clear`.
+
+Surface convection on a bar with one fixed end and one free end:
+
+```shell
+open-cae create fin.ocae --units m
+open-cae material set fin.ocae --E 210e9 --A 1e-2 --conductivity 50
+open-cae node add fin.ocae --id n1 --x 0 --y 0
+open-cae node add fin.ocae --id n2 --x 1 --y 0
+open-cae element add fin.ocae --id e1 --from n1 --to n2 --convection 2 --perimeter 0.1
+open-cae model ambient fin.ocae --temperature 20
+open-cae node temperature fin.ocae --id n1 --temperature 100
+open-cae heat fin.ocae --out convection.json
+```
 
 An elastic support leaves the degree of freedom free and adds stiffness
 instead of constraining it:
