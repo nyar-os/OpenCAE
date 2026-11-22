@@ -33,7 +33,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | linear elastic spring supports (`elasticSupports`, translational and rotational stiffness) | ✅ supported |
 | inclined/rotated roller supports (`inclinedSupports`, arbitrary constraint direction in 2D) | ✅ supported |
 | assembled stiffness and mass matrix export (`matrixExport`) | ✅ supported |
-| response-spectrum analysis (`responseSpectrum`, SDOF spectral acceleration input + SRSS) | ✅ supported |
+| response-spectrum analysis (`responseSpectrum`, SDOF spectral acceleration input + SRSS or CQC) | ✅ supported |
 | harmonic frequency response (`frequencyResponse`, modal superposition sweep, peak frequency/amplitude) | ✅ supported |
 | construction stages / element birth–death summaries (`constructionStages`, active element subsets + stage factors) | ✅ supported |
 | geometric-nonlinear truss analysis (`geometricNonlinear`, corotational Newton iteration with load increments) | ✅ supported |
@@ -272,14 +272,21 @@ be finite and positive and a model without nodes is rejected with
     `rz`) plus whether a support constrains it. A bar's axial `EA/L` terms, a
     cantilever's `12EI/L³`, `6EI/L²`, `4EI/L` and `2EI/L` terms and the
     `ρAL/2` / `ρIL/2` masses are asserted directly.
-23. **Response spectrum**: `solve_response_spectrum(model, modes, axis,
-    spectrum)` reuses the mass-normalised modal solution, reads `Sa(T)` by
-    linear interpolation (constant beyond the first and last point), converts
-    it to `Sd = Sa/ω²`, scales each mode by the signed participation factor
-    `Γ` in the requested direction and combines the nodal contributions with
-    SRSS. A single free translational degree of freedom therefore peaks at the
-    static-equivalent `Sd = Sa·m/k`, which is asserted together with the
-    interpolation and validation errors.
+23. **Response spectrum**: `solve_response_spectrum(model, modes, axis, spectrum,
+    combination, damping)` reuses the mass-normalised modal solution, reads
+    `Sa(T)` by linear interpolation (constant beyond the first and last point),
+    converts it to `Sd = Sa/ω²`, scales each mode by the signed participation
+    factor `Γ` in the requested direction and combines the nodal contribution
+    vectors component by component. `combination = "srss"` (the default) takes
+    `sqrt(Σ_r R_r²)` per component. `combination = "cqc"` uses the complete
+    quadratic combination with one modal damping ratio `ζ` in `(0, 1]` and the
+    Der Kiureghian coefficient `ρ_ij = 8ζ²(1+r)r^(3/2) / ((1+r²)² + 4ζ²r(1+r)²)`
+    with `r = ω_j/ω_i` and `ρ_ij = 1` when `i = j`; each component is
+    `sqrt(Σ_i Σ_j ρ_ij R_i R_j)`. A single free translational degree of freedom
+    therefore peaks at the static-equivalent `Sd = Sa·m/k` under both rules, so
+    one-mode CQC equals SRSS. An unknown combination reports
+    `spectrum/invalid-combination`; CQC without a finite damping ratio in
+    `(0, 1]` reports `spectrum/invalid-damping`.
 24. **Harmonic frequency response**: `solve_frequency_response(model, modes,
     axis, damping, start_hz, end_hz, points)` treats the document's static
     load vector as the harmonic excitation `f(t) = f·sin(ωt)` of the requested
@@ -532,8 +539,14 @@ combinations:
   `12EI/L³` and `4EI/L` terms plus the lumped `ρAL/2`/`ρIL/2` masses
   (`1e-12`);
 - a single free translational degree of freedom peaks at `Sd = Sa·m/k` with
-  `Γ = √m` (`1e-9`), the spectrum is linearly interpolated, and empty/negative
-  period spectra and unavailable axes are rejected.
+  `Γ = √m` (`1e-9`), one-mode CQC reproduces SRSS exactly, the spectrum is
+  linearly interpolated, and empty/negative period spectra and unavailable axes
+  are rejected;
+- a two-mode bar frame with closed-form frequencies and mode vectors reproduces
+  the two-mode CQC combination `sqrt(Σ_i Σ_j ρ_ij R_i R_j)` (`1e-8`), a
+  damping ratio of `1e-9` converges to the SRSS result (`1e-6`), and an unknown
+  combination or a missing/out-of-range CQC damping ratio reports
+  `spectrum/invalid-combination` / `spectrum/invalid-damping`.
 
 `tests/frequency_response.rs`, `tests/construction_stages.rs` and
 `tests/nonlinear.rs` assert the newer capabilities:
@@ -636,11 +649,11 @@ threshold of `1e-9`.
   and fibre-level plasticity are not modelled.
 - Modal analysis uses a **lumped mass matrix** and ignores constrained degrees
   of freedom; frequencies and mode shapes are finite element approximations.
-  Results contain only the lowest few modes. Response-spectrum analysis is
-  available, but it uses the SRSS combination only (no CQC or complete
-  quadratic combination), no rotational/rocking excitation, and no ductility
-  or inelastic spectrum modification. Harmonic response inherits the same mass
-  matrix and shape approximation.
+  Results contain only the lowest few modes. Response-spectrum analysis offers
+  SRSS and CQC, but CQC uses **one modal damping ratio for every mode** rather
+  than a per-mode damping table. There is no rotational/rocking excitation and
+  no ductility or inelastic spectrum modification. Harmonic response inherits
+  the same mass matrix and shape approximation.
 - Self-weight is applied as **lumped forces** (trusses) or **consistent loads**
   (beam transverse direction); this is exact in equilibrium and approximate in
   displacement, and does not replace a consistent mass matrix.
