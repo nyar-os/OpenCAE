@@ -1,0 +1,313 @@
+<template>
+    <SiteShell page="features">
+        <div class="page-head">
+            <span class="eyebrow">Feature index / OCAE-01</span>
+            <h1>Features</h1>
+            <p class="lead">
+                One <code>.ocae</code> model behind editing, validation, assembly,
+                solving and export. Trusses, planar beams and the listed dynamic
+                analyses work today. 3D beams, shells, solids, material
+                nonlinearity and heat transfer fail with a stable error code
+                instead of being implied by a suffix.
+            </p>
+            <div class="head-tags">
+                <span class="chip chip--available">2D beam · 2D / 3D truss</span>
+                <span class="chip chip--blocked">no shell or solid elements</span>
+            </div>
+        </div>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">01</span>Contracts</h2>
+                <span class="chip chip--available">available</span>
+            </div>
+            <div class="grid-2">
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Session API</h3>
+                    <p>
+                        <code>OpenCae</code> owns create, open, edit, validate,
+                        solve, recover and save. The CLI, Node-API addon and
+                        TypeScript SDK call the same Rust session, so results
+                        cannot drift between surfaces.
+                    </p>
+                </article>
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Atomic writes</h3>
+                    <p>
+                        Every edit operation validates first and writes the
+                        <code>.ocae</code> file through a temporary file plus
+                        rename. A failed command cannot leave a half-written
+                        document behind.
+                    </p>
+                </article>
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Stable error codes</h3>
+                    <p>
+                        Failures carry codes such as <code>model/mechanism</code>,
+                        <code>support/spring-constrained</code>,
+                        <code>document/dimension-mismatch</code> or
+                        <code>capability/not-implemented</code>. The CLI maps them
+                        to exit codes <code>0</code>, <code>1</code> and
+                        <code>2</code>.
+                    </p>
+                </article>
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Capability matrix</h3>
+                    <p>
+                        <code>ocae capabilities</code> prints the machine-readable
+                        matrix from one source of truth. A route is described as
+                        available only when the corresponding solve or export
+                        exists in this build.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">02</span>Feature areas</h2>
+                <p>Each card names behaviour that exists in the native model today.</p>
+            </div>
+            <div class="grid-3">
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Document</h3>
+                    <p>
+                        UTF-8 JSON with camelCase fields, <code>format</code>
+                        <code>open-cae-truss</code> and <code>version</code>
+                        <code>1</code>. Units are <code>mm</code> or <code>m</code>;
+                        the dimension is <code>2</code> or <code>3</code>.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Model and material</h3>
+                    <p>
+                        Nodes, truss and beam elements, per-element E/A overrides,
+                        density, allowable stress and thermal expansion. Beam
+                        inertia may come from a parametric section.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Supports</h3>
+                    <p>
+                        Rigid constraints, translational and rotational springs,
+                        inclined rollers in 2D, and prescribed settlements or
+                        driven degrees of freedom on a constrained component.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Loads and actions</h3>
+                    <p>
+                        Nodal forces and moments, uniform or trapezoidal member
+                        loads over the full or partial span, self-weight, uniform
+                        temperature change and through-depth gradient.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Static and modal</h3>
+                    <p>
+                        Direct stiffness with row and column elimination for
+                        constraints. Modal analysis uses a lumped mass matrix with
+                        Jacobi eigenpairs, signed participation factors and
+                        effective modal mass.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Stability and dynamics</h3>
+                    <p>
+                        Linear buckling for 2D truss, 2D beam and 3D truss models,
+                        buckling per load combination, response spectrum with SRSS,
+                        harmonic sweep and construction-stage element activation.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--limited">limited</span>
+                    <h3>Geometric nonlinearity</h3>
+                    <p>
+                        <code>geometricNonlinear()</code> runs a corotational Newton
+                        iteration for truss models only. Beam and frame large
+                        displacement remains unimplemented.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Results</h3>
+                    <p>
+                        Reactions with a force-equilibrium check, sampled N/V/M
+                        diagrams, extreme-fibre stresses with utilisation,
+                        deflected centrelines, averaged nodal stresses and a
+                        load-case summary.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Library and export</h3>
+                    <p>
+                        Material presets for steel, stainless steel, aluminium,
+                        concrete and timber, six section shapes, assembled stiffness
+                        and mass matrix export, plus CSV, legacy VTK, Markdown and
+                        HTML reports.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">03</span>Command surface</h2>
+                <span class="chip">today</span>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>Surface</th>
+                            <th>Status</th>
+                            <th>Behaviour</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">CLI</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Creates, edits, validates, solves, recovers and exports. Editing commands save in place.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">SDK</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td><code>new OpenCAE()</code> returns a session; documents expose editing, analysis, recovery and export methods.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Node-API</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>A thin native wrapper over the same session; the SDK resolves the platform addon from its package name.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Skills</td>
+                            <td><span class="chip chip--blocked">not shipped</span></td>
+                            <td>This repository has no skill package yet. The CLI and SDK are the supported automation surfaces.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">04</span>Capability honesty</h2>
+                <span class="chip chip--limited">read the status</span>
+            </div>
+            <p>
+                The capability matrix reports 2D truss, 3D truss, 2D beam, modal,
+                buckling, response spectrum, frequency response, construction
+                stages, geometric nonlinear truss, prescribed displacements,
+                end releases, temperature actions, partial-span loads, elastic and
+                inclined supports, matrix export and CSV/VTK/Markdown/HTML export
+                as supported. It reports 3D beam, 3D frame, shell and solid
+                elements, material nonlinearity, heat transfer, contact,
+                prestress, dynamic time history, Abaqus import and STEP export as
+                <code>capability/not-implemented</code>.
+            </p>
+            <p>
+                A request for an unimplemented route fails with exit code
+                <code>2</code>; it is never approximated silently. Modal
+                frequencies and effective masses are finite element
+                approximations from a lumped mass matrix, with the error bounds
+                stated in the readme and tests.
+            </p>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">05</span>Current state</h2>
+                <span class="chip chip--available">inspectable</span>
+            </div>
+            <div class="grid-2">
+                <article class="card">
+                    <span class="status-dot status-dot--on"></span>
+                    <h3>In place</h3>
+                    <ul>
+                        <li>2D and 3D truss linear static analysis</li>
+                        <li>2D Euler–Bernoulli beams with releases and partial loads</li>
+                        <li>Self-weight, temperature change and gradient actions</li>
+                        <li>Rigid, spring, inclined and prescribed supports</li>
+                        <li>Modal, buckling, spectrum, harmonic and staged analysis</li>
+                        <li>Geometric-nonlinear truss iteration</li>
+                        <li>Reactions, N/V/M, stresses, deflections, nodal stresses</li>
+                        <li>Parametric section and material library</li>
+                        <li>CSV, VTK, Markdown and HTML export</li>
+                    </ul>
+                </article>
+                <article class="card">
+                    <span class="status-dot status-dot--off"></span>
+                    <h3>Not implemented</h3>
+                    <ul>
+                        <li>3D beam and 3D frame elements</li>
+                        <li>Shell, membrane and solid elements</li>
+                        <li>Material nonlinearity</li>
+                        <li>Beam and frame large displacement</li>
+                        <li>Steady-state and transient heat transfer</li>
+                        <li>Contact, prestress and dynamic time history</li>
+                        <li>Abaqus <code>.inp</code> import and STEP export</li>
+                        <li>Graphical interface</li>
+                    </ul>
+                </article>
+            </div>
+        </section>
+
+        <p class="cta-line">
+            Curious which gates are closed?
+            <Link to="RoadmapPage">Read the roadmap</Link>
+            .
+        </p>
+    </SiteShell>
+</template>
+
+<style>
+.head-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.feature {
+    padding: 16px 16px 14px;
+    border: 1px solid var(--cae-line);
+    border-top: 2px solid var(--cae-line-strong);
+    border-radius: var(--cae-radius);
+    background: var(--cae-surface);
+}
+
+.feature h3 {
+    margin: 8px 0 6px;
+    font-size: 14.5px;
+}
+
+.feature p {
+    margin: 0;
+    color: var(--cae-muted);
+    font-size: 12.8px;
+}
+</style>
+
+<script client>
+export default class FeaturesPage {
+    static meta() {
+        return {
+            title: "Features - OpenCAE",
+            description:
+                "The OpenCAE document, truss and beam elements, supports, actions, static/modal/buckling/spectrum/harmonic analysis, result recovery and CSV/VTK/Markdown/HTML export, with unimplemented routes reported explicitly.",
+        };
+    }
+}
+</script>

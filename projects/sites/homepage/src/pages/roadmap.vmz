@@ -1,0 +1,400 @@
+<template>
+    <SiteShell page="roadmap">
+        <div class="page-head">
+            <span class="eyebrow">Gate log / OCAE-01</span>
+            <h1>Roadmap</h1>
+            <p class="lead">
+                The phases below are gates, not marketing dates. A phase closes
+                when its evidence exists in the repository; until then, the
+                capability matrix keeps saying so.
+            </p>
+            <ul class="legend" aria-label="Phase states">
+                <li><span class="status-dot status-dot--on"></span> Done</li>
+                <li><span class="status-dot status-dot--active"></span> Active</li>
+                <li><span class="status-dot status-dot--off"></span> Planned</li>
+            </ul>
+        </div>
+
+        <section class="notice">
+            <b>No public release or installer yet.</b>
+            The source can create, edit, validate, solve and export truss and
+            2D beam models today. 3D beams and frames, shells, solids, material
+            nonlinearity and heat transfer stay unimplemented and are reported
+            as such.
+        </section>
+
+        <ol class="phases">
+            <li data-state="done">
+                <span class="phase__id">P0</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Freeze the model contracts</h2>
+                        <span class="chip chip--available">done</span>
+                    </div>
+                    <p>
+                        <code>.ocae</code> fields, units and dimension rules,
+                        error codes, exit codes, report schema and the
+                        capability matrix.
+                    </p>
+                </div>
+            </li>
+            <li data-state="done">
+                <span class="phase__id">P1</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Document and linear static core</h2>
+                        <span class="chip chip--available">done</span>
+                    </div>
+                    <p>
+                        Create, open, edit, validate, solve and save a document;
+                        2D truss, 3D truss and 2D Euler–Bernoulli beams; rigid,
+                        spring, inclined and prescribed supports; nodal loads,
+                        member loads, self-weight and load combinations. The CLI,
+                        Node-API addon and SDK share the same Rust session.
+                    </p>
+                </div>
+            </li>
+            <li data-state="done">
+                <span class="phase__id">P2</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Result recovery and reports</h2>
+                        <span class="chip chip--available">done</span>
+                    </div>
+                    <p>
+                        Reaction summary with an equilibrium check, sampled N/V/M
+                        diagrams, extreme-fibre stresses and utilisation, deflected
+                        centrelines, averaged nodal stresses, load-case summaries,
+                        assembled matrices, and CSV, legacy VTK, Markdown and HTML
+                        export.
+                    </p>
+                </div>
+            </li>
+            <li data-state="done">
+                <span class="phase__id">P3</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Stability, dynamics and staged analysis</h2>
+                        <span class="chip chip--available">done</span>
+                    </div>
+                    <p>
+                        Modal analysis with effective mass, linear buckling and
+                        buckling per combination, response spectrum with SRSS,
+                        harmonic frequency sweep, construction stages, end
+                        releases, temperature actions and the geometric-nonlinear
+                        truss iteration.
+                    </p>
+                </div>
+            </li>
+            <li data-state="active">
+                <span class="phase__id">P4</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Verification and packaging</h2>
+                        <span class="chip chip--planned">active</span>
+                    </div>
+                    <p>
+                        Closed-form regressions already assert a
+                        <code>1e-12</code> relative error on settlement, spring
+                        and 3D-bar cases, and the readme states the modal
+                        lumped-mass bounds. Independent reference models, a wider
+                        model corpus and a public package release remain open.
+                    </p>
+                </div>
+            </li>
+            <li>
+                <span class="phase__id">P5</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>3D frames, shells and heat transfer</h2>
+                        <span class="chip chip--planned">planned</span>
+                    </div>
+                    <p>
+                        3D beam and frame elements, shell and solid elements,
+                        material nonlinearity, steady-state and transient heat
+                        transfer, contact and external format adapters.
+                    </p>
+                </div>
+            </li>
+        </ol>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">01</span>Working today</h2>
+                <span class="chip chip--available">verified in the workspace</span>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>Area</th>
+                            <th>Status</th>
+                            <th>Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">Document</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Create, open, edit, validate, save and reopen an <code>.ocae</code> model.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">2D / 3D truss</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Direct stiffness with exact axial reference cases.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">2D beam</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Euler–Bernoulli stiffness, releases, partial loads and end moments.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Supports</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Rigid, spring, inclined roller and prescribed displacement.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Actions</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Nodal loads, member loads, self-weight, temperature change and gradient.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Modal</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Lumped mass, Jacobi eigenpairs, participation and effective modal mass.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Buckling</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Single load case and per-combination factors with a governing case.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Spectrum and harmonic</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>SDOF spectral acceleration with SRSS, and a sampled harmonic sweep.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Construction stages</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Active element subsets solved per declared stage.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Geometric nonlinear truss</td>
+                            <td><span class="chip chip--limited">limited</span></td>
+                            <td>Corotational Newton iteration with load increments. Truss models only.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Results</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Reactions, N/V/M, stresses, deflections, nodal stresses and load cases.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Export</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>CSV, legacy VTK, Markdown and self-contained HTML reports.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">CLI, SDK, Node-API</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>All three call the same Rust session and the same validation.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Skills</td>
+                            <td><span class="chip chip--blocked">not shipped</span></td>
+                            <td>No skill package exists in this repository yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">02</span>Not implemented</h2>
+                <span class="chip chip--blocked">fails explicitly</span>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>Route</th>
+                            <th>Status</th>
+                            <th>Behaviour</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">3D beam / frame</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>Rejected at validation and at the solver with <code>capability/not-implemented</code>.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Shell / solid</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>No shell, membrane or solid element formulation exists.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Material nonlinearity</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>The generic <code>nonlinear</code> route returns exit code <code>2</code>.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Heat transfer</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>Member temperature actions work; the <code>thermal</code> analysis does not.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Contact / prestress</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>No contact, prestress or dynamic time-history solver.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">External formats</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>No Abaqus <code>.inp</code> import and no STEP export.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2><span class="section-index">03</span>Where the tests live</h2>
+                <span class="chip">product suite</span>
+            </div>
+            <p>
+                Closed-form regressions and the solver test suite live with the
+                product under <code>projects/crates/cae-model/tests</code>. They
+                assert analytical values for trusses, beams, settlements,
+                springs, thermal actions, modal properties and buckling factors.
+                The shared workspace keeps integration and session checks, so a
+                green build is not presented as a finished product.
+            </p>
+        </section>
+
+        <p class="cta-line">
+            Follow the work in the
+            <a href="https://github.com/nyar-os/OpenCAE" rel="noopener">
+                source repository
+            </a>
+            .
+        </p>
+    </SiteShell>
+</template>
+
+<style>
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--cae-muted);
+    font-family: var(--cae-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.notice {
+    margin-top: 24px;
+    padding: 14px 18px;
+    border: 1px solid var(--cae-line-strong);
+    border-left: 4px solid var(--cae-accent);
+    background: var(--cae-surface);
+    color: var(--cae-muted);
+    font-size: 14px;
+}
+
+.notice b {
+    color: var(--cae-ink);
+}
+
+.phases {
+    margin: 28px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+}
+
+.phases li {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 14px;
+    padding: 16px 18px;
+    border: 1px solid var(--cae-line);
+    border-left: 3px solid var(--cae-line-strong);
+    background: var(--cae-surface);
+}
+
+.phase__id {
+    color: var(--cae-muted);
+    font-family: var(--cae-mono);
+    font-size: 16px;
+    letter-spacing: 0.06em;
+}
+
+.phase__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-bottom: 3px;
+}
+
+.phases h2 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.phases p {
+    margin: 0;
+    color: var(--cae-muted);
+    font-size: 13.5px;
+}
+
+.phases li[data-state="done"] {
+    border-left-color: var(--cae-ok);
+}
+
+.phases li[data-state="done"] .phase__id {
+    color: var(--cae-ok);
+}
+
+.phases li[data-state="active"] {
+    border-left-color: var(--cae-accent);
+    background: linear-gradient(90deg, var(--cae-accent-soft), var(--cae-surface) 46%);
+}
+
+.phases li[data-state="active"] .phase__id {
+    color: var(--cae-accent-ink);
+}
+
+@media (max-width: 620px) {
+    .phases li {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+}
+</style>
+
+<script client>
+export default class RoadmapPage {
+    static meta() {
+        return {
+            title: "Roadmap - OpenCAE",
+            description:
+                "The P0-P5 gates for OpenCAE: model contracts, the linear static core, result recovery and dynamic analyses are done, verification and packaging are active, and 3D frames, shells and heat transfer remain planned.",
+        };
+    }
+}
+</script>
