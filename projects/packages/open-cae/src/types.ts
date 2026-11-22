@@ -977,6 +977,14 @@ export interface NodeUpdateRequest {
     readonly z?: number;
 }
 
+/** Request of `mergeNodes()`; the `into` node survives with its coordinates. */
+export interface NodeMergeRequest {
+    /** Node that is removed after its references move to `into`. */
+    readonly from: string;
+    /** Node that keeps its id and coordinates. */
+    readonly into: string;
+}
+
 /** Request of `addElement()`. */
 export interface ElementAddRequest {
     readonly id: string;

@@ -79,8 +79,7 @@ fn boolean_field(request: &Value, name: &str) -> Result<bool> {
 }
 
 fn options_from(value: Option<&Value>) -> Result<OpenCaeOptions> {
-    let Some(value) = value
-    else {
+    let Some(value) = value else {
         return Ok(OpenCaeOptions::default());
     };
     if !value.is_object() {
@@ -304,6 +303,19 @@ fn element_remove(ctx: CallContext) -> Result<JsValue> {
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session.remove_element(&id).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Merges one node into another and saves the document.
+#[function]
+fn node_merge(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let from = text_field(&request, "from")?;
+    let into = text_field(&request, "into")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.merge_nodes(&from, &into).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -921,6 +933,7 @@ register_module![
     save,
     node_add,
     node_update,
+    node_merge,
     node_remove,
     element_add,
     element_update,

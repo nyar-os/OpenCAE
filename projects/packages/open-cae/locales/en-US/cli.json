@@ -57,6 +57,7 @@
             "nodeAdded": "node `{id}` added (z={z}, revision {revision})",
             "nodeUpdated": "node `{id}` moved (revision {revision})",
             "nodeRemoved": "node `{id}` removed (revision {revision})",
+            "nodeMerged": "node `{from}` merged into `{into}` (revision {revision})",
             "elementAdded": "element `{id}` added (revision {revision})",
             "elementUpdated": "element `{id}` reconnected (revision {revision})",
             "elementRemoved": "element `{id}` removed (revision {revision})",

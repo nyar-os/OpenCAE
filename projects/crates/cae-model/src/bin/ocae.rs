@@ -24,6 +24,7 @@ Usage:
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
   ocae node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]
   ocae node remove <file> --id <id>
+  ocae node merge <file> --from <id> --into <id>
   ocae node displacement <file> --id <id>
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
@@ -88,8 +89,7 @@ fn main() {
 }
 
 fn dispatch(args: &[String]) -> Result<i32, CaeError> {
-    let Some(command) = args.first().map(String::as_str)
-    else {
+    let Some(command) = args.first().map(String::as_str) else {
         print!("{USAGE}");
         return Ok(0);
     };
@@ -151,16 +151,17 @@ fn node_command(args: &[String]) -> Result<i32, CaeError> {
         Some("add") => node_add(&args[1..]),
         Some("update") => node_update(&args[1..]),
         Some("remove") => node_remove(&args[1..]),
+        Some("merge") => node_merge(&args[1..]),
         Some("displacement") => node_displacement(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `remove` or `displacement` is supported"
+                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `remove`, `merge` or `displacement` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`node` is missing a subcommand; only `add`, `update`, `remove` or `displacement` is supported",
+            "`node` is missing a subcommand; only `add`, `update`, `remove`, `merge` or `displacement` is supported",
         )),
     }
 }
@@ -253,6 +254,18 @@ fn node_remove(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.remove_node(id)?;
     println!("node `{id}` removed (revision {})", summary.revision);
+    Ok(0)
+}
+
+fn node_merge(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--from", "--into"], &[])?;
+    let file = positional(&parsed, 0, "node merge <file> --from <id> --into <id>")?;
+    let from = required(&parsed, "--from")?;
+    let into = required(&parsed, "--into")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.merge_nodes(from, into)?;
+    println!("node `{from}` merged into `{into}` (revision {})", summary.revision);
     Ok(0)
 }
 
@@ -491,8 +504,7 @@ fn material_preset(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn optional_section(parsed: &Parsed) -> Result<Option<Section>, CaeError> {
-    let Some(shape) = parsed.options.get("--section")
-    else {
+    let Some(shape) = parsed.options.get("--section") else {
         let geometry = [
             "--width",
             "--height",
@@ -1215,8 +1227,7 @@ fn parse(args: &[String], value_options: &[&str], flag_options: &[&str]) -> Resu
             if flag_options.contains(&argument.as_str()) {
                 parsed.flags.insert(argument.clone());
                 index += 1;
-            }
-            else if value_options.contains(&argument.as_str()) {
+            } else if value_options.contains(&argument.as_str()) {
                 let value = args
                     .get(index + 1)
                     .ok_or_else(|| CaeError::new("cli/missing-value", format!("`{argument}` is missing a value")))?;
@@ -1225,12 +1236,10 @@ fn parse(args: &[String], value_options: &[&str], flag_options: &[&str]) -> Resu
                 }
                 parsed.options.insert(argument.clone(), value.clone());
                 index += 2;
-            }
-            else {
+            } else {
                 return Err(CaeError::new("cli/unknown-option", format!("unknown option `{argument}`")));
             }
-        }
-        else {
+        } else {
             parsed.positionals.push(argument.clone());
             index += 1;
         }

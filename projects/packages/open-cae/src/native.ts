@@ -20,6 +20,7 @@ export interface NativeBinding {
     save(path: string, target?: string): string;
     node_add(path: string, requestJson: string): string;
     node_update(path: string, requestJson: string): string;
+    node_merge(path: string, requestJson: string): string;
     node_remove(path: string, requestJson: string): string;
     element_add(path: string, requestJson: string): string;
     element_update(path: string, requestJson: string): string;

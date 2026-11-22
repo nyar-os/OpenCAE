@@ -267,6 +267,9 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === 'remove') {
         return nodeRemove(args.slice(1));
     }
+    if (action === 'merge') {
+        return nodeMerge(args.slice(1));
+    }
     if (action === 'displacement') {
         return nodeDisplacement(args.slice(1));
     }
@@ -359,6 +362,19 @@ async function nodeUpdate(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const summary = document.updateNode({ id, x, y, z });
         console.log(message('nodeUpdated', { id, revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function nodeMerge(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--from', '--into'], []);
+    const file = positional(parsed, 0, 'node merge <file> --from <id> --into <id>');
+    const from = required(parsed, '--from');
+    const into = required(parsed, '--into');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.mergeNodes({ from, into });
+        console.log(message('nodeMerged', { from, into, revision: String(summary.revision) }));
         return 0;
     });
 }

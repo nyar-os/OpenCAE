@@ -312,8 +312,7 @@ impl OpenCae {
         self.edit(|model| {
             let material = if youngs_modulus.is_some() || area.is_some() {
                 Some(crate::ElementMaterial { youngs_modulus, area })
-            }
-            else {
+            } else {
                 None
             };
             model.add_element(id, from, to, material)
@@ -398,8 +397,7 @@ impl OpenCae {
         self.edit(|model| {
             let material = if youngs_modulus.is_some() || area.is_some() {
                 Some(crate::ElementMaterial { youngs_modulus, area })
-            }
-            else {
+            } else {
                 None
             };
             model.add_element_with_loads(id, from, to, material, kind, inertia, distributed_load, distributed_load_end)?;
@@ -676,6 +674,15 @@ impl OpenCae {
         self.edit(|model| model.remove_node(id))
     }
 
+    /// Merges one node into another and saves the document.
+    ///
+    /// The node `into` survives with its coordinates; elements, supports and
+    /// loads of `from` are re-pointed, combined or moved. Conflicting supports
+    /// and an element that would collapse are rejected without writing.
+    pub fn merge_nodes(&mut self, from: &str, into: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.merge_nodes(from, into))
+    }
+
     /// Removes an element and saves the document.
     pub fn remove_element(&mut self, id: &str) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.remove_element(id))
@@ -689,8 +696,7 @@ impl OpenCae {
         self.edit(|model| {
             if model.remove_support(node) {
                 Ok(())
-            }
-            else {
+            } else {
                 Err(CaeError::new("support/unknown-support", format!("node `{node}` has no support entry to remove")))
             }
         })
@@ -703,8 +709,7 @@ impl OpenCae {
         self.edit(|model| {
             if model.remove_load(node) {
                 Ok(())
-            }
-            else {
+            } else {
                 Err(CaeError::new("load/unknown-load", format!("node `{node}` has no load entry to remove")))
             }
         })
@@ -1049,8 +1054,7 @@ impl OpenCae {
                 export_vtk(model, &solution, target)?;
                 let file = if target.extension().and_then(|extension| extension.to_str()) == Some("vtk") {
                     target.to_path_buf()
-                }
-                else {
+                } else {
                     target.join("model.vtk")
                 };
                 vec![file.display().to_string()]
@@ -1061,8 +1065,7 @@ impl OpenCae {
                 export_md(model, &solution, modal.as_ref(), &issues, target)?;
                 let file = if target.extension().and_then(|extension| extension.to_str()) == Some("md") {
                     target.to_path_buf()
-                }
-                else {
+                } else {
                     target.join("report.md")
                 };
                 vec![file.display().to_string()]
@@ -1074,8 +1077,7 @@ impl OpenCae {
                 let extension = target.extension().and_then(|extension| extension.to_str());
                 let file = if extension == Some("html") || extension == Some("htm") {
                     target.to_path_buf()
-                }
-                else {
+                } else {
                     target.join("report.html")
                 };
                 vec![file.display().to_string()]

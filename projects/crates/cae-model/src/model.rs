@@ -1132,8 +1132,7 @@ impl Model {
         if let Some(existing) = self.combinations.iter_mut().find(|combination| combination.name == name) {
             existing.loads = loads;
             existing.gravity = gravity;
-        }
-        else {
+        } else {
             self.combinations.push(LoadCombination { name, loads, gravity });
         }
         self.bump_revision();
@@ -1194,8 +1193,7 @@ impl Model {
             support.dy |= dy;
             support.dz |= dz;
             support.rz |= rz;
-        }
-        else {
+        } else {
             self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None, spring: None, direction: None });
         }
         self.bump_revision();
@@ -1240,8 +1238,7 @@ impl Model {
                 ));
             }
             support.direction = Some([nx, ny]);
-        }
-        else {
+        } else {
             self.supports.push(Support {
                 node,
                 dx: false,
@@ -1476,8 +1473,7 @@ impl Model {
             if let Some(mz) = mz {
                 load.mz = mz;
             }
-        }
-        else {
+        } else {
             self.loads.push(Load {
                 node,
                 fx: fx.unwrap_or(0.0),
@@ -1539,6 +1535,88 @@ impl Model {
         Ok(())
     }
 
+    /// Merges one node into another and bumps the revision.
+    ///
+    /// The surviving node keeps the coordinates and id of `into`. Every element
+    /// endpoint, support entry and concentrated load that references `from` is
+    /// re-pointed to `into`; two loads add component-wise and two supports merge
+    /// their flags, springs and prescribed displacements.
+    ///
+    /// The merge changes nothing and reports an error when an id is unknown, when
+    /// both ids are equal, when an element directly connects the two nodes
+    /// (`element/degenerate`), or when the supports carry conflicting prescribed
+    /// displacements, inclined directions or constraint frames
+    /// (`support/merge-conflict`).
+    pub fn merge_nodes(&mut self, from: &str, into: &str) -> Result<(), CaeError> {
+        if from == into {
+            return Err(CaeError::new("node/merge-invalid", format!("a node cannot be merged into itself (`{from}`)")));
+        }
+        if self.node(from).is_none() {
+            return Err(CaeError::new("node/unknown-id", format!("unknown node `{from}`")));
+        }
+        if self.node(into).is_none() {
+            return Err(CaeError::new("node/unknown-id", format!("unknown node `{into}`")));
+        }
+        if let Some(element) = self
+            .elements
+            .iter()
+            .find(|element| (element.from == from && element.to == into) || (element.from == into && element.to == from))
+        {
+            return Err(CaeError::new(
+                "element/degenerate",
+                format!("merging `{from}` into `{into}` would collapse element `{}` to zero length", element.id),
+            ));
+        }
+
+        let support_from = self.supports.iter().find(|support| support.node == from).cloned();
+        let support_into = self.supports.iter().find(|support| support.node == into).cloned();
+        let merged_support = match (support_from, support_into) {
+            (Some(extra), Some(target)) => Some(merge_supports(target, extra)?),
+            (Some(mut only), None) | (None, Some(mut only)) => {
+                only.node = into.to_string();
+                Some(only)
+            }
+            (None, None) => None,
+        };
+
+        let load_from = self.loads.iter().find(|load| load.node == from).cloned();
+        let load_into = self.loads.iter().find(|load| load.node == into).cloned();
+        let merged_load = match (load_from, load_into) {
+            (Some(extra), Some(target)) => Some(Load {
+                node: into.to_string(),
+                fx: target.fx + extra.fx,
+                fy: target.fy + extra.fy,
+                fz: target.fz + extra.fz,
+                mz: target.mz + extra.mz,
+            }),
+            (Some(mut only), None) | (None, Some(mut only)) => {
+                only.node = into.to_string();
+                Some(only)
+            }
+            (None, None) => None,
+        };
+
+        for element in &mut self.elements {
+            if element.from == from {
+                element.from = into.to_string();
+            }
+            if element.to == from {
+                element.to = into.to_string();
+            }
+        }
+        self.supports.retain(|support| support.node != from && support.node != into);
+        if let Some(support) = merged_support {
+            self.supports.push(support);
+        }
+        self.loads.retain(|load| load.node != from && load.node != into);
+        if let Some(load) = merged_load {
+            self.loads.push(load);
+        }
+        self.nodes.retain(|node| node.id != from);
+        self.bump_revision();
+        Ok(())
+    }
+
     /// Removes the support entry of a node, returning whether one existed.
     ///
     /// The whole entry is removed, including a prescribed displacement, spring
@@ -1571,6 +1649,67 @@ impl Model {
     fn bump_revision(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
+}
+
+/// Merges two support entries of nodes that are being combined.
+///
+/// Flags are OR-ed, springs are added component-wise and a prescribed
+/// displacement is kept when only one entry sets it. Two different prescribed
+/// displacements, two different inclined directions, or an inclined direction
+/// combined with any other constraint are rejected with
+/// `support/merge-conflict`.
+fn merge_supports(target: Support, extra: Support) -> Result<Support, CaeError> {
+    let conflict = |detail: &str| {
+        CaeError::new(
+            "support/merge-conflict",
+            format!("nodes `{}` and `{}` cannot be merged: {detail}", target.node, extra.node),
+        )
+    };
+    let direction = match (target.direction, extra.direction) {
+        (Some(left), Some(right)) if left != right => {
+            return Err(conflict("their inclined directions differ"));
+        }
+        (Some(left), _) => Some(left),
+        (_, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+    let prescribed = match (target.prescribed, extra.prescribed) {
+        (Some(left), Some(right)) if left != right => {
+            return Err(conflict("their prescribed displacements differ"));
+        }
+        (Some(left), _) => Some(left),
+        (_, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+    let spring = match (target.spring, extra.spring) {
+        (Some(left), Some(right)) => {
+            let merged = SpringStiffness {
+                kx: left.kx + right.kx,
+                ky: left.ky + right.ky,
+                kz: left.kz + right.kz,
+                kr: left.kr + right.kr,
+            };
+            (!merged.is_empty()).then_some(merged)
+        }
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    };
+    let merged = Support {
+        node: target.node.clone(),
+        dx: target.dx || extra.dx,
+        dy: target.dy || extra.dy,
+        dz: target.dz || extra.dz,
+        rz: target.rz || extra.rz,
+        prescribed,
+        spring,
+        direction,
+    };
+    if merged.direction.is_some()
+        && (merged.dx || merged.dy || merged.dz || merged.rz || merged.prescribed.is_some() || merged.spring.is_some())
+    {
+        return Err(conflict("an inclined direction cannot be combined with another constraint frame"));
+    }
+    Ok(merged)
 }
 
 impl Default for Model {

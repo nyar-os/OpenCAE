@@ -44,6 +44,7 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeMergeRequest,
     NodeUpdateRequest,
     NodalStressOptions,
     NodalStressSolution,
@@ -140,6 +141,11 @@ export function nodeAdd(path: string, request: NodeAddRequest): DocumentSummary 
 /** Moves an existing node and returns the updated summary. */
 export function updateNode(path: string, request: NodeUpdateRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('node.update').node_update(path, JSON.stringify(request)));
+}
+
+/** Merges one node into another and returns the updated summary. */
+export function mergeNodes(path: string, request: NodeMergeRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('node.merge').node_merge(path, JSON.stringify(request)));
 }
 
 /** Adds a truss or beam element and returns the updated summary. */

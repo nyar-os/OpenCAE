@@ -44,6 +44,7 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeMergeRequest,
     NodeUpdateRequest,
     NodalStressOptions,
     NodalStressSolution,
@@ -147,6 +148,16 @@ export class CaeDocument {
     updateNode(request: NodeUpdateRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.updateNode(this.path, request));
+    }
+
+    /**
+     * Merges one node into another and saves the file. The `into` node keeps its
+     * coordinates; element endpoints, supports and loads of `from` move over.
+     * Conflicting supports and an element that would collapse are rejected.
+     */
+    mergeNodes(request: NodeMergeRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.mergeNodes(this.path, request));
     }
 
     /**
