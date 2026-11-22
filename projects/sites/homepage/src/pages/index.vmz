@@ -48,48 +48,44 @@
 
             <div class="sheet" aria-hidden="true">
                 <div class="sheet__head">
-                    <span class="sheet__no">SHEET 01 / 03</span>
-                    <span>STATIC · LINEAR ELASTIC</span>
-                    <span class="sheet__rev">REV 0</span>
+                    <span class="sheet__no">SHEET 01 / 01</span>
+                    <span>TRUSS2D · LINEAR STATIC</span>
+                    <span class="sheet__rev">SCALE 2000</span>
                 </div>
 
-                <div class="draw">
-                    <div class="draw__canvas">
-                        <span class="axis axis--h"></span>
-                        <span class="axis axis--v"></span>
-
-                        <i class="member member--comp" style="left: 20px; top: 139px; width: 170px; transform: rotate(-45deg)"></i>
-                        <i class="member member--comp" style="left: 260px; top: 139px; width: 170px; transform: rotate(-135deg)"></i>
-                        <i class="member member--tens" style="left: 20px; top: 139px; width: 240px"></i>
-
-                        <i class="node" style="left: 16px; top: 136px"></i>
-                        <i class="node" style="left: 256px; top: 136px"></i>
-                        <i class="node" style="left: 136px; top: 16px"></i>
-
-                        <span class="node-label" style="left: 1px; top: 145px">n1</span>
-                        <span class="node-label" style="left: 266px; top: 145px">n2</span>
-                        <span class="node-label" style="left: 119px; top: 1px">n3</span>
-
-                        <span class="support support--pin" style="left: 12px; top: 144px"></span>
-                        <span class="hatch" style="left: 5px; top: 155px; width: 32px"></span>
-
-                        <span class="support support--roller" style="left: 256px; top: 144px"></span>
-                        <span class="hatch" style="left: 249px; top: 155px; width: 24px"></span>
-
-                        <span class="load">
-                            <i class="load__stem"></i>
-                            <i class="load__head"></i>
-                        </span>
-                        <span class="load-label">−1.0 kN</span>
-
-                        <span class="force-label force-label--comp" style="left: 48px; top: 58px">C −707.1</span>
-                        <span class="force-label force-label--tens" style="left: 92px; top: 146px">T +500.0</span>
-
-                        <span class="dim" style="left: 20px; top: 166px; width: 240px"></span>
-                        <span class="dim__tick" style="left: 20px; top: 162px"></span>
-                        <span class="dim__tick" style="left: 260px; top: 162px"></span>
-                        <span class="dim-label">1000 mm</span>
-                    </div>
+                <div class="sheet__draw">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" role="img" aria-label="Exported OpenCAE model and deformed shape">
+                        <rect x="0" y="0" width="960" height="720" fill="#ffffff"></rect>
+                        <text x="480" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" fill="#111827">OpenCAE model and deformed shape</text>
+                        <defs>
+                            <marker id="ocae-load-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto" markerUnits="strokeWidth">
+                                <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"></path>
+                            </marker>
+                        </defs>
+                        <g stroke-linecap="round">
+                            <line x1="40.00" y1="565.00" x2="480.00" y2="125.00" stroke="#9ca3af" stroke-width="1"></line>
+                            <line x1="920.00" y1="565.00" x2="480.00" y2="125.00" stroke="#9ca3af" stroke-width="1"></line>
+                            <polyline points="40.00,565.00 480.00,184.26" fill="none" stroke="#2563eb" stroke-width="2"></polyline>
+                            <polyline points="920.00,565.00 480.00,184.26" fill="none" stroke="#2563eb" stroke-width="2"></polyline>
+                            <circle cx="40.00" cy="565.00" r="3" fill="#111827"></circle>
+                            <circle cx="920.00" cy="565.00" r="3" fill="#111827"></circle>
+                            <circle cx="480.00" cy="125.00" r="3" fill="#111827"></circle>
+                            <polygon points="40.00,565.00 33.00,576.00 47.00,576.00" fill="#16a34a"></polygon>
+                            <polygon points="920.00,565.00 913.00,576.00 927.00,576.00" fill="#16a34a"></polygon>
+                            <line x1="480.00" y1="91.00" x2="480.00" y2="125.00" stroke="#dc2626" stroke-width="2" marker-end="url(#ocae-load-arrow)"></line>
+                        </g>
+                        <g font-family="system-ui, sans-serif" font-size="13" fill="#111827">
+                            <line x1="40" y1="686" x2="70" y2="686" stroke="#9ca3af" stroke-width="1"></line>
+                            <text x="78" y="690">undeformed</text>
+                            <line x1="190" y1="686" x2="220" y2="686" stroke="#2563eb" stroke-width="2"></line>
+                            <text x="228" y="690">deformed (scale 2000.00)</text>
+                            <polygon points="400,680 392,694 408,694" fill="#16a34a"></polygon>
+                            <text x="416" y="690">support</text>
+                            <line x1="520" y1="686" x2="550" y2="686" stroke="#dc2626" stroke-width="2" marker-end="url(#ocae-load-arrow)"></line>
+                            <text x="558" y="690">load</text>
+                            <text x="920" y="690" text-anchor="end">projection: XY (Z ignored)</text>
+                        </g>
+                    </svg>
                 </div>
 
                 <div class="readout">
@@ -116,8 +112,8 @@
                 </div>
 
                 <div class="sheet__foot">
-                    <span>$ ocae solve demo.ocae --analysis static</span>
-                    <span>exit 0</span>
+                    <span>$ ocae export demo.ocae --format svg --scale 2000</span>
+                    <span>2 elements · 3 nodes · 4 DOF fixed</span>
                 </div>
             </div>
         </section>
@@ -349,10 +345,14 @@
 <style>
 .hero {
     display: grid;
-    grid-template-columns: 1.06fr 0.94fr;
+    grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
     gap: 40px;
     align-items: start;
     padding: 26px 0 4px;
+}
+
+.hero > * {
+    min-width: 0;
 }
 
 .hero h1 {
@@ -435,190 +435,15 @@
     color: var(--cae-ink);
 }
 
-.draw {
-    padding: 10px 8px 6px;
+.sheet__draw {
     border-bottom: 1px solid var(--cae-line);
-    background:
-        linear-gradient(to right, rgba(16, 23, 28, 0.05) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(16, 23, 28, 0.05) 1px, transparent 1px);
-    background-size: 12px 12px;
+    background: #fff;
 }
 
-.draw__canvas {
-    position: relative;
-    width: 280px;
-    height: 176px;
-    margin: 0 auto;
-}
-
-.axis {
-    position: absolute;
-    background: var(--cae-line);
-}
-
-.axis--h {
-    left: 0;
-    top: 140px;
-    width: 280px;
-    height: 1px;
-}
-
-.axis--v {
-    left: 140px;
-    top: 8px;
-    width: 1px;
-    height: 146px;
-    background: repeating-linear-gradient(
-        to bottom,
-        var(--cae-line) 0,
-        var(--cae-line) 4px,
-        transparent 4px,
-        transparent 9px
-    );
-}
-
-.member {
-    position: absolute;
-    height: 2px;
-    transform-origin: 0 0;
-}
-
-.member--comp {
-    background: var(--cae-accent);
-}
-
-.member--tens {
-    background: var(--cae-ok);
-}
-
-.node {
-    position: absolute;
-    width: 8px;
-    height: 8px;
-    border: 1px solid var(--cae-ink);
-    background: var(--cae-surface);
-    transform: rotate(45deg);
-}
-
-.node-label {
-    position: absolute;
-    color: var(--cae-muted);
-    font-family: var(--cae-mono);
-    font-size: 8px;
-    letter-spacing: 0.04em;
-}
-
-.support {
-    position: absolute;
+.sheet__draw svg {
     display: block;
-}
-
-.support--pin {
-    width: 0;
-    height: 0;
-    border-left: 8px solid transparent;
-    border-right: 8px solid transparent;
-    border-top: 10px solid var(--cae-ink);
-}
-
-.support--roller {
-    width: 8px;
-    height: 8px;
-    border: 1px solid var(--cae-ink);
-    border-radius: 50%;
-}
-
-.hatch {
-    position: absolute;
-    height: 4px;
-    border-top: 1px solid var(--cae-ink);
-    background: repeating-linear-gradient(
-        45deg,
-        var(--cae-ink) 0,
-        var(--cae-ink) 1px,
-        transparent 1px,
-        transparent 4px
-    );
-}
-
-.load {
-    position: absolute;
-    left: 140px;
-    top: 0;
-    width: 1px;
-    height: 16px;
-}
-
-.load__stem {
-    position: absolute;
-    left: 0;
-    top: -2px;
-    width: 1px;
-    height: 12px;
-    background: var(--cae-stop);
-}
-
-.load__head {
-    position: absolute;
-    left: -3px;
-    top: 9px;
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 6px solid var(--cae-stop);
-}
-
-.load-label {
-    position: absolute;
-    left: 150px;
-    top: 4px;
-    color: var(--cae-stop);
-    font-family: var(--cae-mono);
-    font-size: 8px;
-}
-
-.force-label {
-    position: absolute;
-    z-index: 2;
-    padding: 0 3px;
-    background: var(--cae-surface);
-    font-family: var(--cae-mono);
-    font-size: 7.5px;
-    letter-spacing: 0.02em;
-}
-
-.force-label--comp {
-    color: var(--cae-accent-ink);
-}
-
-.force-label--tens {
-    color: var(--cae-ok);
-}
-
-.dim {
-    position: absolute;
-    height: 1px;
-    background: var(--cae-line-strong);
-}
-
-.dim__tick {
-    position: absolute;
-    width: 1px;
-    height: 6px;
-    background: var(--cae-line-strong);
-}
-
-.dim-label {
-    position: absolute;
-    left: 108px;
-    top: 158px;
-    padding: 0 4px;
-    background: var(--cae-surface);
-    color: var(--cae-muted);
-    font-family: var(--cae-mono);
-    font-size: 8px;
-    letter-spacing: 0.06em;
+    width: 100%;
+    height: auto;
 }
 
 .readout {
@@ -828,13 +653,6 @@
 
     .flow-step:last-child {
         border-bottom: 0;
-    }
-}
-
-@media (max-width: 380px) {
-    .draw__canvas {
-        transform: scale(0.92);
-        transform-origin: top center;
     }
 }
 </style>
