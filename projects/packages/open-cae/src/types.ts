@@ -17,7 +17,7 @@ export type Dimension = 2 | 3;
 export type ElementKind = 'truss' | 'beam';
 
 /** Analysis performed by `solve()`. */
-export type Analysis = 'static' | 'modal' | 'buckling';
+export type Analysis = 'static' | 'modal' | 'buckling' | 'tensionOnly';
 
 /** Disclosure level of one capability entry. */
 export type SupportLevel = 'supported' | 'unsupported';
@@ -294,6 +294,43 @@ export interface Solution {
     readonly maxDisplacement: NodeDisplacement;
     readonly maxAxialForce: MaxAxialForce;
     readonly maxMoment: MaxMoment;
+}
+
+/** Active state of one tension-only truss in a tension-only solution. */
+export interface TensionOnlyElement {
+    readonly id: string;
+    /** `true` when the cable contributed stiffness in the final active set. */
+    readonly active: boolean;
+    /** Axial force in the final solution; zero for a slack member. */
+    readonly axialForce: number;
+}
+
+/**
+ * Result of a tension-only (cable) analysis.
+ *
+ * The active-set iteration deactivates compressed tension-only trusses and
+ * re-solves the remaining structure. `iterations` counts static solves;
+ * `converged` is `false` when the active set still changed at the iteration
+ * limit.
+ */
+export interface TensionOnlySolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly iterations: number;
+    readonly converged: boolean;
+    readonly solution: Solution;
+    readonly elements: readonly TensionOnlyElement[];
+}
+
+/** Options of `tensionOnly()`. */
+export interface TensionOnlyOptions {
+    /** Maximum number of active-set solves; defaults to 20. */
+    readonly iterations?: number;
+    /** Relative axial-force threshold below which a cable is slack; defaults to `1e-9`. */
+    readonly tolerance?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
 }
 
 /** Internal force result at one station along an element. */
@@ -1048,6 +1085,11 @@ export interface ElementAddRequest {
      * depth; the gradient produces equivalent end moments.
      */
     readonly temperatureGradient?: number;
+    /**
+     * Marks a truss member as tension-only (a cable). The tension-only analysis
+     * removes members that carry compression. Only valid for `truss` elements.
+     */
+    readonly tensionOnly?: boolean;
 }
 
 /** Bending-moment release (hinge) at the ends of a two-dimensional beam. */
@@ -1063,6 +1105,12 @@ export interface ElementReleaseRequest {
     readonly id: string;
     readonly start?: boolean;
     readonly end?: boolean;
+}
+
+/** Request of `setElementTensionOnly()`. */
+export interface ElementTensionOnlyRequest {
+    readonly id: string;
+    readonly tensionOnly: boolean;
 }
 
 /**
@@ -1152,8 +1200,12 @@ export interface GravitySetRequest {
 export interface SolveOptions {
     /** When given, the JSON report is written atomically to this path. */
     readonly out?: string;
-    /** `static` (default), `modal` or `buckling`. */
+    /** `static` (default), `modal`, `buckling` or `tensionOnly`. */
     readonly analysis?: Analysis;
     /** Number of modes for modal or buckling analysis; defaults to 5. */
     readonly modes?: number;
+    /** Maximum active-set solves for `tensionOnly`; defaults to 20. */
+    readonly iterations?: number;
+    /** Relative slack threshold for `tensionOnly`; defaults to `1e-9`. */
+    readonly tolerance?: number;
 }

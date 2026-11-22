@@ -26,6 +26,7 @@ import type {
     ElementAddRequest,
     ElementReleaseRequest,
     ElementResult,
+    ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
     ExportReport,
@@ -66,6 +67,8 @@ import type {
     SupportAddRequest,
     SupportReaction,
     SystemMatrices,
+    TensionOnlyOptions,
+    TensionOnlySolution,
     ValidationReport,
 } from './types.js';
 
@@ -179,6 +182,13 @@ export function elementRelease(path: string, request: ElementReleaseRequest): Do
     return decode<DocumentSummary>(() => binding('element.release').element_release(path, JSON.stringify(request)));
 }
 
+/** Sets or clears the tension-only (cable) flag of a truss element. */
+export function elementTensionOnly(path: string, request: ElementTensionOnlyRequest): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        binding('element.tensionOnly').element_tension_only(path, JSON.stringify(request)),
+    );
+}
+
 /** Replaces the global material and returns the updated summary. */
 export function materialSet(path: string, request: MaterialSetRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('material.set').material_set(path, JSON.stringify(request)));
@@ -237,14 +247,42 @@ export function solve(path: string, options?: SolveOptions & { analysis?: 'stati
 export function solve(path: string, options: SolveOptions & { analysis: 'modal' }): ModalSolution;
 /** Solves a document for `options.modes` linear buckling load factors. */
 export function solve(path: string, options: SolveOptions & { analysis: 'buckling' }): BucklingSolution;
+/** Solves a document with tension-only (cable) truss members. */
+export function solve(path: string, options: SolveOptions & { analysis: 'tensionOnly' }): TensionOnlySolution;
 /** Solves a document, optionally writing the JSON report to `options.out`. */
-export function solve(path: string, options: SolveOptions = {}): Solution | ModalSolution | BucklingSolution {
+export function solve(
+    path: string,
+    options: SolveOptions = {},
+): Solution | ModalSolution | BucklingSolution | TensionOnlySolution {
     const request =
-        options.out === undefined && options.analysis === undefined && options.modes === undefined
+        options.out === undefined &&
+        options.analysis === undefined &&
+        options.modes === undefined &&
+        options.iterations === undefined &&
+        options.tolerance === undefined
             ? undefined
-            : JSON.stringify({ out: options.out, analysis: options.analysis, modes: options.modes });
-    return decode<Solution | ModalSolution | BucklingSolution>(() =>
+            : JSON.stringify({
+                  out: options.out,
+                  analysis: options.analysis,
+                  modes: options.modes,
+                  iterations: options.iterations,
+                  tolerance: options.tolerance,
+              });
+    return decode<Solution | ModalSolution | BucklingSolution | TensionOnlySolution>(() =>
         request === undefined ? binding('solve').solve(path) : binding('solve').solve(path, request),
+    );
+}
+
+/** Solves a model with tension-only (cable) truss members. */
+export function tensionOnly(path: string, options: TensionOnlyOptions = {}): TensionOnlySolution {
+    const request =
+        options.iterations === undefined && options.tolerance === undefined && options.out === undefined
+            ? undefined
+            : JSON.stringify({ iterations: options.iterations, tolerance: options.tolerance, out: options.out });
+    return decode<TensionOnlySolution>(() =>
+        request === undefined
+            ? binding('tension.only').tension_only(path)
+            : binding('tension.only').tension_only(path, request),
     );
 }
 

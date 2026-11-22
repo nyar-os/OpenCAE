@@ -189,6 +189,7 @@ fn validation_reports_required_error_codes() {
         temperature: None,
         temperature_gradient: None,
         release: None,
+        tension_only: false,
     });
     assert!(duplicate_element.validate().iter().any(|issue| issue.code == "element/duplicate"));
 

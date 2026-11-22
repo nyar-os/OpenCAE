@@ -425,6 +425,15 @@ impl Model {
                     ));
                 }
             }
+            if element.tension_only && element.kind != ElementKind::Truss {
+                report.push(check_error(
+                    "element/tension-only-requires-truss",
+                    format!(
+                        "element `{}` is a beam element and cannot be tension-only; the tension-only flag is limited to truss elements",
+                        element.id
+                    ),
+                ));
+            }
         }
 
         let rotation_nodes = rotation_nodes(self);

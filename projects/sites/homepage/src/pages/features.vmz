@@ -140,6 +140,17 @@
                 </article>
                 <article class="feature">
                     <span class="chip chip--available">available</span>
+                    <h3>Tension-only cables</h3>
+                    <p>
+                        Truss members marked <code>tensionOnly</code> form cables.
+                        An active-set iteration removes compressed members,
+                        reassembles stiffness, self-weight and thermal loads, and
+                        reports iterations, each cable's state and a mechanism when
+                        the slack topology cannot carry the load.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
                     <h3>Results</h3>
                     <p>
                         Reactions with a force-equilibrium check, sampled N/V/M
@@ -209,7 +220,8 @@
             <p>
                 The capability matrix reports 2D truss, 3D truss, 2D beam, modal,
                 buckling, response spectrum, frequency response, construction
-                stages, geometric nonlinear truss, prescribed displacements,
+                stages, geometric nonlinear truss, tension-only cables,
+                prescribed displacements,
                 end releases, temperature actions, partial-span loads, elastic and
                 inclined supports, matrix export and CSV/VTK/Markdown/HTML export
                 as supported. It reports 3D beam, 3D frame, shell and solid
@@ -242,6 +254,7 @@
                         <li>Rigid, spring, inclined and prescribed supports</li>
                         <li>Modal, buckling, spectrum, harmonic and staged analysis</li>
                         <li>Geometric-nonlinear truss iteration</li>
+                        <li>Tension-only cable active-set iteration</li>
                         <li>Reactions, N/V/M, stresses, deflections, nodal stresses</li>
                         <li>Parametric section and material library</li>
                         <li>CSV, VTK, Markdown and HTML export</li>

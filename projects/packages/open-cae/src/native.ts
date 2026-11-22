@@ -27,6 +27,8 @@ export interface NativeBinding {
     element_update(path: string, requestJson: string): string;
     element_remove(path: string, requestJson: string): string;
     element_release(path: string, requestJson: string): string;
+    element_tension_only(path: string, requestJson: string): string;
+    tension_only(path: string, requestJson?: string): string;
     material_set(path: string, requestJson: string): string;
     material_preset(path: string, requestJson: string): string;
     library(requestJson?: string): string;

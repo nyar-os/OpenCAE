@@ -97,6 +97,12 @@ pub const NONLINEAR_REPORT_VERSION: u32 = 1;
 /// Format tag of the geometric-nonlinear JSON report.
 pub const NONLINEAR_REPORT_FORMAT: &str = "open-cae-nonlinear-report";
 
+/// Version of the JSON report produced by [`solve_tension_only`].
+pub const TENSION_ONLY_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the tension-only JSON report.
+pub const TENSION_ONLY_REPORT_FORMAT: &str = "open-cae-tension-only-report";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -566,6 +572,44 @@ pub struct NonlinearSolution {
     pub nodes: Vec<NodeDisplacement>,
     /// Nodal displacement with the largest magnitude.
     pub max_displacement: NodeDisplacement,
+}
+
+/// Active state of one tension-only truss in [`TensionOnlySolution`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TensionOnlyElement {
+    /// Element identifier.
+    pub id: String,
+    /// `true` when the member contributed stiffness and loads in the final
+    /// active set; `false` when it was slack and removed.
+    pub active: bool,
+    /// Axial force of the member in the final solution (zero when slack).
+    pub axial_force: f64,
+}
+
+/// Result of [`solve_tension_only`].
+///
+/// The report wraps the final static [`Solution`] and lists the active state of
+/// every tension-only member. `iterations` counts the static solves performed;
+/// `converged` is `false` when the active set was still changing after the
+/// requested maximum number of iterations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TensionOnlySolution {
+    /// Report format tag, always `open-cae-tension-only-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Number of static solves performed by the active-set iteration.
+    pub iterations: usize,
+    /// `true` when the active set reached a stable state.
+    pub converged: bool,
+    /// Final static solution with the accepted active set.
+    pub solution: Solution,
+    /// Active state of every tension-only member, in model element order.
+    pub elements: Vec<TensionOnlyElement>,
 }
 
 /// One linear buckling mode.
@@ -1120,6 +1164,9 @@ struct AssemblyElement {
     length: f64,
     youngs_modulus: f64,
     area: f64,
+    /// `false` for a slack tension-only member excluded from stiffness and
+    /// loads while still appearing in the result list.
+    active: bool,
     /// Global degree of freedom of every local element degree of freedom.
     ///
     /// `None` marks a released beam rotation that is condensed out and has no
@@ -1327,6 +1374,11 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
         return Err(CaeError::new(issue.code, issue.message));
     }
     let system = assemble(model)?;
+    solve_assembled(model, system)
+}
+
+/// Solves an already assembled system and builds the static result report.
+fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> {
     let size = system.layout.size;
     let free: Vec<usize> = (0..size).filter(|&dof| !constrained(&system, dof)).collect();
     let free_count = free.len();
@@ -1391,6 +1443,21 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
     let mut elements = Vec::with_capacity(system.elements.len());
     let mut strain_energy = 0.0;
     for element in &system.elements {
+        if !element.active {
+            elements.push(ElementResult {
+                id: element.id.clone(),
+                from: model.nodes[element.from].id.clone(),
+                to: model.nodes[element.to].id.clone(),
+                kind: element.kind,
+                length: element.length,
+                axial_force: 0.0,
+                stress: 0.0,
+                strain: 0.0,
+                end_forces: EndForces { n1: 0.0, v1: 0.0, m1: 0.0, n2: 0.0, v2: 0.0, m2: 0.0 },
+                max_abs_moment: 0.0,
+            });
+            continue;
+        }
         let local_displacement: Vec<f64> =
             element.displacement_dofs.iter().map(|slot| slot.map(|dof| displacement[dof]).unwrap_or(0.0)).collect();
         let (axial_force, end_forces, energy) = match &element.model {
@@ -1488,6 +1555,83 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
         max_axial_force,
         max_moment,
     })
+}
+
+/// Solves a linear-static model with tension-only (cable) truss members.
+///
+/// The analysis starts with every member active. It repeatedly solves the
+/// assembled static system and deactivates each tension-only member that
+/// carries compression (an axial force below `-tolerance × the largest absolute
+/// axial force`), then reassembles the stiffness, self-weight and thermal loads
+/// without those members. The loop stops when the active set no longer changes,
+/// or after `max_iterations` solves, in which case `converged` is `false`.
+///
+/// Slack members remain in the result list with zero axial force. A model that
+/// loses stability when cables go slack fails with `model/mechanism`, which is
+/// the same mechanism check as the ordinary static solver. Only truss elements
+/// can be tension-only; validation rejects the flag on beams.
+pub fn solve_tension_only(
+    model: &Model,
+    max_iterations: usize,
+    tolerance: f64,
+) -> Result<TensionOnlySolution, CaeError> {
+    if max_iterations == 0 {
+        return Err(CaeError::new("analysis/invalid-options", "tension-only analysis requires at least one iteration"));
+    }
+    if !tolerance.is_finite() || tolerance < 0.0 {
+        return Err(CaeError::new(
+            "analysis/invalid-options",
+            format!("tension-only tolerance must be finite and non-negative (currently {tolerance})"),
+        ));
+    }
+    if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
+        return Err(CaeError::new(issue.code, issue.message));
+    }
+    let mut active = vec![true; model.elements.len()];
+    let mut iterations = 0;
+    loop {
+        iterations += 1;
+        let system = assemble_with_active(model, Some(&active))?;
+        let solution = solve_assembled(model, system)?;
+        let scale = solution
+            .elements
+            .iter()
+            .map(|element| element.axial_force.abs())
+            .fold(0.0_f64, f64::max);
+        let mut changed = false;
+        for (index, element) in model.elements.iter().enumerate() {
+            if !element.tension_only || !active[index] {
+                continue;
+            }
+            let axial_force = solution.elements[index].axial_force;
+            if scale > 0.0 && axial_force < -tolerance * scale {
+                active[index] = false;
+                changed = true;
+            }
+        }
+        if !changed || iterations >= max_iterations {
+            let elements = model
+                .elements
+                .iter()
+                .enumerate()
+                .filter(|(_, element)| element.tension_only)
+                .map(|(index, element)| TensionOnlyElement {
+                    id: element.id.clone(),
+                    active: active[index],
+                    axial_force: if active[index] { solution.elements[index].axial_force } else { 0.0 },
+                })
+                .collect();
+            return Ok(TensionOnlySolution {
+                format: TENSION_ONLY_REPORT_FORMAT.to_string(),
+                version: TENSION_ONLY_REPORT_VERSION,
+                units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+                iterations,
+                converged: !changed,
+                solution,
+                elements,
+            });
+        }
+    }
 }
 
 /// Exports the assembled global stiffness and lumped mass matrices.
@@ -3430,6 +3574,15 @@ fn constrained(system: &System, dof: usize) -> bool {
 }
 
 fn assemble(model: &Model) -> Result<System, CaeError> {
+    assemble_with_active(model, None)
+}
+
+/// Assembles the system with an optional element activity mask.
+///
+/// An inactive element contributes no stiffness, no self-weight and no thermal
+/// load but is still reported with zero forces. Only the tension-only iteration
+/// passes a mask; every other caller keeps every element active.
+fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Result<System, CaeError> {
     let layout = build_layout(model);
     let size = layout.size;
     let index: HashMap<&str, usize> =
@@ -3449,7 +3602,8 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
     }
     let translation_components = if model.dimension == 3 { 3 } else { 2 };
 
-    for element in &model.elements {
+    for (element_index, element) in model.elements.iter().enumerate() {
+        let element_active = active_elements.is_none_or(|mask| mask[element_index]);
         let from = *index.get(element.from.as_str()).ok_or_else(|| {
             CaeError::new(
                 "element/unknown-node",
@@ -3663,6 +3817,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     length,
                     youngs_modulus,
                     area,
+                    active: true,
                     displacement_dofs,
                     model: ElementModel::Beam(Box::new(BeamLocal {
                         transform,
@@ -3696,19 +3851,21 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     }
                 }
                 let active: Vec<usize> = displacement_dofs.iter().map(|slot| slot.expect("truss degree of freedom")).collect();
-                for row in 0..2 * translation_components {
-                    let row_end = row / translation_components;
-                    for column in 0..2 * translation_components {
-                        let column_end = column / translation_components;
-                        let sign = if row_end == column_end { 1.0 } else { -1.0 };
-                        let value = sign
-                            * direction[row % translation_components]
-                            * direction[column % translation_components]
-                            * axial_stiffness;
-                        stiffness[active[row] * size + active[column]] += value;
+                if element_active {
+                    for row in 0..2 * translation_components {
+                        let row_end = row / translation_components;
+                        for column in 0..2 * translation_components {
+                            let column_end = column / translation_components;
+                            let sign = if row_end == column_end { 1.0 } else { -1.0 };
+                            let value = sign
+                                * direction[row % translation_components]
+                                * direction[column % translation_components]
+                                * axial_stiffness;
+                            stiffness[active[row] * size + active[column]] += value;
+                        }
                     }
                 }
-                if let Some(gravity) = gravity {
+                if let Some(gravity) = gravity.filter(|_| element_active) {
                     let total = [
                         density * area * length * gravity[0],
                         density * area * length * gravity[1],
@@ -3720,7 +3877,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                         }
                     }
                 }
-                if thermal != 0.0 {
+                if element_active && thermal != 0.0 {
                     for component in 0..translation_components {
                         let value = thermal * direction[component];
                         forces[layout.dof(from * layout.slots + component)?] -= value;
@@ -3735,6 +3892,7 @@ fn assemble(model: &Model) -> Result<System, CaeError> {
                     length,
                     youngs_modulus,
                     area,
+                    active: element_active,
                     displacement_dofs,
                     model: ElementModel::Truss { direction, axial_stiffness, components: translation_components, thermal },
                 });

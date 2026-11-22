@@ -240,9 +240,10 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let temperature_gradient = number_field(&request, "temperatureGradient")?;
     let distributed_load_from = number_field(&request, "distributedLoadFrom")?;
     let distributed_load_to = number_field(&request, "distributedLoadTo")?;
+    let tension_only = request.get("tensionOnly").and_then(Value::as_bool).unwrap_or(false);
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary = session
+    let mut summary = session
         .add_element_thermal(
             &id,
             &from,
@@ -270,6 +271,9 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
             }
         };
         session.set_element_load_span(&id, span).map_err(fail)?;
+    }
+    if tension_only {
+        summary = session.set_element_tension_only(&id, true).map_err(fail)?;
     }
     respond(&ctx, &summary)
 }
@@ -306,6 +310,21 @@ fn element_release(ctx: CallContext) -> Result<JsValue> {
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session.set_element_release(&id, release).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Sets or clears the tension-only (cable) flag of a truss element.
+///
+/// The request accepts a required `id` and `tensionOnly` boolean.
+#[function]
+fn element_tension_only(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let tension_only = boolean_field(&request, "tensionOnly")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_element_tension_only(&id, tension_only).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -602,8 +621,10 @@ fn validate(ctx: CallContext) -> Result<JsValue> {
 
 /// Solves a document, optionally writing the JSON report to `out`.
 ///
-/// `analysis` is `"static"` (default), `"modal"` or `"buckling"`; modal and
-/// buckling requests honour `modes` (default 5).
+/// `analysis` is `"static"` (default), `"modal"`, `"buckling"` or
+/// `"tensionOnly"`; modal and buckling requests honour `modes` (default 5) and
+/// tension-only requests honour `iterations` (default 20) and `tolerance`
+/// (default `1e-9`).
 #[function]
 fn solve(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -611,6 +632,8 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
     let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
     let analysis = request.as_ref().and_then(|request| request.get("analysis")).and_then(Value::as_str);
     let modes = request.as_ref().and_then(|request| request.get("modes")).and_then(Value::as_u64);
+    let iterations = request.as_ref().and_then(|request| request.get("iterations")).and_then(Value::as_u64);
+    let tolerance = request.as_ref().and_then(|request| request.get("tolerance")).and_then(Value::as_f64);
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     match analysis.unwrap_or("static") {
@@ -630,7 +653,15 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
             let buckling = session.solve_buckling(modes, out.map(Path::new)).map_err(fail)?;
             respond(&ctx, &buckling)
         }
-        other => Err(argument_error(&format!("unsupported analysis `{other}`; use `static`, `modal` or `buckling`"))),
+        "tensionOnly" | "tension-only" => {
+            let iterations = usize::try_from(iterations.unwrap_or(20))
+                .map_err(|_| argument_error("`iterations` must be a positive integer"))?;
+            let result = session.tension_only(iterations, tolerance.unwrap_or(1e-9), out.map(Path::new)).map_err(fail)?;
+            respond(&ctx, &result)
+        }
+        other => {
+            Err(argument_error(&format!("unsupported analysis `{other}`; use `static`, `modal`, `buckling` or `tensionOnly`")))
+        }
     }
 }
 
@@ -918,6 +949,30 @@ fn geometric_nonlinear(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Solves a model with tension-only (cable) truss members.
+///
+/// The request accepts optional `iterations` (default 20), `tolerance`
+/// (default `1e-9`) and an optional `out` path for the JSON report.
+#[function]
+fn tension_only(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let number = |name: &str, default: f64| -> Result<f64> {
+        match request.as_ref().and_then(|request| request.get(name)) {
+            None | Some(Value::Null) => Ok(default),
+            Some(value) => value.as_f64().ok_or_else(|| argument_error(&format!("`{name}` must be a number"))),
+        }
+    };
+    let iterations = usize::try_from(number("iterations", 20.0)? as u64)
+        .map_err(|_| argument_error("`iterations` must be a positive integer"))?;
+    let tolerance = number("tolerance", 1e-9)?;
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.tension_only(iterations, tolerance, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Exports a solved document as `csv`, `vtk` or `md`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
@@ -955,6 +1010,7 @@ register_module![
     element_update,
     element_remove,
     element_release,
+    element_tension_only,
     material_set,
     material_preset,
     library,
@@ -984,6 +1040,7 @@ register_module![
     frequency_response,
     construction_stages,
     geometric_nonlinear,
+    tension_only,
     export,
     report
 ];

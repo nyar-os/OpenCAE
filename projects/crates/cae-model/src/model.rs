@@ -363,6 +363,19 @@ pub struct Element {
     /// end moments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<EndRelease>,
+    /// Marks a truss member as tension-only (a cable).
+    ///
+    /// The tension-only analysis starts with every member active and
+    /// deactivates this member whenever it carries compression, reassembling
+    /// the stiffness and loads without it until the active set is stable. The
+    /// flag is only valid on truss elements; beams are rejected.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub tension_only: bool,
+}
+
+/// Returns `true` when a boolean flag is `false`, so it is omitted from JSON.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Enforced (prescribed) values of the constrained degrees of freedom of a
@@ -866,6 +879,7 @@ impl Model {
             temperature: None,
             temperature_gradient: None,
             release: None,
+            tension_only: false,
         });
         self.bump_revision();
         Ok(())
@@ -1121,6 +1135,29 @@ impl Model {
             ));
         }
         element.release = release;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the tension-only (cable) flag of an existing truss.
+    ///
+    /// A beam element is rejected with `element/tension-only-requires-truss`
+    /// and an unknown identifier with `element/unknown-id`.
+    pub fn set_element_tension_only(&mut self, id: &str, tension_only: bool) -> Result<(), CaeError> {
+        let element = self
+            .elements
+            .iter_mut()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        if element.kind != ElementKind::Truss && tension_only {
+            return Err(CaeError::new(
+                "element/tension-only-requires-truss",
+                format!(
+                    "element `{id}` is a beam element and cannot be tension-only; the tension-only flag is limited to truss elements"
+                ),
+            ));
+        }
+        element.tension_only = tension_only;
         self.bump_revision();
         Ok(())
     }

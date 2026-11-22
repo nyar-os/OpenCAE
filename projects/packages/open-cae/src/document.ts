@@ -26,6 +26,7 @@ import type {
     ElementAddRequest,
     ElementReleaseRequest,
     ElementResult,
+    ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
     ExportReport,
@@ -63,6 +64,8 @@ import type {
     SupportAddRequest,
     SupportReaction,
     SystemMatrices,
+    TensionOnlyOptions,
+    TensionOnlySolution,
     Units,
     ValidationReport,
 } from './types.js';
@@ -210,6 +213,12 @@ export class CaeDocument {
         return this.adopt(service.elementRelease(this.path, request));
     }
 
+    /** Sets or clears the tension-only (cable) flag of a truss element. */
+    setElementTensionOnly(request: ElementTensionOnlyRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.elementTensionOnly(this.path, request));
+    }
+
     /** Replaces the global material and saves the file. */
     setMaterial(request: MaterialSetRequest): DocumentSummary {
         this.assertOpen();
@@ -264,8 +273,10 @@ export class CaeDocument {
     solve(options: SolveOptions & { analysis: 'modal' }): ModalSolution;
     /** Solves the document for `options.modes` linear buckling load factors. */
     solve(options: SolveOptions & { analysis: 'buckling' }): BucklingSolution;
+    /** Solves the document with tension-only (cable) truss members. */
+    solve(options: SolveOptions & { analysis: 'tensionOnly' }): TensionOnlySolution;
     /** Solves the document, optionally writing the JSON report to `out`. */
-    solve(options: SolveOptions = {}): Solution | ModalSolution | BucklingSolution {
+    solve(options: SolveOptions = {}): Solution | ModalSolution | BucklingSolution | TensionOnlySolution {
         this.assertOpen();
         if (options.analysis === 'modal') {
             return service.solve(this.path, { ...options, analysis: 'modal' });
@@ -273,7 +284,16 @@ export class CaeDocument {
         if (options.analysis === 'buckling') {
             return service.solve(this.path, { ...options, analysis: 'buckling' });
         }
+        if (options.analysis === 'tensionOnly') {
+            return service.solve(this.path, { ...options, analysis: 'tensionOnly' });
+        }
         return service.solve(this.path, options as SolveOptions & { analysis?: 'static' });
+    }
+
+    /** Solves the document with tension-only (cable) truss members. */
+    tensionOnly(options: TensionOnlyOptions = {}): TensionOnlySolution {
+        this.assertOpen();
+        return service.tensionOnly(this.path, options);
     }
 
     /** Adds or replaces a linear load combination and saves the file. */

@@ -215,6 +215,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return modalCommand(args.slice(1));
         case 'buckling':
             return bucklingCommand(args.slice(1));
+        case 'tension-only':
+            return tensionOnlyCommand(args.slice(1));
         case 'forces':
             return forcesCommand(args.slice(1));
         case 'reactions':
@@ -433,12 +435,12 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     const parsed = parse(
         args,
         ['--id', '--from', '--to', '--E', '--A', '--kind', '--I', '--w', '--w2', '--dt', '--dt-grad', '--w-from', '--w-to'],
-        [],
+        ['--tension-only'],
     );
     const file = positional(
         parsed,
         0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>]',
+        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--tension-only]',
     );
     const id = required(parsed, '--id');
     const from = required(parsed, '--from');
@@ -472,6 +474,7 @@ async function elementAdd(args: readonly string[]): Promise<number> {
             distributedLoadTo,
             temperature,
             temperatureGradient,
+            tensionOnly: parsed.flags.has('--tension-only') ? true : undefined,
         });
         console.log(message('elementAdded', { id, revision: String(summary.revision) }));
         return 0;
@@ -509,16 +512,19 @@ async function elementCommand(args: readonly string[]): Promise<number> {
     if (action === 'release') {
         return elementRelease(args.slice(1));
     }
+    if (action === 'tension-only') {
+        return elementTensionOnly(args.slice(1));
+    }
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'element',
-            expected: 'add, update, remove, forces or release',
+            expected: 'add, update, remove, forces, release or tension-only',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'element',
         action,
-        expected: 'add, update, remove, forces or release',
+        expected: 'add, update, remove, forces, release or tension-only',
     });
 }
 
@@ -535,6 +541,25 @@ async function elementRelease(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const summary = document.setElementRelease({ id, start, end });
         console.log(message('elementReleased', { id, start: String(start), end: String(end), revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function elementTensionOnly(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id'], ['--clear']);
+    const file = positional(parsed, 0, 'element tension-only <file> --id <id> [--clear]');
+    const id = required(parsed, '--id');
+    const tensionOnly = !parsed.flags.has('--clear');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.setElementTensionOnly({ id, tensionOnly });
+        console.log(
+            message('elementTensionOnly', {
+                id,
+                tensionOnly: String(tensionOnly),
+                revision: String(summary.revision),
+            }),
+        );
         return 0;
     });
 }
@@ -1059,6 +1084,8 @@ function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
             break;
         case 'modal':
         case 'buckling':
+        case 'tensionOnly':
+        case 'tension-only':
             break;
         case 'nonlinear':
             throw new NotImplementedError('nonlinear analysis');
@@ -1101,12 +1128,28 @@ function modesOption(parsed: Parsed): number {
     return modes;
 }
 
+function iterationsOption(parsed: Parsed): number | undefined {
+    const raw = parsed.options.get('--iterations');
+    if (raw === undefined) {
+        return undefined;
+    }
+    const iterations = Number(raw);
+    if (!Number.isInteger(iterations) || iterations < 1) {
+        throw failure('cli/invalid-number', 'invalidIterations', { value: raw });
+    }
+    return iterations;
+}
+
 async function solveCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--out', '--analysis', '--element', '--dimension', '--modes'], []);
+    const parsed = parse(
+        args,
+        ['--out', '--analysis', '--element', '--dimension', '--modes', '--iterations', '--tolerance'],
+        [],
+    );
     const file = positional(
         parsed,
         0,
-        'solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N] [--element truss|beam] [--dimension 2|3]',
+        'solve <file> [--out report.json] [--analysis static|modal|buckling|tension-only] [--modes N] [--iterations N] [--tolerance t] [--element truss|beam] [--dimension 2|3]',
     );
     return withSession(async (session) => {
         const document = await openDocument(session, file);
@@ -1118,9 +1161,19 @@ async function solveCommand(args: readonly string[]): Promise<number> {
         } else if (analysis === 'buckling') {
             const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out });
             console.log(JSON.stringify(result, null, 2));
+        } else if (analysis === 'tensionOnly') {
+            const result = document.tensionOnly({
+                iterations: iterationsOption(parsed),
+                tolerance: number(parsed, '--tolerance'),
+                out,
+            });
+            console.log(JSON.stringify(result, null, 2));
         } else {
             if (parsed.options.has('--modes')) {
                 throw failure('cli/invalid-option', 'modesRequireModal');
+            }
+            if (parsed.options.has('--iterations') || parsed.options.has('--tolerance')) {
+                throw failure('cli/invalid-option', 'tensionOnlyOptionsRequireAnalysis');
             }
             const result = document.solve({ out });
             console.log(JSON.stringify(result, null, 2));
@@ -1146,6 +1199,25 @@ async function bucklingCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function tensionOnlyCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--iterations', '--tolerance', '--out'], []);
+    const file = positional(
+        parsed,
+        0,
+        'tension-only <file> [--iterations N] [--tolerance t] [--out report.json]',
+    );
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.tensionOnly({
+            iterations: iterationsOption(parsed),
+            tolerance: number(parsed, '--tolerance'),
+            out: parsed.options.get('--out'),
+        });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });
