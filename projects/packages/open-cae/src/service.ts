@@ -406,7 +406,7 @@ export function loadCases(path: string, options: LoadCaseOptions = {}): LoadCase
     );
 }
 
-/** Solves a response-spectrum analysis by modal superposition (SRSS). */
+/** Solves a response-spectrum analysis by modal superposition (SRSS or CQC). */
 export function responseSpectrum(path: string, options: ResponseSpectrumOptions): ResponseSpectrumSolution {
     if (!Array.isArray(options.spectrum) || options.spectrum.length === 0) {
         throw new OpenCAEError('session/argument-invalid', '`spectrum` must contain at least one point', {
@@ -419,6 +419,8 @@ export function responseSpectrum(path: string, options: ResponseSpectrumOptions)
             JSON.stringify({
                 modes: options.modes,
                 axis: options.axis,
+                combination: options.combination,
+                damping: options.damping,
                 spectrum: options.spectrum,
                 out: options.out,
             }),

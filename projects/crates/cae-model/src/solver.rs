@@ -362,6 +362,42 @@ pub struct ModalSolution {
     pub modes: Vec<Mode>,
 }
 
+/// Modal combination rule of a response-spectrum analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpectrumCombination {
+    /// Square root of the sum of the squares; the default.
+    #[default]
+    Srss,
+    /// Complete quadratic combination with the Der Kiureghian correlation
+    /// coefficient.
+    Cqc,
+}
+
+impl SpectrumCombination {
+    /// Parses the wire value `srss` or `cqc`.
+    ///
+    /// An unknown value is rejected with the stable
+    /// `spectrum/invalid-combination` code.
+    pub fn parse(value: &str) -> Result<Self, CaeError> {
+        match value {
+            "srss" => Ok(Self::Srss),
+            "cqc" => Ok(Self::Cqc),
+            other => Err(CaeError::new(
+                "spectrum/invalid-combination",
+                format!("unknown spectrum combination `{other}`; use `srss` or `cqc`"),
+            )),
+        }
+    }
+
+    /// Wire value of the combination, `srss` or `cqc`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Srss => "srss",
+            Self::Cqc => "cqc",
+        }
+    }
+}
+
 /// One point of a response spectrum.
 ///
 /// The spectrum gives the spectral acceleration of a single-degree-of-freedom
@@ -407,14 +443,19 @@ pub struct ResponseSpectrumSolution {
     pub units: String,
     /// Analysed global direction (`x`, `y` or `z`).
     pub axis: String,
+    /// Modal combination that was applied (`srss` or `cqc`).
+    pub combination: String,
+    /// Modal damping ratio used by the CQC combination; absent for SRSS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damping: Option<f64>,
     /// Requested number of modes.
     pub requested: usize,
     /// Modes used in the combination, in ascending frequency order.
     pub modes: Vec<SpectrumMode>,
-    /// Combined nodal displacements after the square-root-of-sum-of-squares
-    /// (SRSS) modal combination.
+    /// Combined nodal displacements after the modal combination. Components
+    /// are combined before the displacement magnitude is taken.
     pub nodes: Vec<NodeDisplacement>,
-    /// Nodal displacement with the largest SRSS magnitude.
+    /// Nodal displacement with the largest combined magnitude.
     pub max_displacement: NodeDisplacement,
 }
 
@@ -1830,20 +1871,31 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
 /// factors. For every mode the spectral acceleration `Sa(T)` is read from
 /// `spectrum` at its natural period, converted into the spectral displacement
 /// `Sd = Sa / ω²`, and scaled by the participation factor `Γ` in the requested
-/// global direction (`0 = x`, `1 = y`, `2 = z`). The modal displacement
-/// contributions are combined with the square-root-of-sum-of-squares (SRSS)
-/// rule, so every node receives the peak displacement magnitude of the
-/// linearly elastic response.
+/// global direction (`0 = x`, `1 = y`, `2 = z`).
+///
+/// `combination` selects how the modal nodal contributions are combined.
+/// [`SpectrumCombination::Srss`] takes the square root of the sum of the
+/// squares of every component. [`SpectrumCombination::Cqc`] uses the complete
+/// quadratic combination with the Der Kiureghian correlation coefficient
+/// `ρ_ij = 8ζ²(1+r)r^(3/2) / ((1+r²)² + 4ζ²r(1+r)²)` for `r = ω_j/ω_i` and
+/// `ρ_ij = 1` when `i = j`; the component value is
+/// `sqrt(Σ_i Σ_j ρ_ij R_i R_j)` for the modal nodal contributions `R_i`.
+/// CQC requires `damping`, one modal damping ratio in `(0, 1]`; SRSS ignores
+/// it.
 ///
 /// Spectral accelerations use the document length unit per second squared, for
 /// example `mm/s²` with millimetre documents. An empty spectrum, a negative or
 /// non-finite period, a non-finite acceleration, an unavailable direction or a
-/// mode count of zero is rejected with a stable `analysis/...` code.
+/// mode count of zero is rejected with a stable `analysis/...` code. An
+/// unknown combination reports `spectrum/invalid-combination` and a missing or
+/// out-of-range CQC damping ratio reports `spectrum/invalid-damping`.
 pub fn solve_response_spectrum(
     model: &Model,
     modes: usize,
     axis: usize,
     spectrum: &[SpectrumPoint],
+    combination: SpectrumCombination,
+    damping: Option<f64>,
 ) -> Result<ResponseSpectrumSolution, CaeError> {
     let translations = if model.dimension == 3 { 3 } else { 2 };
     if axis >= translations {
@@ -1872,11 +1924,32 @@ pub fn solve_response_spectrum(
             ));
         }
     }
+    let damping = match combination {
+        SpectrumCombination::Srss => None,
+        SpectrumCombination::Cqc => {
+            let Some(value) = damping
+            else {
+                return Err(CaeError::new(
+                    "spectrum/invalid-damping",
+                    "the CQC combination requires a modal damping ratio",
+                ));
+            };
+            if !value.is_finite() || value <= 0.0 || value > 1.0 {
+                return Err(CaeError::new(
+                    "spectrum/invalid-damping",
+                    format!("the CQC modal damping ratio must be finite and in (0, 1] (currently {value})"),
+                ));
+            }
+            Some(value)
+        }
+    };
     let mut sorted = spectrum.to_vec();
     sorted.sort_by(|left, right| left.period.partial_cmp(&right.period).unwrap_or(std::cmp::Ordering::Equal));
 
     let modal = solve_modal(model, modes)?;
     let mut accumulated = vec![[0.0_f64; 4]; model.nodes.len()];
+    let mut contributions: Vec<Vec<[f64; 4]>> = Vec::new();
+    let mut frequencies: Vec<f64> = Vec::new();
     let mut result_modes = Vec::with_capacity(modal.modes.len());
     for mode in &modal.modes {
         if !positive_finite(mode.frequency_hz) || !positive_finite(mode.eigenvalue) {
@@ -1887,11 +1960,18 @@ pub fn solve_response_spectrum(
         let spectral_displacement = spectral_acceleration / mode.eigenvalue;
         let participation_factor = mode.participation_factor[axis];
         let scale = participation_factor * spectral_displacement;
+        let mut scaled = Vec::with_capacity(mode.shape.len());
         for (node, shape) in mode.shape.iter().enumerate() {
-            accumulated[node][0] += (scale * shape.ux).powi(2);
-            accumulated[node][1] += (scale * shape.uy).powi(2);
-            accumulated[node][2] += (scale * shape.uz).powi(2);
-            accumulated[node][3] += (scale * shape.rz).powi(2);
+            let values = [scale * shape.ux, scale * shape.uy, scale * shape.uz, scale * shape.rz];
+            accumulated[node][0] += values[0].powi(2);
+            accumulated[node][1] += values[1].powi(2);
+            accumulated[node][2] += values[2].powi(2);
+            accumulated[node][3] += values[3].powi(2);
+            scaled.push(values);
+        }
+        if damping.is_some() {
+            contributions.push(scaled);
+            frequencies.push(mode.eigenvalue.sqrt());
         }
         result_modes.push(SpectrumMode {
             frequency_hz: mode.frequency_hz,
@@ -1903,15 +1983,19 @@ pub fn solve_response_spectrum(
         });
     }
 
+    let combined: Vec<[f64; 4]> = match damping {
+        Some(ratio) => combine_cqc(&frequencies, &contributions, ratio, model.nodes.len()),
+        None => accumulated.into_iter().map(|values| values.map(f64::sqrt)).collect(),
+    };
     let nodes: Vec<NodeDisplacement> = model
         .nodes
         .iter()
-        .zip(&accumulated)
+        .zip(&combined)
         .map(|(node, values)| {
-            let ux = values[0].sqrt();
-            let uy = values[1].sqrt();
-            let uz = if model.dimension == 3 { values[2].sqrt() } else { 0.0 };
-            let rz = if model.dimension == 2 { values[3].sqrt() } else { 0.0 };
+            let ux = values[0];
+            let uy = values[1];
+            let uz = if model.dimension == 3 { values[2] } else { 0.0 };
+            let rz = if model.dimension == 2 { values[3] } else { 0.0 };
             NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
         })
         .collect();
@@ -1926,11 +2010,47 @@ pub fn solve_response_spectrum(
         version: RESPONSE_SPECTRUM_REPORT_VERSION,
         units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
         axis: ["x", "y", "z"][axis].to_string(),
+        combination: combination.as_str().to_string(),
+        damping,
         requested: modes,
         modes: result_modes,
         nodes,
         max_displacement,
     })
+}
+
+/// Der Kiureghian CQC correlation coefficient between two modes.
+fn cqc_correlation(omega_i: f64, omega_j: f64, damping: f64) -> f64 {
+    if omega_i == omega_j {
+        return 1.0;
+    }
+    let r = omega_j / omega_i;
+    let numerator = 8.0 * damping * damping * (1.0 + r) * r.powf(1.5);
+    let denominator = (1.0 + r * r).powi(2) + 4.0 * damping * damping * r * (1.0 + r).powi(2);
+    if denominator <= 0.0 { 0.0 } else { numerator / denominator }
+}
+
+/// Combines per-mode nodal contribution vectors component by component.
+fn combine_cqc(frequencies: &[f64], contributions: &[Vec<[f64; 4]>], damping: f64, nodes: usize) -> Vec<[f64; 4]> {
+    let mut combined = vec![[0.0_f64; 4]; nodes];
+    for (node, values) in combined.iter_mut().enumerate() {
+        for (component, value) in values.iter_mut().enumerate() {
+            let mut sum = 0.0_f64;
+            for (i, left) in contributions.iter().enumerate() {
+                for (j, right) in contributions.iter().enumerate() {
+                    let weight = if i == j {
+                        1.0
+                    }
+                    else {
+                        cqc_correlation(frequencies[i], frequencies[j], damping)
+                    };
+                    sum += weight * left[node][component] * right[node][component];
+                }
+            }
+            *value = if sum > 0.0 { sum.sqrt() } else { 0.0 };
+        }
+    }
+    combined
 }
 
 /// Piecewise-linear spectral acceleration with constant end values.

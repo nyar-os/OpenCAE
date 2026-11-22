@@ -50,7 +50,7 @@
             "  ocae nodal-stresses <file> [--stations N] [--out report.json]",
             "  ocae load-cases <file> [--out report.json]",
             "  ocae matrices <file> [--out report.json]",
-            "  ocae spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]",
+            "  ocae spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]",
             "  ocae export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N]",
             "  ocae report <file>",
             "  ocae capabilities"
@@ -108,6 +108,7 @@
             "invalidSpectrumPoint": "spectrum point `{point}` must use the form `period:acceleration`",
             "emptySpectrum": "provide at least one `period:acceleration` spectrum point",
             "unknownSpectrumAxis": "unknown spectrum axis `{value}`; use `x`, `y` or `z`",
+            "unknownSpectrumCombination": "unknown spectrum combination `{value}`; use `srss` or `cqc`",
             "directionConflict": "`--direction` is an independent inclined-support constraint; do not combine it with `--dx`, `--dy`, `--dz`, `--rz`, a prescribed displacement or a spring",
             "invalidDirection": "`--direction` must be two comma-separated numbers `nx,ny`, not `{value}`"
         }

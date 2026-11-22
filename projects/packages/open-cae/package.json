@@ -25,6 +25,7 @@
     ],
     "scripts": {
         "build": "tsc -p tsconfig.json",
+        "test": "node --test",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "keywords": [

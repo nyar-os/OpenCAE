@@ -381,7 +381,7 @@ export class CaeDocument {
         return service.matrices(this.path, options);
     }
 
-    /** Solves a response-spectrum analysis and combines the modes with SRSS. */
+    /** Solves a response-spectrum analysis with SRSS or CQC modal combination. */
     responseSpectrum(options: ResponseSpectrumOptions): ResponseSpectrumSolution {
         this.assertOpen();
         return service.responseSpectrum(this.path, options);

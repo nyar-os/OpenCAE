@@ -35,6 +35,8 @@ export const errorCodes = [
     'analysis/invalid-stations',
     'analysis/invalid-axis',
     'analysis/invalid-spectrum',
+    'spectrum/invalid-combination',
+    'spectrum/invalid-damping',
     'buckling/non-finite',
     'combination/invalid-name',
     'combination/invalid-factor',

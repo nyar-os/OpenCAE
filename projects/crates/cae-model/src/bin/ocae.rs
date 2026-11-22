@@ -12,8 +12,8 @@ use std::{
 };
 
 use cae_model::{
-    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumPoint, Units,
-    not_implemented, section_report,
+    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination,
+    SpectrumPoint, Units, not_implemented, section_report,
 };
 
 const USAGE: &str = "\
@@ -68,7 +68,7 @@ Usage:
   ocae nodal-stresses <file> [--stations N] [--out report.json]
   ocae load-cases <file> [--out report.json]
   ocae matrices <file> [--out report.json]
-  ocae spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]
+  ocae spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]
   ocae export <file> --format csv|vtk|md|html --out <dir|file>
   ocae report <file>
   ocae capabilities
@@ -1109,19 +1109,30 @@ fn parse_axis(value: &str) -> Result<usize, CaeError> {
 }
 
 fn spectrum_command(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--modes", "--axis", "--spectrum", "--out"], &[])?;
-    let file = positional(&parsed, 0, "spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]")?;
+    let parsed = parse(args, &["--modes", "--axis", "--spectrum", "--combination", "--damping", "--out"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]",
+    )?;
     let modes = parse_modes(&parsed)?;
     let axis = match parsed.options.get("--axis") {
         Some(value) => parse_axis(value)?,
         None => 0,
+    };
+    let combination = SpectrumCombination::parse(parsed.options.get("--combination").map_or("srss", String::as_str))?;
+    let damping = match parsed.options.get("--damping") {
+        Some(value) => Some(value.parse::<f64>().map_err(|_| {
+            CaeError::new("cli/invalid-number", format!("value `{value}` of `--damping` is not a number"))
+        })?),
+        None => None,
     };
     let spectrum_value = required(&parsed, "--spectrum")?;
     let spectrum = parse_spectrum(spectrum_value)?;
     let out = parsed.options.get("--out").map(PathBuf::from);
     let mut session = session();
     session.open(Path::new(file))?;
-    let result = session.response_spectrum(modes, axis, &spectrum, out.as_deref())?;
+    let result = session.response_spectrum(modes, axis, &spectrum, combination, damping, out.as_deref())?;
     println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(0)
 }

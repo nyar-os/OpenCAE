@@ -15,7 +15,16 @@ import { fileURLToPath } from 'node:url';
 import type { CaeDocument } from './document.js';
 import { NotImplementedError, OpenCAEError, type OpenCAEErrorCode } from './errors.js';
 import { OpenCAE } from './open-cae.js';
-import type { Analysis, Dimension, ElementKind, ExportFormat, Section, SpectrumPoint, Units } from './types.js';
+import type {
+    Analysis,
+    Dimension,
+    ElementKind,
+    ExportFormat,
+    Section,
+    SpectrumCombination,
+    SpectrumPoint,
+    Units,
+} from './types.js';
 
 interface CliLocale {
     readonly cli: {
@@ -1351,20 +1360,32 @@ function spectrumAxisOption(parsed: Parsed): 'x' | 'y' | 'z' {
     throw failure('cli/invalid-option', 'unknownSpectrumAxis', { value: raw });
 }
 
+function spectrumCombinationOption(parsed: Parsed): SpectrumCombination {
+    const raw = parsed.options.get('--combination') ?? 'srss';
+    if (raw === 'srss' || raw === 'cqc') {
+        return raw;
+    }
+    throw failure('spectrum/invalid-combination', 'unknownSpectrumCombination', { value: raw });
+}
+
 async function spectrumCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--modes', '--axis', '--spectrum', '--out'], []);
+    const parsed = parse(args, ['--modes', '--axis', '--combination', '--damping', '--spectrum', '--out'], []);
     const file = positional(
         parsed,
         0,
-        'spectrum <file> [--modes N] [--axis x|y|z] --spectrum <T:Sa,...> [--out report.json]',
+        'spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]',
     );
     const spectrum = parseSpectrum(required(parsed, '--spectrum'));
     const axis = spectrumAxisOption(parsed);
+    const combination = spectrumCombinationOption(parsed);
+    const damping = number(parsed, '--damping');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
         const result = document.responseSpectrum({
             modes: modesOption(parsed),
             axis,
+            combination,
+            damping,
             spectrum,
             out: parsed.options.get('--out'),
         });

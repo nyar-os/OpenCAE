@@ -16,7 +16,7 @@ use std::path::Path;
 
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
-    Section, SpectrumPoint, Units, library_json, section_report,
+    Section, SpectrumCombination, SpectrumPoint, Units, library_json, section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -829,8 +829,9 @@ fn load_cases(ctx: CallContext) -> Result<JsValue> {
 /// Solves a response-spectrum analysis by modal superposition.
 ///
 /// The request accepts `spectrum` (array of `{ period, acceleration }` points),
-/// optional `modes` (default 5), `axis` (`"x"`, `"y"` or `"z"`, default `"x"`)
-/// and an optional `out` path. Modes are combined with SRSS.
+/// optional `modes` (default 5), `axis` (`"x"`, `"y"` or `"z"`, default `"x"`),
+/// `combination` (`"srss"` or `"cqc"`, default `"srss"`), `damping` (required
+/// and in `(0, 1]` for CQC) and an optional `out` path.
 #[function]
 fn response_spectrum(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -849,10 +850,14 @@ fn response_spectrum(ctx: CallContext) -> Result<JsValue> {
         "z" => 2,
         other => return Err(argument_error(&format!("`axis` must be `x`, `y` or `z`, not `{other}`"))),
     };
+    let combination = SpectrumCombination::parse(request.get("combination").and_then(Value::as_str).unwrap_or("srss"))
+        .map_err(fail)?;
+    let damping = number_field(&request, "damping")?;
     let out = request.get("out").and_then(Value::as_str);
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let result = session.response_spectrum(modes, axis, &spectrum, out.map(Path::new)).map_err(fail)?;
+    let result =
+        session.response_spectrum(modes, axis, &spectrum, combination, damping, out.map(Path::new)).map_err(fail)?;
     respond(&ctx, &result)
 }
 

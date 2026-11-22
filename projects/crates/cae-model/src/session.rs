@@ -23,10 +23,11 @@ use crate::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, ElementResult, FrequencyResponseSolution, InternalForceSolution, LoadCaseSummary, ModalSolution,
         NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary,
-        ResponseSpectrumSolution, Solution, SpectrumPoint, StressSolution, SupportReaction, SystemMatrices,
-        TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations, solve_combinations, solve_construction_stages,
-        solve_deflection, solve_frequency_response, solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress,
-        solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only, summarize_load_cases,
+        ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint, StressSolution, SupportReaction,
+        SystemMatrices, TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations, solve_combinations,
+        solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces, solve_matrices,
+        solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only,
+        summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -967,18 +968,22 @@ impl OpenCae {
     }
 
     /// Solves a response-spectrum analysis in the global `axis` direction
-    /// (`0 = x`, `1 = y`, `2 = z`) and combines the modes with SRSS.
+    /// (`0 = x`, `1 = y`, `2 = z`) and combines the modes with `combination`.
     ///
-    /// When `out` is given the JSON report is written atomically to that path.
+    /// CQC requires `damping`, one modal damping ratio in `(0, 1]`; SRSS
+    /// ignores it. When `out` is given the JSON report is written atomically to
+    /// that path.
     pub fn response_spectrum(
         &self,
         modes: usize,
         axis: usize,
         spectrum: &[SpectrumPoint],
+        combination: SpectrumCombination,
+        damping: Option<f64>,
         out: Option<&Path>,
     ) -> Result<ResponseSpectrumSolution, CaeError> {
         let model = &self.current()?.model;
-        let result = solve_response_spectrum(model, modes, axis, spectrum)?;
+        let result = solve_response_spectrum(model, modes, axis, spectrum, combination, damping)?;
         if let Some(path) = out {
             let json = serde_json::to_string_pretty(&result).map_err(|error| {
                 CaeError::new("document/serialize", format!("cannot serialize response-spectrum result: {error}"))

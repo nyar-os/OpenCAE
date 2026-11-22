@@ -622,6 +622,9 @@ export interface SpectrumPoint {
     readonly acceleration: number;
 }
 
+/** Modal combination rule of a response-spectrum analysis. */
+export type SpectrumCombination = 'srss' | 'cqc';
+
 /** One mode of a response-spectrum analysis. */
 export interface SpectrumMode {
     readonly frequencyHz: number;
@@ -643,13 +646,17 @@ export interface ResponseSpectrumSolution {
     readonly units: string;
     /** Analysed global direction (`x`, `y` or `z`). */
     readonly axis: string;
+    /** Modal combination that was applied. */
+    readonly combination: SpectrumCombination;
+    /** Modal damping ratio used by CQC; absent for SRSS. */
+    readonly damping?: number;
     /** Requested number of modes. */
     readonly requested: number;
     /** Modes used in the combination, in ascending frequency order. */
     readonly modes: readonly SpectrumMode[];
-    /** Combined nodal displacements after the SRSS modal combination. */
+    /** Combined nodal displacements after the modal combination. */
     readonly nodes: readonly NodeDisplacement[];
-    /** Nodal displacement with the largest SRSS magnitude. */
+    /** Nodal displacement with the largest combined magnitude. */
     readonly maxDisplacement: NodeDisplacement;
 }
 
@@ -659,6 +666,13 @@ export interface ResponseSpectrumOptions {
     readonly modes?: number;
     /** Global direction of the excitation; defaults to `x`. */
     readonly axis?: 'x' | 'y' | 'z';
+    /** Modal combination rule; defaults to `srss`. */
+    readonly combination?: SpectrumCombination;
+    /**
+     * One modal damping ratio in `(0, 1]`; required by `cqc` and ignored by
+     * `srss`.
+     */
+    readonly damping?: number;
     /** Spectral acceleration points; values between points are interpolated linearly. */
     readonly spectrum: readonly SpectrumPoint[];
     /** When given, the JSON report is written atomically to this path. */
