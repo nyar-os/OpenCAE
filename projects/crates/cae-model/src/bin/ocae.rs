@@ -12,8 +12,8 @@ use std::{
 };
 
 use cae_model::{
-    CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination,
-    SpectrumPoint, Units, angle_section_report, channel_standard_section_report, ellipse_section_report,
+    CaeError, ElementKind, ElementUpdate, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section,
+    SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report, ellipse_section_report,
     i_standard_section_report, not_implemented, polygon_section_report, section_report, t_section_report,
     triangle_section_report, tube_standard_section_report, z_section_report,
 };
@@ -35,7 +35,9 @@ Usage:
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
                     [--convection <h>] [--perimeter <P>]
   ocae element update <file> --id <id> [--from <node>] [--to <node>]
-                    [--convection <h>] [--perimeter <P>]
+                    [--w <w>] [--w2 <w2>] [--w-from <s>] [--w-to <s>]
+                    [--dt <dT>] [--dt-grad <dT>] [--convection <h>] [--perimeter <P>]
+                    [--clear-load] [--clear-temperature]
   ocae element split <file> --id <id> --at <fraction>
   ocae element remove <file> --id <id>
   ocae element forces <file> --id <id>
@@ -395,35 +397,34 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn element_update(args: &[String]) -> Result<i32, CaeError> {
-    let parsed = parse(args, &["--id", "--from", "--to", "--convection", "--perimeter"], &[])?;
+    let parsed = parse(
+        args,
+        &["--id", "--from", "--to", "--w", "--w2", "--w-from", "--w-to", "--dt", "--dt-grad", "--convection", "--perimeter"],
+        &["--clear-load", "--clear-temperature"],
+    )?;
     let file = positional(
         &parsed,
         0,
-        "element update <file> --id <id> [--from <node>] [--to <node>] [--convection <h>] [--perimeter <P>]",
+        "element update <file> --id <id> [--from <node>] [--to <node>] [--w <w>] [--w2 <w2>] [--w-from <s>] [--w-to <s>] [--dt <dT>] [--dt-grad <dT>] [--convection <h>] [--perimeter <P>] [--clear-load] [--clear-temperature]",
     )?;
     let id = required(&parsed, "--id")?;
-    let from = parsed.options.get("--from").map(String::as_str);
-    let to = parsed.options.get("--to").map(String::as_str);
-    let convection = number(&parsed, "--convection")?;
-    let perimeter = number(&parsed, "--perimeter")?;
-    if from.is_none() && to.is_none() && convection.is_none() && perimeter.is_none() {
-        return Err(CaeError::new(
-            "element/degenerate",
-            "specify at least one of `--from`, `--to`, `--convection` or `--perimeter`; an empty request would silently succeed",
-        ));
-    }
+    let update = ElementUpdate {
+        from: parsed.options.get("--from").cloned(),
+        to: parsed.options.get("--to").cloned(),
+        distributed_load: number(&parsed, "--w")?,
+        distributed_load_end: number(&parsed, "--w2")?,
+        distributed_load_from: number(&parsed, "--w-from")?,
+        distributed_load_to: number(&parsed, "--w-to")?,
+        temperature: number(&parsed, "--dt")?,
+        temperature_gradient: number(&parsed, "--dt-grad")?,
+        convection: number(&parsed, "--convection")?,
+        perimeter: number(&parsed, "--perimeter")?,
+        clear_load: parsed.flags.contains("--clear-load"),
+        clear_temperature: parsed.flags.contains("--clear-temperature"),
+    };
     let mut session = session();
     session.open(Path::new(file))?;
-    if from.is_some() || to.is_some() {
-        session.update_element(id, from, to)?;
-    }
-    if convection.is_some() {
-        session.set_element_convection(id, convection)?;
-    }
-    if perimeter.is_some() {
-        session.set_element_perimeter(id, perimeter)?;
-    }
-    let summary = session.summary()?;
+    let summary = session.update_element_with(id, &update)?;
     println!("element `{id}` updated (revision {})", summary.revision);
     Ok(0)
 }

@@ -1407,8 +1407,9 @@ export interface ElementTensionOnlyRequest {
 }
 
 /**
- * Request of `updateElement()`. Only the supplied endpoints change; material,
- * loads, temperature and releases are preserved.
+ * Request of `updateElement()`. Only the named fields change; every other
+ * endpoint, material, load, temperature, release and convection value is
+ * preserved. The call causes exactly one revision.
  */
 export interface ElementUpdateRequest {
     readonly id: string;
@@ -1416,10 +1417,38 @@ export interface ElementUpdateRequest {
     readonly from?: string;
     /** New end node identifier. */
     readonly to?: string;
+    /**
+     * Distributed load per unit length at the start of the loaded segment.
+     * Supplying it without `distributedLoadEnd` sets a uniform load.
+     */
+    readonly distributedLoad?: number;
+    /**
+     * Distributed load per unit length at the end of the loaded segment.
+     * Supplying it without `distributedLoad` changes only the end intensity.
+     */
+    readonly distributedLoadEnd?: number;
+    /**
+     * Start of the loaded segment as a fraction of the element length. Supply it
+     * together with `distributedLoadTo`.
+     */
+    readonly distributedLoadFrom?: number;
+    /** End of the loaded segment as a fraction of the element length. */
+    readonly distributedLoadTo?: number;
+    /** Uniform temperature change of the member in kelvin (or °C difference). */
+    readonly temperature?: number;
+    /**
+     * Linear temperature difference between the local `+y` and `-y` extreme
+     * fibres in kelvin (or °C difference).
+     */
+    readonly temperatureGradient?: number;
     /** Surface convection coefficient `h` in `W/(m²·K)`. */
     readonly convection?: number;
     /** Exposed perimeter in the document length unit. */
     readonly perimeter?: number;
+    /** Removes the distributed load, including its end intensity and span. */
+    readonly clearLoad?: boolean;
+    /** Removes both the uniform temperature change and the gradient. */
+    readonly clearTemperature?: boolean;
 }
 
 /** Request of `splitElement()`. */

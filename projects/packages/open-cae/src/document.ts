@@ -217,8 +217,10 @@ export class CaeDocument {
     }
 
     /**
-     * Reconnects an element to new endpoint nodes and saves the file. Material,
-     * loads, temperature and releases are preserved.
+     * Updates an element in place and saves the file. Endpoints, distributed
+     * load, temperature and convection can change independently; omitted fields
+     * keep their current value. `clearLoad`/`clearTemperature` remove the
+     * respective actions. The call causes exactly one revision.
      */
     updateElement(request: ElementUpdateRequest): DocumentSummary {
         this.assertOpen();

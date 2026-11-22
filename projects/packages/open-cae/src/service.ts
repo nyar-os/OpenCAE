@@ -196,7 +196,7 @@ export function elementAdd(path: string, request: ElementAddRequest): DocumentSu
     return decode<DocumentSummary>(() => binding('element.add').element_add(path, JSON.stringify(request)));
 }
 
-/** Reconnects an existing element to new endpoints and returns the updated summary. */
+/** Updates an existing element in place and returns the updated summary. */
 export function updateElement(path: string, request: ElementUpdateRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('element.update').element_update(path, JSON.stringify(request)));
 }

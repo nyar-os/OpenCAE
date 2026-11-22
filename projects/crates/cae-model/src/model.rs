@@ -424,6 +424,47 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// Partial in-place update of an existing element.
+///
+/// Every field is optional and only the fields that are `Some` (or the clear
+/// flags, when set) change. Endpoints, material, inertia, releases,
+/// tension-only, convection, temperature and load that the request does not
+/// name keep their current value.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ElementUpdate {
+    /// New start node identifier; `None` keeps the current one.
+    pub from: Option<String>,
+    /// New end node identifier; `None` keeps the current one.
+    pub to: Option<String>,
+    /// Distributed load per unit length at the start of the loaded segment.
+    ///
+    /// Supplying it without [`ElementUpdate::distributed_load_end`] sets a
+    /// uniform load, matching `add_element_with_loads`.
+    pub distributed_load: Option<f64>,
+    /// Distributed load per unit length at the end of the loaded segment.
+    ///
+    /// Supplying it without [`ElementUpdate::distributed_load`] changes only the
+    /// end intensity of the existing load.
+    pub distributed_load_end: Option<f64>,
+    /// Start of the loaded segment as a fraction of the element length.
+    pub distributed_load_from: Option<f64>,
+    /// End of the loaded segment as a fraction of the element length.
+    pub distributed_load_to: Option<f64>,
+    /// Uniform temperature change `ΔT` of the member.
+    pub temperature: Option<f64>,
+    /// Linear temperature difference between the local `+y` and `-y` extreme
+    /// fibres.
+    pub temperature_gradient: Option<f64>,
+    /// Surface convection coefficient `h` in `W/(m²·K)`.
+    pub convection: Option<f64>,
+    /// Exposed perimeter of the member surface.
+    pub perimeter: Option<f64>,
+    /// Removes the distributed load, including its end intensity and span.
+    pub clear_load: bool,
+    /// Removes both the uniform temperature change and the gradient.
+    pub clear_temperature: bool,
+}
+
 /// Identifiers produced by [`Model::split_element`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1038,6 +1079,201 @@ impl Model {
         }
         self.elements[index].from = from;
         self.elements[index].to = to;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Applies a partial [`ElementUpdate`] to an existing element and bumps the
+    /// revision exactly once.
+    ///
+    /// Only the fields named by the request change; every other endpoint,
+    /// material, inertia, release, tension-only flag, convection, temperature
+    /// and load value is preserved. A uniform load update
+    /// (`distributed_load` without `distributed_load_end`) clears the end
+    /// intensity, `distributed_load_end` alone changes only the end value, and
+    /// `clear_load`/`clear_temperature` remove the corresponding actions
+    /// entirely.
+    ///
+    /// Conflict and argument-shape problems report `session/argument-invalid`:
+    /// an empty request, `clear_load` combined with a load value, and
+    /// `clear_temperature` combined with a temperature value. A lone
+    /// `distributed_load_from` or `distributed_load_to` reports
+    /// `element/invalid-load-span`. Other failures keep the stable codes of the
+    /// individual setters. Naming a value that equals the current one is still
+    /// an edit and bumps the revision once, matching the other setters.
+    pub fn update_element_with(&mut self, id: &str, update: &ElementUpdate) -> Result<(), CaeError> {
+        let has_load_value = update.distributed_load.is_some()
+            || update.distributed_load_end.is_some()
+            || update.distributed_load_from.is_some()
+            || update.distributed_load_to.is_some();
+        let has_temperature_value = update.temperature.is_some() || update.temperature_gradient.is_some();
+        let has_endpoint = update.from.is_some() || update.to.is_some();
+        let has_convection = update.convection.is_some() || update.perimeter.is_some();
+        if !has_endpoint
+            && !has_load_value
+            && !has_temperature_value
+            && !has_convection
+            && !update.clear_load
+            && !update.clear_temperature
+        {
+            return Err(CaeError::new(
+                "session/argument-invalid",
+                format!("element `{id}` update needs at least one of the endpoint, load, temperature or convection values"),
+            ));
+        }
+        if update.clear_load && has_load_value {
+            return Err(CaeError::new(
+                "session/argument-invalid",
+                format!("element `{id}` cannot combine `clear_load` with a distributed load value"),
+            ));
+        }
+        if update.clear_temperature && has_temperature_value {
+            return Err(CaeError::new(
+                "session/argument-invalid",
+                format!("element `{id}` cannot combine `clear_temperature` with a temperature value"),
+            ));
+        }
+        if update.distributed_load_from.is_some() != update.distributed_load_to.is_some() {
+            return Err(CaeError::new(
+                "element/invalid-load-span",
+                format!("element `{id}` needs both `distributed_load_from` and `distributed_load_to`, or neither"),
+            ));
+        }
+        let index = self
+            .elements
+            .iter()
+            .position(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        let mut element = self.elements[index].clone();
+        if has_endpoint {
+            let from = update.from.clone().unwrap_or_else(|| element.from.clone());
+            let to = update.to.clone().unwrap_or_else(|| element.to.clone());
+            if from == to {
+                return Err(CaeError::new(
+                    "element/degenerate",
+                    format!("element `{id}` must not have identical start and end nodes"),
+                ));
+            }
+            let start = self.node(&from).ok_or_else(|| {
+                CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{from}`"))
+            })?;
+            let end = self.node(&to).ok_or_else(|| {
+                CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{to}`"))
+            })?;
+            if start.x == end.x && start.y == end.y && start.z == end.z {
+                return Err(CaeError::new("element/zero-length", format!("element `{id}` has zero length")));
+            }
+            element.from = from;
+            element.to = to;
+        }
+        if update.clear_load {
+            element.distributed_load = None;
+            element.distributed_load_end = None;
+            element.distributed_load_from = None;
+            element.distributed_load_to = None;
+        }
+        else {
+            if update.distributed_load.is_some_and(|value| !value.is_finite())
+                || update.distributed_load_end.is_some_and(|value| !value.is_finite())
+            {
+                return Err(CaeError::new(
+                    "element/invalid-distributed-load",
+                    format!("distributed load w of element `{id}` must be finite"),
+                ));
+            }
+            if (update.distributed_load.is_some() || update.distributed_load_end.is_some()) && element.kind != ElementKind::Beam
+            {
+                return Err(CaeError::new(
+                    "element/distributed-load-requires-beam",
+                    format!(
+                        "element `{id}` is a truss element and cannot carry distributed load w; use a beam element instead"
+                    ),
+                ));
+            }
+            if let Some(value) = update.distributed_load {
+                element.distributed_load = Some(value);
+                element.distributed_load_end = update.distributed_load_end;
+            }
+            else if let Some(value) = update.distributed_load_end {
+                element.distributed_load_end = Some(value);
+            }
+            if let (Some(start), Some(end)) = (update.distributed_load_from, update.distributed_load_to) {
+                if !start.is_finite() || !end.is_finite() || start < 0.0 || end > 1.0 || start >= end {
+                    return Err(CaeError::new(
+                        "element/invalid-load-span",
+                        format!("load span of element `{id}` must satisfy 0 <= start < end <= 1 (currently {start}..{end})"),
+                    ));
+                }
+                if element.kind != ElementKind::Beam {
+                    return Err(CaeError::new(
+                        "element/distributed-load-requires-beam",
+                        format!("element `{id}` is a truss element and cannot carry a distributed load span"),
+                    ));
+                }
+                if element.distributed_load.is_none() {
+                    return Err(CaeError::new(
+                        "element/missing-distributed-load",
+                        format!("element `{id}` must declare a distributed load before its span can be limited"),
+                    ));
+                }
+                element.distributed_load_from = Some(start);
+                element.distributed_load_to = Some(end);
+            }
+        }
+        if update.clear_temperature {
+            element.temperature = None;
+            element.temperature_gradient = None;
+        }
+        else {
+            if update.temperature.is_some_and(|value| !value.is_finite()) {
+                return Err(CaeError::new(
+                    "element/invalid-temperature",
+                    format!("temperature change of element `{id}` must be finite"),
+                ));
+            }
+            if let Some(value) = update.temperature {
+                element.temperature = Some(value);
+            }
+            if update.temperature_gradient.is_some_and(|value| !value.is_finite()) {
+                return Err(CaeError::new(
+                    "element/invalid-temperature-gradient",
+                    format!("temperature gradient of element `{id}` must be finite"),
+                ));
+            }
+            if let Some(value) = update.temperature_gradient {
+                if element.kind != ElementKind::Beam {
+                    return Err(CaeError::new(
+                        "element/gradient-requires-beam",
+                        format!(
+                            "element `{id}` is a truss element and cannot carry a temperature gradient; use a beam element"
+                        ),
+                    ));
+                }
+                element.temperature_gradient = Some(value);
+            }
+        }
+        if update.convection.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "heat/invalid-convection",
+                format!(
+                    "convection coefficient of element `{id}` must be positive and finite (currently {:?})",
+                    update.convection
+                ),
+            ));
+        }
+        if update.perimeter.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "heat/invalid-perimeter",
+                format!("perimeter of element `{id}` must be positive and finite (currently {:?})", update.perimeter),
+            ));
+        }
+        if let Some(value) = update.convection {
+            element.convection = Some(value);
+        }
+        if let Some(value) = update.perimeter {
+            element.perimeter = Some(value);
+        }
+        self.elements[index] = element;
         self.bump_revision();
         Ok(())
     }

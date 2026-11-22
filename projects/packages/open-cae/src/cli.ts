@@ -551,20 +551,56 @@ async function elementAdd(args: readonly string[]): Promise<number> {
 }
 
 async function elementUpdate(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--from', '--to', '--convection', '--perimeter'], []);
+    const parsed = parse(
+        args,
+        [
+            '--id',
+            '--from',
+            '--to',
+            '--w',
+            '--w2',
+            '--w-from',
+            '--w-to',
+            '--dt',
+            '--dt-grad',
+            '--convection',
+            '--perimeter',
+        ],
+        ['--clear-load', '--clear-temperature'],
+    );
     const file = positional(
         parsed,
         0,
-        'element update <file> --id <id> [--from <node>] [--to <node>] [--convection <h>] [--perimeter <P>]',
+        'element update <file> --id <id> [--from <node>] [--to <node>] [--w <w>] [--w2 <w2>] [--w-from <s>] [--w-to <s>] [--dt <dT>] [--dt-grad <dT>] [--convection <h>] [--perimeter <P>] [--clear-load] [--clear-temperature]',
     );
     const id = required(parsed, '--id');
     const from = parsed.options.get('--from');
     const to = parsed.options.get('--to');
+    const distributedLoad = number(parsed, '--w');
+    const distributedLoadEnd = number(parsed, '--w2');
+    const distributedLoadFrom = number(parsed, '--w-from');
+    const distributedLoadTo = number(parsed, '--w-to');
+    const temperature = number(parsed, '--dt');
+    const temperatureGradient = number(parsed, '--dt-grad');
     const convection = number(parsed, '--convection');
     const perimeter = number(parsed, '--perimeter');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.updateElement({ id, from, to, convection, perimeter });
+        const summary = document.updateElement({
+            id,
+            from,
+            to,
+            distributedLoad,
+            distributedLoadEnd,
+            distributedLoadFrom,
+            distributedLoadTo,
+            temperature,
+            temperatureGradient,
+            convection,
+            perimeter,
+            clearLoad: parsed.flags.has('--clear-load') ? true : undefined,
+            clearTemperature: parsed.flags.has('--clear-temperature') ? true : undefined,
+        });
         console.log(message('elementUpdated', { id, revision: String(summary.revision) }));
         return 0;
     });

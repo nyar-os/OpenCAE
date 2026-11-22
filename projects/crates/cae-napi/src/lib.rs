@@ -15,8 +15,8 @@
 use std::path::Path;
 
 use cae_model::{
-    CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
-    Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
+    CaeError, ConstructionStage, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions, Material, OpenCae,
+    OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
     ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, section_report, t_section_report,
     triangle_section_report, tube_standard_section_report, z_section_report,
 };
@@ -320,34 +320,36 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
-/// Reconnects an existing element of a document and saves it.
+/// Updates an existing element of a document in place and saves it.
 ///
-/// The request accepts `id` and any of `from`, `to`, `convection` or
-/// `perimeter`; omitted endpoints keep their current node. Material, loads,
-/// temperature and releases are preserved.
+/// The request accepts `id` and any of `from`, `to`, `distributedLoad`,
+/// `distributedLoadEnd`, `distributedLoadFrom`, `distributedLoadTo`,
+/// `temperature`, `temperatureGradient`, `convection`, `perimeter`,
+/// `clearLoad` or `clearTemperature`. Omitted fields keep their current value,
+/// and the call causes exactly one revision. Conflicting clear flags report
+/// `session/argument-invalid`.
 #[function]
 fn element_update(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
     let request = object(&ctx, 1)?;
     let id = text_field(&request, "id")?;
-    let from = request.get("from").and_then(Value::as_str);
-    let to = request.get("to").and_then(Value::as_str);
-    let convection = number_field(&request, "convection")?;
-    let perimeter = number_field(&request, "perimeter")?;
-    if from.is_none() && to.is_none() && convection.is_none() && perimeter.is_none() {
-        return Err(argument_error("supply at least one of `from`, `to`, `convection` or `perimeter`"));
-    }
+    let update = ElementUpdate {
+        from: request.get("from").and_then(Value::as_str).map(str::to_string),
+        to: request.get("to").and_then(Value::as_str).map(str::to_string),
+        distributed_load: number_field(&request, "distributedLoad")?,
+        distributed_load_end: number_field(&request, "distributedLoadEnd")?,
+        distributed_load_from: number_field(&request, "distributedLoadFrom")?,
+        distributed_load_to: number_field(&request, "distributedLoadTo")?,
+        temperature: number_field(&request, "temperature")?,
+        temperature_gradient: number_field(&request, "temperatureGradient")?,
+        convection: number_field(&request, "convection")?,
+        perimeter: number_field(&request, "perimeter")?,
+        clear_load: boolean_field(&request, "clearLoad")?,
+        clear_temperature: boolean_field(&request, "clearTemperature")?,
+    };
     let mut session = OpenCae::new(OpenCaeOptions::default());
-    let mut summary = session.open(Path::new(&path)).map_err(fail)?;
-    if from.is_some() || to.is_some() {
-        summary = session.update_element(&id, from, to).map_err(fail)?;
-    }
-    if convection.is_some() {
-        summary = session.set_element_convection(&id, convection).map_err(fail)?;
-    }
-    if perimeter.is_some() {
-        summary = session.set_element_perimeter(&id, perimeter).map_err(fail)?;
-    }
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.update_element_with(&id, &update).map_err(fail)?;
     respond(&ctx, &summary)
 }
 

@@ -62,8 +62,8 @@ pub use crate::{
         tube_standard_section_report, z_section_report,
     },
     model::{
-        Element, ElementKind, ElementMaterial, ElementSplit, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
-        PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
+        Element, ElementKind, ElementMaterial, ElementSplit, ElementUpdate, EndRelease, FORMAT, Load, LoadCombination,
+        Material, Model, Node, PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
     },
     session::{
         DocumentSummary, ElementSplitReport, ExportFormat, ExportOptions, ExportReport, OpenCae, OpenCaeOptions, Report,
@@ -139,7 +139,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "heatConvection": "supported"
   },
   "edits": {
-    "elementSplit": "supported"
+    "elementSplit": "supported",
+    "elementUpdate": "supported"
   },
   "io": {
     "ocae": "supported",

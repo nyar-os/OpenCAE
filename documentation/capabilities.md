@@ -74,7 +74,12 @@ subcommands `section i`, `section tube`, `section channel`, `section angle`,
 `section t`, `section ellipse`, `section triangle` and `section z`.
 Parametric element splitting is the `edits`
 entry `elementSplit` of the capability matrix and is available at the same
-three entry points plus the CLI (`open-cae element split`).
+three entry points plus the CLI (`open-cae element split`). In-place element
+updates are the `edits` entry `elementUpdate`: `element update` can change the
+endpoints, distributed load (uniform, tapered or partial-span), uniform
+temperature change, gradient and convection data independently, leaving every
+unnamed value untouched, with `--clear-load` and `--clear-temperature` to
+remove the corresponding actions.
 
 `thermalExpansion` and `thermalGradient` cover member temperature actions and
 feed the structural solver only. `heat` is a separate, uncoupled steady-state
@@ -896,10 +901,11 @@ threshold of `1e-9`.
   independent named load patterns (separate live-load cases) are not modelled,
   so a combination cannot mix two different nodal load layouts.
 - In-place edits (`node update`, `element update`) move nodes and reconnect
-  **existing truss/beam endpoints** only: they never rebuild geometry, remesh
-  or rewire a whole network, and a move that would collapse an element to zero
-  length is rejected. Editing a node keeps every element, support and load
-  reference to it.
+  **existing truss/beam endpoints**, and `element update` can also replace the
+  distributed load, uniform temperature change, gradient and convection data of
+  one member. They never rebuild geometry, remesh or rewire a whole network, and
+  a move that would collapse an element to zero length is rejected. Editing a
+  node keeps every element, support and load reference to it.
 - `element split` inserts **one interior node** and only divides members whose
   loads can be represented exactly by two segments. Partial-span loads,
   linearly varying distributed loads and temperature gradients are rejected

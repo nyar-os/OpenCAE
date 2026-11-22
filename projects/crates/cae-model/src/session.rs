@@ -506,6 +506,16 @@ impl OpenCae {
         self.edit(|model| model.update_element_endpoints(id, from, to))
     }
 
+    /// Applies a partial [`crate::ElementUpdate`] to an existing element and
+    /// saves the document.
+    ///
+    /// Only the named endpoints, load, temperature or convection values change,
+    /// and the call bumps the revision exactly once. Conflicting clear flags and
+    /// an empty request are rejected with `session/argument-invalid`.
+    pub fn update_element_with(&mut self, id: &str, update: &crate::ElementUpdate) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.update_element_with(id, update))
+    }
+
     /// Splits an existing element at the fraction `at` of its length and saves
     /// the document.
     ///
