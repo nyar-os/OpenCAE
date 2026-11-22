@@ -1,6 +1,6 @@
 [package]
 name = "open-cae-napi"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 publish = false
 description = "Thin Node-API surface for OpenCAE"
