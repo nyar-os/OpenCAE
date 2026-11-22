@@ -4,7 +4,7 @@ Structural analysis for 2D frames and trusses that stays in plain text and repro
 
 ## 💡 What is OpenCAE?
 
-OpenCAE is a small structural-analysis engine for **planar frames, beams and trusses** and **space trusses**. You describe the model as a `.ocae` JSON document, then run linear static, modal, linear buckling or response-spectrum analysis and read the results as JSON, CSV, VTK or Markdown. The same model file and the same commands give the same numbers on every machine, which makes it useful for teaching, algorithm validation and regression checks in CI.
+OpenCAE is a small structural-analysis engine for **planar frames, beams and trusses** and **space trusses**. You describe the model as a `.ocae` JSON document, then run linear static, modal, linear buckling or response-spectrum analysis and read the results as JSON, CSV, VTK, Markdown or HTML. The same model file and the same commands give the same numbers on every machine, which makes it useful for teaching, algorithm validation and regression checks in CI.
 
 It is for axial-force systems (trusses, bracing, space trusses) and for 2D bending members (cantilevers, simply supported beams, portal frames in one plane). It is built to be explicit about what it can and cannot do.
 
