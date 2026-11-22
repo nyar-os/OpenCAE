@@ -67,6 +67,7 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | `open-cae material preset <file>` | `--preset <name> [--section <shape> ...geometry] [--area <A>] [--allowable <s>]` | Presets: `steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`. |
 | `open-cae library` | `[--units mm\|m]` | Prints presets and supported section shapes. |
 | `open-cae section properties` | `--section <shape> [...geometry] [--units mm\|m]` | Prints area, inertias, torsion constant, extreme fibre and section modulus. |
+| `open-cae section polygon` | `--points "x,y;x,y;..." [--units mm\|m]` | Prints area, centroid, `Ix`/`Iy`/`Ixy` about the centroid, polar moment `J = Ix + Iy` and radii of gyration of a closed polygon. Vertices may be clockwise or counter-clockwise and the closing vertex may be repeated. |
 
 Section shapes and their geometry flags:
 

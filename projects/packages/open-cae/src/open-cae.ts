@@ -19,6 +19,8 @@ import type {
     MaterialLibrary,
     OpenCAECapabilities,
     OpenCAEOptions,
+    PolygonPoint,
+    PolygonSectionReport,
     Section,
     SectionReport,
     Units,
@@ -84,6 +86,18 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionProperties(section, units);
+    }
+
+    /**
+     * Derived properties of a closed polygon section: area, centroid, second
+     * moments about centroidal axes, polar moment and radii of gyration.
+     * `points` are `[x, y]` pairs in `units`; the closing vertex may be omitted
+     * and either winding order is accepted.
+     */
+    async sectionPolygon(points: readonly PolygonPoint[], units: Units = this.units): Promise<PolygonSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionPolygon(points, units);
     }
 
     /** Creates an empty document at `path` and returns it. */

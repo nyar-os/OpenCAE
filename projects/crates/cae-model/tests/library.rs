@@ -5,7 +5,8 @@ use std::{
 };
 
 use cae_model::{
-    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset, section_report, solve,
+    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset,
+    polygon_section_report, section_report, solve,
 };
 
 const E: f64 = 210_000.0;
@@ -263,6 +264,100 @@ fn section_report_serialises_camel_case_and_labels_the_units() {
 fn section_report_rejects_invalid_geometry() {
     let error = section_report(Section::Rectangle { width: 0.0, height: 20.0 }, Units::Millimeter).expect_err("invalid width");
     assert_eq!(error.code, "material/invalid-section");
+}
+
+#[test]
+fn polygon_rectangle_matches_closed_form() {
+    let vertices = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)];
+    let report = polygon_section_report(&vertices, Units::Millimeter).expect("polygon rectangle");
+
+    let area = 100.0 * 50.0;
+    let ix = 100.0 * 50.0_f64.powi(3) / 12.0;
+    let iy = 50.0 * 100.0_f64.powi(3) / 12.0;
+
+    assert_eq!(report.shape, "polygon");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, 50.0, 1e-12);
+    assert_close(report.centroid_y, 25.0, 1e-12);
+    assert_close(report.ix, ix, 1e-12);
+    assert_close(report.iy, iy, 1e-12);
+    assert!(report.ixy.abs() < 1e-9 * ix, "rectangle product of inertia should vanish, got {}", report.ixy);
+    assert_close(report.polar_moment, ix + iy, 1e-12);
+    assert_close(report.radius_of_gyration_x, (ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (iy / area).sqrt(), 1e-12);
+}
+
+#[test]
+fn polygon_triangle_matches_closed_form() {
+    let vertices = [(0.0, 0.0), (100.0, 0.0), (0.0, 50.0)];
+    let report = polygon_section_report(&vertices, Units::Millimeter).expect("polygon triangle");
+
+    let base: f64 = 100.0;
+    let height: f64 = 50.0;
+    let area = base * height / 2.0;
+    let ix = base * height.powi(3) / 36.0;
+    let iy = height * base.powi(3) / 36.0;
+    let ixy = -base.powi(2) * height.powi(2) / 72.0;
+
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, base / 3.0, 1e-12);
+    assert_close(report.centroid_y, height / 3.0, 1e-12);
+    assert_close(report.ix, ix, 1e-12);
+    assert_close(report.iy, iy, 1e-12);
+    assert_close(report.ixy, ixy, 1e-12);
+    assert_close(report.polar_moment, ix + iy, 1e-12);
+    assert_close(report.radius_of_gyration_x, (ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (iy / area).sqrt(), 1e-12);
+}
+
+#[test]
+fn polygon_winding_and_closing_vertex_do_not_change_the_result() {
+    let counter_clockwise = [(0.0, 0.0), (100.0, 0.0), (0.0, 50.0)];
+    let clockwise = [(0.0, 50.0), (100.0, 0.0), (0.0, 0.0)];
+    let closed = [(0.0, 0.0), (100.0, 0.0), (0.0, 50.0), (0.0, 0.0)];
+
+    let reference = polygon_section_report(&counter_clockwise, Units::Millimeter).expect("counter-clockwise");
+    assert_eq!(polygon_section_report(&clockwise, Units::Millimeter).expect("clockwise"), reference);
+    assert_eq!(polygon_section_report(&closed, Units::Millimeter).expect("closed"), reference);
+    assert!(reference.ixy < 0.0);
+}
+
+#[test]
+fn polygon_section_report_serialises_camel_case() {
+    let vertices = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)];
+    let report = polygon_section_report(&vertices, Units::Millimeter).expect("polygon");
+    let json = serde_json::to_value(&report).expect("json");
+
+    assert_eq!(json["shape"], "polygon");
+    assert_eq!(json["units"], "mm");
+    assert!(json["centroidX"].as_f64().is_some_and(|value| (value - 50.0).abs() < 1e-12));
+    assert!(json["ix"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json.get("radiusOfGyrationX").is_some());
+    assert!(json.get("centroid_x").is_none());
+}
+
+#[test]
+fn polygon_section_rejects_invalid_vertex_lists() {
+    let error = polygon_section_report(&[(0.0, 0.0), (100.0, 0.0)], Units::Millimeter).expect_err("two vertices");
+    assert_eq!(error.code, "section/polygon-too-few-vertices");
+
+    let collinear = [(0.0, 0.0), (50.0, 0.0), (100.0, 0.0)];
+    let error = polygon_section_report(&collinear, Units::Millimeter).expect_err("collinear");
+    assert_eq!(error.code, "section/polygon-degenerate");
+
+    let crossed = [(0.0, 0.0), (100.0, 100.0), (0.0, 100.0), (100.0, 0.0)];
+    let error = polygon_section_report(&crossed, Units::Millimeter).expect_err("self-intersection");
+    assert_eq!(error.code, "section/polygon-self-intersecting");
+
+    let repeated = [(10.0, 10.0), (10.0, 10.0), (10.0, 10.0)];
+    let error = polygon_section_report(&repeated, Units::Millimeter).expect_err("no distinct vertices");
+    assert_eq!(error.code, "section/polygon-degenerate");
+
+    let non_finite = [(0.0, 0.0), (f64::NAN, 0.0), (0.0, 10.0)];
+    let error = polygon_section_report(&non_finite, Units::Millimeter).expect_err("non-finite");
+    assert_eq!(error.code, "section/invalid-polygon");
 }
 
 fn cantilever_with_section() -> Model {

@@ -416,6 +416,218 @@ pub fn library_json(units: Units) -> Result<String, CaeError> {
         .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize the library: {error}")))
 }
 
+/// Derived properties of a closed polygon cross-section.
+///
+/// The vertices are integrated with the standard Green-theorem formulas. All
+/// second moments are taken about centroidal axes parallel to the `x` and `y`
+/// axes. Before integration the vertex list is normalised to a
+/// **counter-clockwise** winding, so clockwise and counter-clockwise input of
+/// the same shape give identical values and `ixy` follows one fixed sign
+/// convention (`∫ x·y dA` about the centroid).
+///
+/// Coordinates carry `length`; `area` is `length²`, the second moments are
+/// `length⁴` and the radii of gyration are `length`. `units` only labels the
+/// unit system the vertices were supplied in.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolygonSectionReport {
+    /// Shape identifier, always `"polygon"`.
+    pub shape: String,
+    /// Unit system label (`mm` or `m`) the vertices were interpreted in.
+    pub units: String,
+    /// Cross-sectional area.
+    pub area: f64,
+    /// Centroid `x` coordinate.
+    pub centroid_x: f64,
+    /// Centroid `y` coordinate.
+    pub centroid_y: f64,
+    /// Second moment of area about the centroidal `x` axis, `∫ y² dA`.
+    pub ix: f64,
+    /// Second moment of area about the centroidal `y` axis, `∫ x² dA`.
+    pub iy: f64,
+    /// Product of inertia about the centroidal axes, `∫ x·y dA`.
+    pub ixy: f64,
+    /// Polar moment of area about the centroid, `J = Ix + Iy`.
+    pub polar_moment: f64,
+    /// Radius of gyration about the centroidal `x` axis, `sqrt(Ix / A)`.
+    pub radius_of_gyration_x: f64,
+    /// Radius of gyration about the centroidal `y` axis, `sqrt(Iy / A)`.
+    pub radius_of_gyration_y: f64,
+}
+
+/// Computes the properties of a closed polygon section.
+///
+/// `vertices` are the corners in document units, in either winding order and
+/// with or without the first vertex repeated at the end. At least three
+/// distinct vertices are required, the outline must be simple (no
+/// self-intersection) and its area must not be degenerate.
+///
+/// Invalid input reports `section/polygon-too-few-vertices`,
+/// `section/polygon-degenerate`, `section/polygon-self-intersecting` or
+/// `section/invalid-polygon`; no non-finite property is ever returned.
+pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<PolygonSectionReport, CaeError> {
+    let points = normalize_polygon(vertices)?;
+    let count = points.len();
+    let mut double_area = 0.0;
+    let mut centroid_x_sum = 0.0;
+    let mut centroid_y_sum = 0.0;
+    let mut ix_sum = 0.0;
+    let mut iy_sum = 0.0;
+    let mut ixy_sum = 0.0;
+    for index in 0..count {
+        let (x0, y0) = points[index];
+        let (x1, y1) = points[(index + 1) % count];
+        let cross = x0 * y1 - x1 * y0;
+        double_area += cross;
+        centroid_x_sum += (x0 + x1) * cross;
+        centroid_y_sum += (y0 + y1) * cross;
+        ix_sum += (y0 * y0 + y0 * y1 + y1 * y1) * cross;
+        iy_sum += (x0 * x0 + x0 * x1 + x1 * x1) * cross;
+        ixy_sum += (x0 * y1 + 2.0 * x0 * y0 + 2.0 * x1 * y1 + x1 * y0) * cross;
+    }
+    let area = 0.5 * double_area;
+    let centroid_x = centroid_x_sum / (6.0 * area);
+    let centroid_y = centroid_y_sum / (6.0 * area);
+    let ix = (ix_sum / 12.0 - area * centroid_y.powi(2)).max(0.0);
+    let iy = (iy_sum / 12.0 - area * centroid_x.powi(2)).max(0.0);
+    let ixy = ixy_sum / 24.0 - area * centroid_x * centroid_y;
+    Ok(PolygonSectionReport {
+        shape: "polygon".to_string(),
+        units: units.as_str().to_string(),
+        area,
+        centroid_x,
+        centroid_y,
+        ix,
+        iy,
+        ixy,
+        polar_moment: ix + iy,
+        radius_of_gyration_x: (ix / area).sqrt(),
+        radius_of_gyration_y: (iy / area).sqrt(),
+    })
+}
+
+/// Validates a vertex list and returns it de-duplicated and counter-clockwise.
+fn normalize_polygon(vertices: &[(f64, f64)]) -> Result<Vec<(f64, f64)>, CaeError> {
+    if vertices.len() < 3 {
+        return Err(CaeError::new(
+            "section/polygon-too-few-vertices",
+            format!("a polygon section needs at least 3 vertices, got {}", vertices.len()),
+        ));
+    }
+    for (x, y) in vertices {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(CaeError::new(
+                "section/invalid-polygon",
+                format!("polygon vertex ({x}, {y}) must have finite coordinates"),
+            ));
+        }
+    }
+    let mut points = vertices.to_vec();
+    if points.first() == points.last() {
+        points.pop();
+    }
+    let mut deduped: Vec<(f64, f64)> = Vec::with_capacity(points.len());
+    for point in points {
+        if deduped.last() != Some(&point) {
+            deduped.push(point);
+        }
+    }
+    if deduped.len() > 1 && deduped.first() == deduped.last() {
+        deduped.pop();
+    }
+    if deduped.len() < 3 {
+        return Err(CaeError::new(
+            "section/polygon-degenerate",
+            format!("a polygon section needs at least 3 distinct vertices, got {}", deduped.len()),
+        ));
+    }
+    if polygon_self_intersects(&deduped) {
+        return Err(CaeError::new(
+            "section/polygon-self-intersecting",
+            "polygon section edges intersect; the vertex list must form a simple closed polygon",
+        ));
+    }
+    let signed_area = polygon_signed_area(&deduped);
+    let extent = polygon_extent(&deduped);
+    if extent <= 0.0 || signed_area.abs() <= 1e-12 * extent * extent {
+        return Err(CaeError::new(
+            "section/polygon-degenerate",
+            format!("polygon section area is too small to compute section properties (signed area {signed_area})"),
+        ));
+    }
+    if signed_area < 0.0 {
+        deduped.reverse();
+    }
+    Ok(deduped)
+}
+
+fn polygon_signed_area(points: &[(f64, f64)]) -> f64 {
+    let count = points.len();
+    let mut sum = 0.0;
+    for index in 0..count {
+        let (x0, y0) = points[index];
+        let (x1, y1) = points[(index + 1) % count];
+        sum += x0 * y1 - x1 * y0;
+    }
+    0.5 * sum
+}
+
+fn polygon_extent(points: &[(f64, f64)]) -> f64 {
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (x, y) in points {
+        min_x = min_x.min(*x);
+        max_x = max_x.max(*x);
+        min_y = min_y.min(*y);
+        max_y = max_y.max(*y);
+    }
+    (max_x - min_x).max(max_y - min_y)
+}
+
+fn polygon_self_intersects(points: &[(f64, f64)]) -> bool {
+    let count = points.len();
+    for first in 0..count {
+        for second in (first + 1)..count {
+            if second == first + 1 || (first == 0 && second == count - 1) {
+                continue;
+            }
+            let first_end = points[(first + 1) % count];
+            let second_end = points[(second + 1) % count];
+            if segments_intersect(points[first], first_end, points[second], second_end) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn segments_intersect(a0: (f64, f64), a1: (f64, f64), b0: (f64, f64), b1: (f64, f64)) -> bool {
+    let d1 = orientation(b0, b1, a0);
+    let d2 = orientation(b0, b1, a1);
+    let d3 = orientation(a0, a1, b0);
+    let d4 = orientation(a0, a1, b1);
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
+        return true;
+    }
+    (d1 == 0.0 && point_on_segment(b0, b1, a0))
+        || (d2 == 0.0 && point_on_segment(b0, b1, a1))
+        || (d3 == 0.0 && point_on_segment(a0, a1, b0))
+        || (d4 == 0.0 && point_on_segment(a0, a1, b1))
+}
+
+fn orientation(origin: (f64, f64), first: (f64, f64), second: (f64, f64)) -> f64 {
+    (first.0 - origin.0) * (second.1 - origin.1) - (first.1 - origin.1) * (second.0 - origin.0)
+}
+
+fn point_on_segment(start: (f64, f64), end: (f64, f64), point: (f64, f64)) -> bool {
+    point.0 >= start.0.min(end.0)
+        && point.0 <= start.0.max(end.0)
+        && point.1 >= start.1.min(end.1)
+        && point.1 <= start.1.max(end.1)
+}
+
 fn validate_dimensions(shape: &str, dimensions: &[(&str, f64)]) -> Result<(), CaeError> {
     for (name, value) in dimensions {
         if !value.is_finite() || *value <= 0.0 {

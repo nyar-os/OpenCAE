@@ -13,7 +13,7 @@ use std::{
 
 use cae_model::{
     CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination,
-    SpectrumPoint, Units, not_implemented, section_report,
+    SpectrumPoint, Units, not_implemented, polygon_section_report, section_report,
 };
 
 const USAGE: &str = "\
@@ -48,6 +48,7 @@ Usage:
                         [--area <A>] [--allowable <s>]
   ocae library [--units mm|m]
   ocae section properties --section rectangle|circle|i|box|tube|channel [geometry] [--units mm|m]
+  ocae section polygon --points \"x,y;x,y;...\" [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
@@ -668,11 +669,15 @@ fn library_command(args: &[String]) -> Result<i32, CaeError> {
 fn section_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("properties") => section_properties(&args[1..]),
+        Some("polygon") => section_polygon(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `section` does not exist; only `properties` is supported"),
+            format!("subcommand `{other}` of `section` does not exist; only `properties` or `polygon` is supported"),
         )),
-        None => Err(CaeError::new("cli/missing-argument", "`section` is missing a subcommand; only `properties` is supported")),
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`section` is missing a subcommand; only `properties` or `polygon` is supported",
+        )),
     }
 }
 
@@ -708,6 +713,38 @@ fn section_properties(args: &[String]) -> Result<i32, CaeError> {
     let report = section_report(section, units)?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
     Ok(0)
+}
+
+fn section_polygon(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--points", "--units"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let points = parse_points(required(&parsed, "--points")?)?;
+    let report = polygon_section_report(&points, units)?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    Ok(0)
+}
+
+fn parse_points(value: &str) -> Result<Vec<(f64, f64)>, CaeError> {
+    let mut points = Vec::new();
+    for item in value.split(';').map(str::trim).filter(|item| !item.is_empty()) {
+        let Some((x, y)) = item.split_once(',')
+        else {
+            return Err(CaeError::new("cli/invalid-points", format!("polygon point `{item}` must use the form `x,y`")));
+        };
+        let coordinate = |axis: &str, raw: &str| -> Result<f64, CaeError> {
+            raw.trim().parse::<f64>().map_err(|_| {
+                CaeError::new(
+                    "cli/invalid-points",
+                    format!("{axis} coordinate `{}` of polygon point `{item}` is not a number", raw.trim()),
+                )
+            })
+        };
+        points.push((coordinate("x", x)?, coordinate("y", y)?));
+    }
+    Ok(points)
 }
 
 fn material_set(args: &[String]) -> Result<i32, CaeError> {

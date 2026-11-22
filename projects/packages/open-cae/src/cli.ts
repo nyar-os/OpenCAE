@@ -20,6 +20,7 @@ import type {
     Dimension,
     ElementKind,
     ExportFormat,
+    PolygonPoint,
     Section,
     SpectrumCombination,
     SpectrumPoint,
@@ -890,10 +891,20 @@ async function sectionCommand(args: readonly string[]): Promise<number> {
     if (action === 'properties') {
         return sectionPropertiesCommand(args.slice(1));
     }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'section', expected: 'properties' });
+    if (action === 'polygon') {
+        return sectionPolygonCommand(args.slice(1));
     }
-    throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'section', action, expected: 'properties' });
+    if (action === undefined) {
+        throw failure('cli/missing-argument', 'missingSubcommand', {
+            group: 'section',
+            expected: 'properties or polygon',
+        });
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', {
+        group: 'section',
+        action,
+        expected: 'properties or polygon',
+    });
 }
 
 async function sectionPropertiesCommand(args: readonly string[]): Promise<number> {
@@ -925,6 +936,31 @@ async function sectionPropertiesCommand(args: readonly string[]): Promise<number
         console.log(JSON.stringify(report, null, 2));
         return 0;
     });
+}
+
+async function sectionPolygonCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--points'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const points = parsePolygonPoints(required(parsed, '--points'));
+    return withSession(async (session) => {
+        const report = await session.sectionPolygon(points, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+function parsePolygonPoints(value: string): readonly PolygonPoint[] {
+    return value
+        .split(';')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .map((entry) => {
+            const parts = entry.split(',').map((part) => Number(part.trim()));
+            if (parts.length !== 2 || !parts.every((part) => Number.isFinite(part))) {
+                throw failure('cli/invalid-option', 'invalidPoint', { value: entry });
+            }
+            return [parts[0] as number, parts[1] as number] as const;
+        });
 }
 
 function directionOption(parsed: Parsed): readonly [number, number] {

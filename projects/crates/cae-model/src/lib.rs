@@ -24,7 +24,8 @@
 //! * support reaction summaries with a global force equilibrium check;
 //! * linear elastic translational and rotational spring supports;
 //! * built-in material presets and parametric rectangular, circular and
-//!   I-section properties;
+//!   I-section properties, plus custom closed-polygon section properties
+//!   (area, centroid, second moments, polar moment and radii of gyration);
 //! * construction-stage (element birth/death) summaries that solve the active
 //!   subset of elements stage by stage;
 //! * a large-displacement Newton iteration for truss models with the exact
@@ -52,7 +53,8 @@ pub use crate::{
     error::CaeError,
     export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::{
-        MATERIAL_PRESETS, MaterialPreset, SectionProperties, SectionReport, library_json, material_preset, section_report,
+        MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, SectionProperties, SectionReport, library_json,
+        material_preset, polygon_section_report, section_report,
     },
     model::{
         Element, ElementKind, ElementMaterial, ElementSplit, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
@@ -114,6 +116,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "deflections": "supported",
     "loadCombinations": "supported",
     "materialLibrary": "supported",
+    "polygonSection": "supported",
     "elasticSupports": "supported",
     "inclinedSupports": "supported",
     "matrixExport": "supported",

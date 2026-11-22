@@ -16,7 +16,7 @@ use std::path::Path;
 
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
-    Section, SpectrumCombination, SpectrumPoint, Units, library_json, section_report,
+    Section, SpectrumCombination, SpectrumPoint, Units, library_json, polygon_section_report, section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -516,6 +516,43 @@ fn section_field(request: &Value) -> Result<Option<Section>> {
             .map(Some)
             .map_err(|error| argument_error(&format!("`section` is invalid: {error}"))),
     }
+}
+
+/// Reports area, centroid, second moments and radii of gyration of a closed
+/// polygon section.
+///
+/// The request accepts a required `points` array of `[x, y]` pairs (one entry
+/// per vertex, in either winding order, with or without the closing vertex
+/// repeated) and an optional `units` value (`mm` or `m`, default `mm`). The
+/// second moments are taken about centroidal axes and the vertex list is
+/// normalised to a counter-clockwise winding so `ixy` has one fixed sign.
+#[function]
+fn section_polygon(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let vertices = polygon_points_field(&request)?;
+    let units = match request.get("units").and_then(Value::as_str) {
+        Some(raw) => raw.parse::<Units>().map_err(fail)?,
+        None => Units::Millimeter,
+    };
+    let report = polygon_section_report(&vertices, units).map_err(fail)?;
+    respond(&ctx, &report)
+}
+
+fn polygon_points_field(request: &Value) -> Result<Vec<(f64, f64)>> {
+    let values = match request.get("points").and_then(Value::as_array) {
+        Some(values) => values,
+        None => return Err(argument_error("`points` must be an array of `[x, y]` pairs")),
+    };
+    values
+        .iter()
+        .map(|value| match value.as_array() {
+            Some(pair) if pair.len() == 2 => match (pair[0].as_f64(), pair[1].as_f64()) {
+                (Some(x), Some(y)) => Ok((x, y)),
+                _ => Err(argument_error("each `points` entry must contain two numbers")),
+            },
+            _ => Err(argument_error("each `points` entry must be an `[x, y]` array")),
+        })
+        .collect()
 }
 
 /// Adds or merges a support entry of a document and saves it.
@@ -1134,6 +1171,7 @@ register_module![
     material_preset,
     library,
     section_properties,
+    section_polygon,
     support_add,
     support_remove,
     load_add,

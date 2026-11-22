@@ -29,6 +29,7 @@
             "                        [--area <A>] [--allowable <s>]",
             "  ocae library [--units mm|m]",
             "  ocae section properties --section rectangle|circle|i|box|tube|channel [geometry] [--units mm|m]",
+            "  ocae section polygon --points \"x,y;x,y;...\" [--units mm|m]",
             "  ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]",
             "                    [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]",
             "                    [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]",
@@ -120,7 +121,8 @@
             "unknownSpectrumAxis": "unknown spectrum axis `{value}`; use `x`, `y` or `z`",
             "unknownSpectrumCombination": "unknown spectrum combination `{value}`; use `srss` or `cqc`",
             "directionConflict": "`--direction` is an independent inclined-support constraint; do not combine it with `--dx`, `--dy`, `--dz`, `--rz`, a prescribed displacement or a spring",
-            "invalidDirection": "`--direction` must be two comma-separated numbers `nx,ny`, not `{value}`"
+            "invalidDirection": "`--direction` must be two comma-separated numbers `nx,ny`, not `{value}`",
+            "invalidPoint": "polygon point `{value}` must use the form `x,y` with finite numbers"
         }
     }
 }

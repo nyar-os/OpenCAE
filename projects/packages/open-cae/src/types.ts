@@ -155,6 +155,42 @@ export interface SectionReport {
     readonly radiusOfGyrationWeak: number;
 }
 
+/** One polygon vertex as an `[x, y]` pair in document units. */
+export type PolygonPoint = readonly [number, number];
+
+/**
+ * Derived properties of a closed polygon section.
+ *
+ * The second moments are taken about centroidal axes. Vertices may be given in
+ * either winding order and the closing vertex may be omitted; the engine
+ * normalises the outline to a counter-clockwise winding so `ixy` follows one
+ * fixed sign convention.
+ */
+export interface PolygonSectionReport {
+    /** Shape identifier, always `"polygon"`. */
+    readonly shape: 'polygon';
+    /** Unit system the vertices were interpreted in. */
+    readonly units: Units;
+    /** Cross-sectional area. */
+    readonly area: number;
+    /** Centroid `x` coordinate. */
+    readonly centroidX: number;
+    /** Centroid `y` coordinate. */
+    readonly centroidY: number;
+    /** Second moment of area about the centroidal `x` axis, `∫ y² dA`. */
+    readonly ix: number;
+    /** Second moment of area about the centroidal `y` axis, `∫ x² dA`. */
+    readonly iy: number;
+    /** Product of inertia about the centroidal axes, `∫ x·y dA`. */
+    readonly ixy: number;
+    /** Polar moment of area about the centroid, `J = Ix + Iy`. */
+    readonly polarMoment: number;
+    /** Radius of gyration about the centroidal `x` axis, `sqrt(Ix / A)`. */
+    readonly radiusOfGyrationX: number;
+    /** Radius of gyration about the centroidal `y` axis, `sqrt(Iy / A)`. */
+    readonly radiusOfGyrationY: number;
+}
+
 /** Request of `applyMaterialPreset()`. */
 export interface MaterialPresetRequest {
     /** Built-in preset name, for example `steel` or `aluminum`. */

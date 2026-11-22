@@ -61,6 +61,8 @@ import type {
     NonlinearOptions,
     NonlinearSolution,
     OpenCAECapabilities,
+    PolygonPoint,
+    PolygonSectionReport,
     Report,
     ReactionOptions,
     ReactionSummary,
@@ -236,6 +238,13 @@ export function library(units: 'mm' | 'm'): MaterialLibrary {
 export function sectionProperties(section: Section, units: 'mm' | 'm'): SectionReport {
     return decode<SectionReport>(() =>
         binding('section.properties').section_properties(JSON.stringify({ section, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and radii of gyration of a polygon. */
+export function sectionPolygon(points: readonly PolygonPoint[], units: 'mm' | 'm'): PolygonSectionReport {
+    return decode<PolygonSectionReport>(() =>
+        binding('section.polygon').section_polygon(JSON.stringify({ points, units })),
     );
 }
 

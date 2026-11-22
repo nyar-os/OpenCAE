@@ -8,7 +8,7 @@ This package is the typed entry point to the same document, solver and exporters
 
 | Export | Role |
 |--------|------|
-| `OpenCAE` | Analysis session; `create()`, `open()`, `library()`, `sectionProperties()`, `capabilities()`, `dispose()` |
+| `OpenCAE` | Analysis session; `create()`, `open()`, `library()`, `sectionProperties()`, `sectionPolygon()`, `capabilities()`, `dispose()` |
 | `CaeDocument` | Path-backed document with editing, solve, query, export and save methods |
 | `OpenCAEError`, `isOpenCAEError`, `errorCodes` | Stable error codes such as `model/mechanism` and `capability/not-implemented` |
 | `NotImplementedError` | Subclass thrown for unimplemented capabilities |

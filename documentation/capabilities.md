@@ -42,6 +42,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | tension-only cable trusses (`tensionOnly`, active-set iteration with slack members removed) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
+| custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -56,7 +57,10 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
 `nodalStress` and `loadCases` are available through the Rust API, the native
-addon and the TypeScript SDK. Parametric element splitting is the `edits`
+addon and the TypeScript SDK. Custom polygon section properties
+(`polygonSection`) are exposed as `polygon_section_report()` in Rust,
+`section_polygon` in the addon and `sectionPolygon()` in the SDK/CLI.
+Parametric element splitting is the `edits`
 entry `elementSplit` of the capability matrix and is available at the same
 three entry points plus the CLI (`open-cae element split`).
 
@@ -397,9 +401,29 @@ be finite and positive and a model without nodes is rejected with
     distributed loads and through-depth temperature gradients report
     `element/split-unsupported-load`. Nodal loads, supports and masses are
     untouched, and the edit bumps `revision` exactly once.
+30. **Polygon section properties**: `polygon_section_report(vertices, units)`
+    (CLI `open-cae section polygon --points "x,y;x,y;..."`, SDK
+    `sectionPolygon()`) integrates a closed polygon with Green's theorem:
+    `A = ½Σ(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)`, the centroid
+    `(1/(6A))Σ(xᵢ + xᵢ₊₁)(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)` (and the matching `y` sum), the
+    origin second moments
+    `Ix = (1/12)Σ(yᵢ² + yᵢyᵢ₊₁ + yᵢ₊₁²)(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)`,
+    `Iy = (1/12)Σ(xᵢ² + xᵢxᵢ₊₁ + xᵢ₊₁²)(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)` and
+    `Ixy = (1/24)Σ(xᵢyᵢ₊₁ + 2xᵢyᵢ + 2xᵢ₊₁yᵢ₊₁ + xᵢ₊₁yᵢ)(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)`,
+    followed by the parallel-axis transfer to the centroid, the polar moment
+    `J = Ix + Iy` and the radii of gyration `√(Ix/A)`, `√(Iy/A)`. The closing
+    vertex may be repeated; it is removed automatically. The outline is
+    normalised to a counter-clockwise winding, so clockwise and
+    counter-clockwise input give identical results and `Ixy` has a single sign
+    convention. Fewer than three vertices report
+    `section/polygon-too-few-vertices`, a zero/near-zero area or repeated
+    vertices report `section/polygon-degenerate`, crossing edges report
+    `section/polygon-self-intersecting` and non-finite coordinates report
+    `section/invalid-polygon`. This is a standalone section calculator: the
+    properties are not stored in documents and are not consumed by the beam
+    solver (which still uses the global parametric `Section`).
 
 ## Validation and tests
-
 ```shell
 cargo fmt -p cae-model -p open-cae-napi
 cargo test -p cae-model -p open-cae-napi --offline
@@ -543,6 +567,14 @@ stable codes.
 - rectangular, circular, I-section, box, tube and channel area, strong/weak
   inertia, torsion constant, extreme fibre and section modulus match the
   closed-form formulas (`1e-12`);
+- a polygon rectangle reproduces `A = bh`, `Ix = bh³/12`, `Iy = hb³/12`,
+  `J = Ix + Iy` and the analytic radii of gyration, and a right triangle
+  reproduces `A = bh/2`, `Ix = bh³/36`, `Iy = hb³/36` and
+  `Ixy = −b²h²/72` about the centroid (`1e-12`);
+- clockwise, counter-clockwise and explicitly closed vertex lists produce
+  identical polygon reports, while fewer than three vertices, collinear
+  (zero-area) lists, self-intersecting outlines and non-finite coordinates
+  report the stable `section/polygon-*` codes;
 - presets convert between `mm` (`210000 MPa`, `7.85e-9 t/mm³`) and `m`
   (`2.1e11 Pa`, `7850 kg/m³`);
 - a cantilever beam that omits `inertia` uses the stored section and
@@ -749,7 +781,9 @@ threshold of `1e-9`.
   (`support/merge-conflict`). It does not renumber nodes or snap coordinates.
 - The material and section are **global**: all elements share one material and
   one parametric section. Per-element `E`/`A` overrides still exist, but there
-  is no per-element section library yet.
+  is no per-element section library yet. Custom polygon properties are a
+  standalone calculator: they are neither stored in `.ocae` documents nor fed
+  into the beam solver as inertia or extreme-fibre distances.
 - Spring supports are **linear elastic and two-way**: no
   tension-only/compression-only (gap) behaviour, no friction, no plasticity,
   and no nonlinear force-displacement law is modelled.

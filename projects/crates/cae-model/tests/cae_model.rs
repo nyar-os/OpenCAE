@@ -313,6 +313,7 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["solver"]["thermalExpansion"], "supported");
     assert_eq!(capabilities["solver"]["thermalGradient"], "supported");
     assert_eq!(capabilities["solver"]["partialSpanLoad"], "supported");
+    assert_eq!(capabilities["solver"]["polygonSection"], "supported");
     assert_eq!(capabilities["solver"]["thermal"], "supported");
     assert_eq!(capabilities["solver"]["heatTransfer"], "supported");
     assert_eq!(capabilities["edits"]["elementSplit"], "supported");
