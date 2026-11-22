@@ -18,7 +18,7 @@ use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
     Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
     ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, section_report, t_section_report,
-    tube_standard_section_report,
+    tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -669,6 +669,28 @@ fn section_ellipse(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &report)
 }
 
+/// Reports area, centroid, second moments and torsion constant of an
+/// equal-thickness Z-section.
+///
+/// The request accepts `height` (`h`), `width` (`w`), `thickness` (`t`) and an
+/// optional `units` value (`mm` or `m`, default `mm`). The origin is the
+/// lower-left corner of the bounding rectangle, the web is centred and the top
+/// and bottom flanges extend to opposite edges. Dimensions must satisfy
+/// `0 < t < w` and `2t < h`.
+#[function]
+fn section_z(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report = z_section_report(
+        required_number_field(&request, "height")?,
+        required_number_field(&request, "width")?,
+        required_number_field(&request, "thickness")?,
+        units,
+    )
+    .map_err(fail)?;
+    respond(&ctx, &report)
+}
+
 fn polygon_points_field(request: &Value) -> Result<Vec<(f64, f64)>> {
     let values = match request.get("points").and_then(Value::as_array) {
         Some(values) => values,
@@ -1309,6 +1331,7 @@ register_module![
     section_angle,
     section_t,
     section_ellipse,
+    section_z,
     support_add,
     support_remove,
     load_add,

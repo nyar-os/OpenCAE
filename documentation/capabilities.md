@@ -43,7 +43,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
-| parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
+| parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse / equal-thickness Z; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -64,12 +64,13 @@ addon and the TypeScript SDK. Custom polygon section properties
 Parametric standard sections (`standardSection`) are exposed as
 `i_standard_section_report()`, `tube_standard_section_report()`,
 `channel_standard_section_report()`, `angle_section_report()`,
-`t_section_report()` and `ellipse_section_report()` in Rust, `section_i`,
-`section_tube`, `section_channel`, `section_angle`, `section_t` and
-`section_ellipse` in the addon and `sectionI()`, `sectionTube()`,
-`sectionChannel()`, `sectionAngle()`, `sectionT()` and `sectionEllipse()` in the
-SDK, with CLI subcommands `section i`, `section tube`, `section channel`,
-`section angle`, `section t` and `section ellipse`.
+`t_section_report()`, `ellipse_section_report()` and `z_section_report()` in
+Rust, `section_i`, `section_tube`, `section_channel`, `section_angle`,
+`section_t`, `section_ellipse` and `section_z` in the addon and `sectionI()`,
+`sectionTube()`, `sectionChannel()`, `sectionAngle()`, `sectionT()`,
+`sectionEllipse()` and `sectionZ()` in the SDK, with CLI subcommands
+`section i`, `section tube`, `section channel`, `section angle`, `section t`,
+`section ellipse` and `section z`.
 Parametric element splitting is the `edits`
 entry `elementSplit` of the capability matrix and is available at the same
 three entry points plus the CLI (`open-cae element split`).
@@ -475,15 +476,43 @@ be finite and positive and a model without nodes is rejected with
       gyration are `√(Ix/A) = b/2` and `√(Iy/A) = a/2`. The torsion constant
       is the exact solid-ellipse value `J = π·a³·b³/(a² + b²)`; it equals
       `Ix + Iy` only when `a = b`.
+    - Equal-thickness Z-section with the origin at the lower-left corner of the
+      bounding rectangle: the web is centred (`x = w/2 − t/2 … w/2 + t/2`), the
+      top flange runs from the web to the right edge at `y = h − t … h` and the
+      bottom flange from the web to the left edge at `y = 0 … t`:
+
+      ```text
+                  ┌────────────┐   y = h
+                  │            │
+                  │            │
+                  │       ┌────┘   y = h − t
+                  │  web  │
+            ┌─────┘       │        y = t
+            │             │
+            └─────────────┘        y = 0
+          x = 0                x = w
+      ```
+
+      The three rectangles do not overlap, so `A = t(w + h − t)` and the outline
+      is point symmetric about `(w/2, h/2)`. With the flange length
+      `b = w/2 + t/2`,
+      `Ix = 2(b·t³/12 + b·t·((h − t)/2)²) + t(h − 2t)³/12`,
+      `Iy = 2(t·b³/12 + b·t·((w − t)/4)²) + (h − 2t)·t³/12` and
+      `Ixy = b·t·(w − t)(h − t)/4`, which is generally non-zero and follows the
+      polygon sign convention. `J` uses the thin-walled open approximation with
+      the corner counted once, `J = (w + h − t)·t³/3`, identical whether the
+      flange net lengths (excluding the web) plus the full web, or the full
+      flanges plus the web between them, are summed.
     The report uses the field names of the polygon report (`centroidX`,
     `centroidY`, `ix`, `iy`, `ixy`, `polarMoment`, `radiusOfGyrationX`,
     `radiusOfGyrationY`); `polarMoment` holds `J`, which is not `Ix + Iy` for
     these sections. Dimensions must satisfy `0 < tf < h/2` and `0 < tw < b`
     (I and channel), `0 < t < min(b, h)/2` (tube), `0 < t < min(h, w)` (angle),
-    `0 < tf < h` and `0 < tw < b` (T), or positive finite `w` and `h`
-    (ellipse); violations report `section/invalid-dimensions`. Results are
-    deterministic and, like the polygon calculator, are not stored in documents
-    or consumed by the beam solver.
+    `0 < tf < h` and `0 < tw < b` (T), positive finite `w` and `h` (ellipse),
+    or `0 < t < w` and `2t < h` (Z); violations report
+    `section/invalid-dimensions`. Results are deterministic and, like the
+    polygon calculator, are not stored in documents or consumed by the beam
+    solver.
 
 ## Validation and tests
 ```shell
@@ -655,6 +684,11 @@ stable codes.
   torsion constant `J = πa³b³/(a² + b²)`, agrees with a 256-edge inscribed
   ellipse polygon on `area`, `Ix` and `Iy` within `1e-3`, and reports
   `section/invalid-dimensions` for zero, negative and non-finite dimensions;
+- the equal-thickness Z section reproduces `A = t(w + h − t) = 2900`,
+  `x̄ = 50`, `ȳ = 100`, `Ix = 14 796 666.67`, `Iy = 849 166.67`,
+  `Ixy = 2 351 250` and `J = 290 000/3` for `200 × 100 × 10`, and its closed
+  polygon agrees with area, centroid and all three second moments within
+  `1e-12`, while zero or oversized `t` report `section/invalid-dimensions`;
 - invalid flange, web, leg and wall thicknesses report
   `section/invalid-dimensions`, and repeated calls return identical reports
   with the documented CLI/SDK field names;

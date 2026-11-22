@@ -87,6 +87,7 @@ import type {
     TensionOnlyOptions,
     TensionOnlySolution,
     ValidationReport,
+    ZSectionGeometry,
 } from './types.js';
 
 const knownCodes = new Set<string>(errorCodes);
@@ -294,6 +295,13 @@ export function sectionT(geometry: TSectionGeometry, units: 'mm' | 'm'): Standar
 export function sectionEllipse(geometry: EllipseSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
     return decode<StandardSectionReport>(() =>
         binding('section.ellipse').section_ellipse(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of an equal-thickness Z-section. */
+export function sectionZ(geometry: ZSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.z').section_z(JSON.stringify({ ...geometry, units })),
     );
 }
 

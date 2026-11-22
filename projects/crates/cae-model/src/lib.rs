@@ -26,9 +26,9 @@
 //! * built-in material presets and parametric rectangular, circular and
 //!   I-section properties, plus custom closed-polygon section properties
 //!   (area, centroid, second moments, polar moment and radii of gyration) and
-//!   standalone I, rectangular-tube, channel, L (angle), T and solid ellipse
-//!   section calculators (area, centroid, second moments, torsion constant and
-//!   radii of gyration);
+//!   standalone I, rectangular-tube, channel, L (angle), T, solid ellipse and
+//!   equal-thickness Z section calculators (area, centroid, second moments,
+//!   torsion constant and radii of gyration);
 //! * construction-stage (element birth/death) summaries that solve the active
 //!   subset of elements stage by stage;
 //! * a large-displacement Newton iteration for truss models with the exact
@@ -59,6 +59,7 @@ pub use crate::{
         MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, SectionProperties, SectionReport, StandardSectionReport,
         angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json,
         material_preset, polygon_section_report, section_report, t_section_report, tube_standard_section_report,
+        z_section_report,
     },
     model::{
         Element, ElementKind, ElementMaterial, ElementSplit, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,

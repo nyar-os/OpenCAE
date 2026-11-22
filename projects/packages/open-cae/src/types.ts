@@ -193,7 +193,7 @@ export interface PolygonSectionReport {
 
 /**
  * Derived properties of a parametric standard section (I, rectangular tube,
- * channel, equal-thickness L, T or solid ellipse).
+ * channel, equal-thickness L, T, solid ellipse or equal-thickness Z).
  *
  * Coordinates use the lower-left corner of the bounding rectangle: `x` runs
  * across the width and `y` along the depth, and the second moments are taken
@@ -202,8 +202,8 @@ export interface PolygonSectionReport {
  * circular section.
  */
 export interface StandardSectionReport {
-    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"` or `"ellipse"`. */
-    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't' | 'ellipse';
+    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"`, `"ellipse"` or `"z"`. */
+    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't' | 'ellipse' | 'z';
     /** Unit system the dimensions were interpreted in. */
     readonly units: Units;
     /** Cross-sectional area. */
@@ -297,6 +297,18 @@ export interface TSectionGeometry {
 export interface EllipseSectionGeometry {
     readonly width: number;
     readonly height: number;
+}
+
+/**
+ * Geometry of an equal-thickness Z-section: total `height` `h`, overall
+ * `width` `w` and uniform `thickness` `t`, with `0 < t < w` and `2t < h`. The
+ * origin is the lower-left corner of the bounding rectangle, the web is
+ * centred and the top and bottom flanges extend to opposite edges.
+ */
+export interface ZSectionGeometry {
+    readonly height: number;
+    readonly width: number;
+    readonly thickness: number;
 }
 
 /** Request of `applyMaterialPreset()`. */

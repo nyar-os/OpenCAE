@@ -507,8 +507,8 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 }
 
 /// Derived properties of a parametric standard section (I, rectangular tube,
-/// channel, equal-thickness L, T or solid ellipse), reported with the same
-/// fields as [`PolygonSectionReport`].
+/// channel, equal-thickness L, T, solid ellipse or equal-thickness Z), reported
+/// with the same fields as [`PolygonSectionReport`].
 ///
 /// Coordinates use the millimetre-style layout of the section: `x` runs across
 /// the width and `y` along the depth, with the origin at the lower-left corner
@@ -520,8 +520,8 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StandardSectionReport {
-    /// Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"` or
-    /// `"ellipse"`.
+    /// Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"`,
+    /// `"ellipse"` or `"z"`.
     pub shape: String,
     /// Unit system label (`mm` or `m`) the dimensions were interpreted in.
     pub units: String,
@@ -792,6 +792,66 @@ pub fn ellipse_section_report(width: f64, height: f64, units: Units) -> Result<S
     let iy = pi * a.powi(3) * b / 4.0;
     let torsion = pi * a.powi(3) * b.powi(3) / (a.powi(2) + b.powi(2));
     Ok(standard_section_report("ellipse", units, area, a, b, ix, iy, 0.0, torsion))
+}
+
+/// Computes the properties of an equal-thickness Z-section.
+///
+/// `height` is the total depth `h`, `width` the overall width `w` and
+/// `thickness` the uniform wall `t`. The origin is the lower-left corner of the
+/// bounding rectangle. The web is centred, spanning `x = w/2 − t/2 …
+/// w/2 + t/2`; the top flange runs from the web to the right edge at
+/// `y = h − t … h` and the bottom flange from the web to the left edge at
+/// `y = 0 … t`:
+///
+/// ```text
+///             ┌────────────┐   y = h
+///             │            │
+///             │            │
+///             │       ┌────┘   y = h − t
+///             │  web  │
+///       ┌─────┘       │        y = t
+///       │             │
+///       └─────────────┘        y = 0
+///     x = 0                x = w
+/// ```
+///
+/// The three rectangles do not overlap, so `A = t(w + h − t)`, the centroid is
+/// `(w/2, h/2)` (the outline is point symmetric) and the second moments add
+/// directly and transfer to the centroid. With the flange length
+/// `b = w/2 + t/2`:
+/// `Ix = 2(b·t³/12 + b·t·((h − t)/2)²) + t(h − 2t)³/12`,
+/// `Iy = 2(t·b³/12 + b·t·((w − t)/4)²) + (h − 2t)·t³/12` and
+/// `Ixy = b·t·(w − t)(h − t)/4`, which is generally non-zero and follows the
+/// polygon sign convention `∫ x·y dA` about the centroid. `J` uses the
+/// thin-walled open approximation with the corner counted once,
+/// `J = (w + h − t)·t³/3`, which is the same value whether the flange net
+/// lengths (excluding the web) and the full web are summed or the full flanges
+/// plus the web between them. The geometry requires `0 < t < w` and `2t < h`;
+/// invalid dimensions report `section/invalid-dimensions`.
+pub fn z_section_report(height: f64, width: f64, thickness: f64, units: Units) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions("z", &[("height", height), ("width", width), ("thickness", thickness)])?;
+    if thickness >= width {
+        return Err(invalid_dimensions(format!(
+            "z section thickness must be smaller than the width (t={thickness}, w={width})"
+        )));
+    }
+    if 2.0 * thickness >= height {
+        return Err(invalid_dimensions(format!(
+            "z section thickness must be smaller than half the height (t={thickness}, h={height})"
+        )));
+    }
+    let flange_length = width / 2.0 + thickness / 2.0;
+    let web_height = height - 2.0 * thickness;
+    let area = 2.0 * flange_length * thickness + web_height * thickness;
+    let flange_offset_y = (height - thickness) / 2.0;
+    let flange_offset_x = (width - thickness) / 4.0;
+    let ix = 2.0 * (flange_length * thickness.powi(3) / 12.0 + flange_length * thickness * flange_offset_y.powi(2))
+        + thickness * web_height.powi(3) / 12.0;
+    let iy = 2.0 * (thickness * flange_length.powi(3) / 12.0 + flange_length * thickness * flange_offset_x.powi(2))
+        + web_height * thickness.powi(3) / 12.0;
+    let ixy = 2.0 * flange_length * thickness * flange_offset_x * flange_offset_y;
+    let torsion = (width + height - thickness) * thickness.powi(3) / 3.0;
+    Ok(standard_section_report("z", units, area, width / 2.0, height / 2.0, ix, iy, ixy, torsion))
 }
 
 #[allow(clippy::too_many_arguments)]

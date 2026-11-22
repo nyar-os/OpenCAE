@@ -7,7 +7,7 @@ use std::{
 use cae_model::{
     ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, angle_section_report,
     channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json, material_preset,
-    polygon_section_report, section_report, solve, t_section_report, tube_standard_section_report,
+    polygon_section_report, section_report, solve, t_section_report, tube_standard_section_report, z_section_report,
 };
 
 const E: f64 = 210_000.0;
@@ -889,4 +889,117 @@ fn angle_and_t_section_reports_are_deterministic_with_cli_field_names() {
         assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
         assert!(json.get("centroid_x").is_none());
     }
+}
+
+#[test]
+fn z_section_matches_rectangle_decomposition_and_polygon() {
+    let height: f64 = 200.0;
+    let width: f64 = 100.0;
+    let thickness: f64 = 10.0;
+    let report = z_section_report(height, width, thickness, Units::Millimeter).expect("z section");
+
+    // Top and bottom flanges b × t with b = w/2 + t/2, plus the web between
+    // them. Hand-evaluated for h = 200, w = 100, t = 10: A = 2900, x̄ = 50,
+    // ȳ = 100, Ix = 14 796 666.67, Iy = 849 166.67, Ixy = 2 351 250 and
+    // J = 290 000/3.
+    let flange_length = width / 2.0 + thickness / 2.0;
+    let web_height = height - 2.0 * thickness;
+    let area = 2.0 * flange_length * thickness + web_height * thickness;
+    let flange_offset_y = (height - thickness) / 2.0;
+    let flange_offset_x = (width - thickness) / 4.0;
+    let expected_ix = 2.0 * (flange_length * thickness.powi(3) / 12.0 + flange_length * thickness * flange_offset_y.powi(2))
+        + thickness * web_height.powi(3) / 12.0;
+    let expected_iy = 2.0 * (thickness * flange_length.powi(3) / 12.0 + flange_length * thickness * flange_offset_x.powi(2))
+        + web_height * thickness.powi(3) / 12.0;
+    let expected_ixy = 2.0 * flange_length * thickness * flange_offset_x * flange_offset_y;
+    let expected_torsion = (width + height - thickness) * thickness.powi(3) / 3.0;
+
+    assert_eq!(report.shape, "z");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, 2900.0, 1e-12);
+    assert_close(report.centroid_x, 50.0, 1e-12);
+    assert_close(report.centroid_y, 100.0, 1e-12);
+    assert_close(report.ix, 14_796_666.666_666_667, 1e-12);
+    assert_close(report.iy, 849_166.666_666_666_6, 1e-12);
+    assert_close(report.ixy, 2_351_250.0, 1e-12);
+    assert_close(report.polar_moment, 290_000.0 / 3.0, 1e-12);
+    assert_close(report.radius_of_gyration_x, (report.ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (report.iy / area).sqrt(), 1e-12);
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.ix, expected_ix, 1e-12);
+    assert_close(report.iy, expected_iy, 1e-12);
+    assert_close(report.ixy, expected_ixy, 1e-12);
+    assert_close(report.polar_moment, expected_torsion, 1e-12);
+    assert!(report.ix > report.iy);
+    assert!(report.ixy > 0.0, "the point-symmetric Z-section has a positive product of inertia");
+
+    // The closed polygon of the same outline must agree to round-off.
+    let right = width / 2.0 + thickness / 2.0;
+    let left = width / 2.0 - thickness / 2.0;
+    let vertices = [
+        (0.0, 0.0),
+        (right, 0.0),
+        (right, height - thickness),
+        (width, height - thickness),
+        (width, height),
+        (left, height),
+        (left, thickness),
+        (0.0, thickness),
+    ];
+    let polygon = polygon_section_report(&vertices, Units::Millimeter).expect("z polygon");
+    assert_close(polygon.area, report.area, 1e-12);
+    assert_close(polygon.centroid_x, report.centroid_x, 1e-12);
+    assert_close(polygon.centroid_y, report.centroid_y, 1e-12);
+    assert_close(polygon.ix, report.ix, 1e-12);
+    assert_close(polygon.iy, report.iy, 1e-12);
+    assert_close(polygon.ixy, report.ixy, 1e-12);
+}
+
+#[test]
+fn z_section_rejects_invalid_dimensions() {
+    for result in [
+        z_section_report(200.0, 100.0, 0.0, Units::Millimeter),
+        z_section_report(200.0, 100.0, -10.0, Units::Millimeter),
+        z_section_report(200.0, 100.0, 100.0, Units::Millimeter),
+        z_section_report(200.0, 100.0, 150.0, Units::Millimeter),
+        z_section_report(20.0, 100.0, 10.0, Units::Millimeter),
+        z_section_report(0.0, 100.0, 10.0, Units::Millimeter),
+        z_section_report(200.0, 0.0, 10.0, Units::Millimeter),
+        z_section_report(f64::NAN, 100.0, 10.0, Units::Millimeter),
+        z_section_report(200.0, f64::INFINITY, 10.0, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid z-section dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+}
+
+#[test]
+fn z_section_report_is_deterministic_with_cli_field_names() {
+    let first = z_section_report(200.0, 100.0, 10.0, Units::Meter).expect("z");
+    let second = z_section_report(200.0, 100.0, 10.0, Units::Meter).expect("z");
+    assert_eq!(first, second);
+
+    let json = serde_json::to_value(&first).expect("json");
+    let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "area",
+            "centroidX",
+            "centroidY",
+            "ix",
+            "ixy",
+            "iy",
+            "polarMoment",
+            "radiusOfGyrationX",
+            "radiusOfGyrationY",
+            "shape",
+            "units",
+        ]
+    );
+    assert_eq!(json["shape"], "z");
+    assert_eq!(json["units"], "m");
+    assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json.get("centroid_x").is_none());
 }

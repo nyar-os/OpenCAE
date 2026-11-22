@@ -31,6 +31,7 @@ import type {
     StandardSectionReport,
     TSectionGeometry,
     Units,
+    ZSectionGeometry,
 } from './types.js';
 
 /** Analysis session. One instance owns the documents it opens. */
@@ -185,6 +186,22 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionEllipse(geometry, units);
+    }
+
+    /**
+     * Derived properties of an equal-thickness Z-section. The web is centred
+     * and the top and bottom flanges extend to opposite edges, so the section
+     * is point symmetric with `Ixy` generally non-zero. `polarMoment` carries
+     * the thin-walled torsion constant `(width + height − thickness)·t³/3`.
+     * Requires `0 < thickness < width` and `2·thickness < height`.
+     */
+    async sectionZ(
+        geometry: ZSectionGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionZ(geometry, units);
     }
 
     /** Creates an empty document at `path` and returns it. */
