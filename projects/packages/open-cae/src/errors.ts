@@ -25,6 +25,7 @@ export const errorCodes = [
     'document/assumed-units',
     'document/closed',
     'material/invalid',
+    'material/invalid-section',
     'material/invalid-alpha',
     'material/missing-alpha',
     'model/no-nodes',
