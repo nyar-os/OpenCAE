@@ -43,7 +43,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
-| parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse / equal-thickness Z; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
+| parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse / equilateral triangle / equal-thickness Z; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -64,13 +64,14 @@ addon and the TypeScript SDK. Custom polygon section properties
 Parametric standard sections (`standardSection`) are exposed as
 `i_standard_section_report()`, `tube_standard_section_report()`,
 `channel_standard_section_report()`, `angle_section_report()`,
-`t_section_report()`, `ellipse_section_report()` and `z_section_report()` in
-Rust, `section_i`, `section_tube`, `section_channel`, `section_angle`,
-`section_t`, `section_ellipse` and `section_z` in the addon and `sectionI()`,
+`t_section_report()`, `ellipse_section_report()`, `triangle_section_report()`
+and `z_section_report()` in Rust, `section_i`, `section_tube`,
+`section_channel`, `section_angle`, `section_t`, `section_ellipse`,
+`section_triangle` and `section_z` in the addon and `sectionI()`,
 `sectionTube()`, `sectionChannel()`, `sectionAngle()`, `sectionT()`,
-`sectionEllipse()` and `sectionZ()` in the SDK, with CLI subcommands
-`section i`, `section tube`, `section channel`, `section angle`, `section t`,
-`section ellipse` and `section z`.
+`sectionEllipse()`, `sectionTriangle()` and `sectionZ()` in the SDK, with CLI
+subcommands `section i`, `section tube`, `section channel`, `section angle`,
+`section t`, `section ellipse`, `section triangle` and `section z`.
 Parametric element splitting is the `edits`
 entry `elementSplit` of the capability matrix and is available at the same
 three entry points plus the CLI (`open-cae element split`).
@@ -436,14 +437,16 @@ be finite and positive and a model without nodes is rejected with
 31. **Standard section properties**: `i_standard_section_report(h, b, tw, tf)`,
     `tube_standard_section_report(h, b, t)`,
     `channel_standard_section_report(h, b, tw, tf)`, `angle_section_report(h,
-    w, t)`, `t_section_report(h, b, tw, tf)` and `ellipse_section_report(w, h)`
-    (CLI `open-cae section i`, `section tube`, `section channel`,
-    `section angle`, `section t` and `section ellipse`, SDK `sectionI()`,
-    `sectionTube()`, `sectionChannel()`, `sectionAngle()`, `sectionT()` and
-    `sectionEllipse()`) compute area, centroid, centroidal second moments,
-    torsion constant and radii of gyration directly from the dimensions. The
-    coordinates put the origin at the lower-left corner of the bounding
-    rectangle, so `x` runs across the width and `y` along the depth.
+    w, t)`, `t_section_report(h, b, tw, tf)`, `ellipse_section_report(w, h)`
+    and `triangle_section_report(a)` (CLI `open-cae section i`,
+    `section tube`, `section channel`, `section angle`, `section t`,
+    `section ellipse` and `section triangle`, SDK `sectionI()`,
+    `sectionTube()`, `sectionChannel()`, `sectionAngle()`, `sectionT()`,
+    `sectionEllipse()` and `sectionTriangle()`) compute area, centroid,
+    centroidal second moments, torsion constant and radii of gyration directly
+    from the dimensions. The coordinates put the origin at the lower-left
+    corner of the bounding rectangle, so `x` runs across the width and `y`
+    along the depth.
     - I-section: `A = 2btf + (h − 2tf)tw`,
       `Ix = (b·h³ − (b − tw)(h − 2tf)³)/12`,
       `Iy = (2tf·b³ + (h − 2tf)tw³)/12`, `Ixy = 0`, centroid `(b/2, h/2)` and
@@ -476,6 +479,13 @@ be finite and positive and a model without nodes is rejected with
       gyration are `√(Ix/A) = b/2` and `√(Iy/A) = a/2`. The torsion constant
       is the exact solid-ellipse value `J = π·a³·b³/(a² + b²)`; it equals
       `Ix + Iy` only when `a = b`.
+    - Equilateral triangle with side `a`: the base lies along the bottom edge of
+      the bounding box and the apex is at the top centre, so the bounding box is
+      `a` wide and `h = a·√3/2` tall, the centroid is `(a/2, h/3)`,
+      `A = √3/4·a²`, `Ix = Iy = √3·a⁴/96`, `Ixy = 0` by symmetry and the radii
+      of gyration are `√(I/A) = a/√24` in both directions. The torsion constant
+      is the exact Saint-Venant value `J = √3·a⁴/80`, reported as `polarMoment`
+      like the other standard sections; it is not `Ix + Iy`.
     - Equal-thickness Z-section with the origin at the lower-left corner of the
       bounding rectangle: the web is centred (`x = w/2 − t/2 … w/2 + t/2`), the
       top flange runs from the web to the right edge at `y = h − t … h` and the
@@ -509,8 +519,8 @@ be finite and positive and a model without nodes is rejected with
     these sections. Dimensions must satisfy `0 < tf < h/2` and `0 < tw < b`
     (I and channel), `0 < t < min(b, h)/2` (tube), `0 < t < min(h, w)` (angle),
     `0 < tf < h` and `0 < tw < b` (T), positive finite `w` and `h` (ellipse),
-    or `0 < t < w` and `2t < h` (Z); violations report
-    `section/invalid-dimensions`. Results are deterministic and, like the
+    positive finite `a` (triangle), or `0 < t < w` and `2t < h` (Z); violations
+    report `section/invalid-dimensions`. Results are deterministic and, like the
     polygon calculator, are not stored in documents or consumed by the beam
     solver.
 
@@ -684,6 +694,12 @@ stable codes.
   torsion constant `J = πa³b³/(a² + b²)`, agrees with a 256-edge inscribed
   ellipse polygon on `area`, `Ix` and `Iy` within `1e-3`, and reports
   `section/invalid-dimensions` for zero, negative and non-finite dimensions;
+- the equilateral triangle reproduces `A = √3/4·a²`, the centroid
+  `(a/2, a·√3/6)`, `Ix = Iy = √3·a⁴/96`, `Ixy = 0`, the exact torsion constant
+  `J = √3·a⁴/80` and the radii `a/√24` for `a = 100` (`1e-12`), its closed
+  outline polygon agrees with area, centroid and all three second moments
+  within `1e-12`, and zero, negative, NaN or infinite `a` report
+  `section/invalid-dimensions`;
 - the equal-thickness Z section reproduces `A = t(w + h − t) = 2900`,
   `x̄ = 50`, `ȳ = 100`, `Ix = 14 796 666.67`, `Iy = 849 166.67`,
   `Ixy = 2 351 250` and `J = 290 000/3` for `200 × 100 × 10`, and its closed

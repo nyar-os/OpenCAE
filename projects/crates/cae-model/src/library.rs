@@ -507,8 +507,9 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 }
 
 /// Derived properties of a parametric standard section (I, rectangular tube,
-/// channel, equal-thickness L, T, solid ellipse or equal-thickness Z), reported
-/// with the same fields as [`PolygonSectionReport`].
+/// channel, equal-thickness L, T, solid ellipse, equilateral triangle or
+/// equal-thickness Z), reported with the same fields as
+/// [`PolygonSectionReport`].
 ///
 /// Coordinates use the millimetre-style layout of the section: `x` runs across
 /// the width and `y` along the depth, with the origin at the lower-left corner
@@ -521,7 +522,7 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 #[serde(rename_all = "camelCase")]
 pub struct StandardSectionReport {
     /// Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"`,
-    /// `"ellipse"` or `"z"`.
+    /// `"ellipse"`, `"triangle"` or `"z"`.
     pub shape: String,
     /// Unit system label (`mm` or `m`) the dimensions were interpreted in.
     pub units: String,
@@ -792,6 +793,29 @@ pub fn ellipse_section_report(width: f64, height: f64, units: Units) -> Result<S
     let iy = pi * a.powi(3) * b / 4.0;
     let torsion = pi * a.powi(3) * b.powi(3) / (a.powi(2) + b.powi(2));
     Ok(standard_section_report("ellipse", units, area, a, b, ix, iy, 0.0, torsion))
+}
+
+/// Computes the properties of a solid equilateral triangle.
+///
+/// `side` is the side length `a`. The base lies along the bottom edge of the
+/// bounding box and the apex is at the top centre, so the bounding box is `a`
+/// wide and `h = a·√3/2` tall with the origin at the lower-left corner. The
+/// centroid is `(a/2, h/3)`.
+///
+/// `A = √3/4·a²`, `Ix = Iy = √3·a⁴/96`, `Ixy = 0` by symmetry and the radii of
+/// gyration are `√(I/A) = a/√24` in both directions. As for the other standard
+/// sections, `polar_moment` holds the Saint-Venant torsion constant **not** the
+/// polar second moment: `J = √3·a⁴/80`, which is the exact equilateral-triangle
+/// value. The geometry requires a positive finite side; invalid dimensions
+/// report `section/invalid-dimensions`.
+pub fn triangle_section_report(side: f64, units: Units) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions("triangle", &[("side", side)])?;
+    let root_three = 3.0_f64.sqrt();
+    let height = root_three * side / 2.0;
+    let area = root_three * side.powi(2) / 4.0;
+    let second_moment = root_three * side.powi(4) / 96.0;
+    let torsion = root_three * side.powi(4) / 80.0;
+    Ok(standard_section_report("triangle", units, area, side / 2.0, height / 3.0, second_moment, second_moment, 0.0, torsion))
 }
 
 /// Computes the properties of an equal-thickness Z-section.

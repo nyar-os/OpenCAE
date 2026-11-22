@@ -18,7 +18,7 @@ use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
     Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
     ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, section_report, t_section_report,
-    tube_standard_section_report, z_section_report,
+    triangle_section_report, tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -666,6 +666,22 @@ fn section_ellipse(ctx: CallContext) -> Result<JsValue> {
     let report =
         ellipse_section_report(required_number_field(&request, "width")?, required_number_field(&request, "height")?, units)
             .map_err(fail)?;
+    respond(&ctx, &report)
+}
+
+/// Reports area, centroid, second moments and torsion constant of a solid
+/// equilateral triangle.
+///
+/// The request accepts `side` (`a`) and an optional `units` value (`mm` or `m`,
+/// default `mm`). The base lies along the bottom edge of the bounding box and
+/// the apex is at the top centre, so the centroid is `(a/2, a·√3/6)`.
+/// `polarMoment` holds the exact Saint-Venant torsion constant `√3·a⁴/80`, not
+/// `Ix + Iy`. The side must be positive and finite.
+#[function]
+fn section_triangle(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report = triangle_section_report(required_number_field(&request, "side")?, units).map_err(fail)?;
     respond(&ctx, &report)
 }
 
@@ -1331,6 +1347,7 @@ register_module![
     section_angle,
     section_t,
     section_ellipse,
+    section_triangle,
     section_z,
     support_add,
     support_remove,

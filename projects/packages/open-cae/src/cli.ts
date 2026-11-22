@@ -912,19 +912,22 @@ async function sectionCommand(args: readonly string[]): Promise<number> {
     if (action === 'ellipse') {
         return sectionEllipseCommand(args.slice(1));
     }
+    if (action === 'triangle') {
+        return sectionTriangleCommand(args.slice(1));
+    }
     if (action === 'z') {
         return sectionZCommand(args.slice(1));
     }
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'section',
-            expected: 'properties, polygon, i, tube, channel, angle, t, ellipse or z',
+            expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle or z',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'section',
         action,
-        expected: 'properties, polygon, i, tube, channel, angle, t, ellipse or z',
+        expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle or z',
     });
 }
 
@@ -1057,6 +1060,19 @@ async function sectionEllipseCommand(args: readonly string[]): Promise<number> {
     };
     return withSession(async (session) => {
         const report = await session.sectionEllipse(geometry, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionTriangleCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--side'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const geometry = {
+        side: requiredNumber(parsed, '--side'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionTriangle(geometry, units);
         console.log(JSON.stringify(report, null, 2));
         return 0;
     });

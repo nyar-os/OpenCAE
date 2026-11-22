@@ -7,7 +7,8 @@ use std::{
 use cae_model::{
     ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, angle_section_report,
     channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json, material_preset,
-    polygon_section_report, section_report, solve, t_section_report, tube_standard_section_report, z_section_report,
+    polygon_section_report, section_report, solve, t_section_report, triangle_section_report, tube_standard_section_report,
+    z_section_report,
 };
 
 const E: f64 = 210_000.0;
@@ -971,6 +972,91 @@ fn z_section_rejects_invalid_dimensions() {
         let error = result.expect_err("invalid z-section dimensions");
         assert_eq!(error.code, "section/invalid-dimensions");
     }
+}
+
+#[test]
+fn triangle_section_matches_closed_form_and_closed_polygon() {
+    let side: f64 = 100.0;
+    let report = triangle_section_report(side, Units::Millimeter).expect("triangle section");
+
+    let root_three = 3.0_f64.sqrt();
+    let height = root_three * side / 2.0;
+    let area = root_three * side.powi(2) / 4.0;
+    let second_moment = root_three * side.powi(4) / 96.0;
+    let torsion = root_three * side.powi(4) / 80.0;
+
+    assert_eq!(report.shape, "triangle");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, side / 2.0, 1e-12);
+    assert_close(report.centroid_y, height / 3.0, 1e-12);
+    assert_close(report.ix, second_moment, 1e-12);
+    assert_close(report.iy, second_moment, 1e-12);
+    assert_close(report.ixy, 0.0, 1e-12);
+    // `polarMoment` carries the exact Saint-Venant torsion constant J, which is
+    // not Ix + Iy for a solid triangle.
+    assert_close(report.polar_moment, torsion, 1e-12);
+    assert!((report.polar_moment - (report.ix + report.iy)).abs() > 1e-3 * torsion);
+    assert_close(report.radius_of_gyration_x, side / 24.0_f64.sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, side / 24.0_f64.sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_x, (report.ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (report.iy / area).sqrt(), 1e-12);
+
+    // The closed equilateral outline (base along the bottom edge, apex at the
+    // top centre) must reproduce the same area, centroid and second moments
+    // with the polygon sign convention, where `Ixy = 0` by symmetry.
+    let vertices = [(0.0, 0.0), (side, 0.0), (side / 2.0, height)];
+    let polygon = polygon_section_report(&vertices, Units::Millimeter).expect("triangle polygon");
+    assert_close(polygon.area, area, 1e-12);
+    assert_close(polygon.centroid_x, side / 2.0, 1e-12);
+    assert_close(polygon.centroid_y, height / 3.0, 1e-12);
+    assert_close(polygon.ix, second_moment, 1e-12);
+    assert_close(polygon.iy, second_moment, 1e-12);
+    assert!(polygon.ixy.abs() <= 1e-12 * second_moment, "the equilateral triangle has Ixy = 0, got {}", polygon.ixy);
+}
+
+#[test]
+fn triangle_section_rejects_invalid_dimensions() {
+    for result in [
+        triangle_section_report(0.0, Units::Millimeter),
+        triangle_section_report(-100.0, Units::Millimeter),
+        triangle_section_report(f64::NAN, Units::Millimeter),
+        triangle_section_report(f64::INFINITY, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid triangle dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+}
+
+#[test]
+fn triangle_section_report_is_deterministic_with_cli_field_names() {
+    let first = triangle_section_report(100.0, Units::Meter).expect("triangle");
+    let second = triangle_section_report(100.0, Units::Meter).expect("triangle");
+    assert_eq!(first, second);
+
+    let json = serde_json::to_value(&first).expect("json");
+    let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "area",
+            "centroidX",
+            "centroidY",
+            "ix",
+            "ixy",
+            "iy",
+            "polarMoment",
+            "radiusOfGyrationX",
+            "radiusOfGyrationY",
+            "shape",
+            "units",
+        ]
+    );
+    assert_eq!(json["shape"], "triangle");
+    assert_eq!(json["units"], "m");
+    assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json.get("centroid_x").is_none());
 }
 
 #[test]

@@ -202,8 +202,8 @@ export interface PolygonSectionReport {
  * circular section.
  */
 export interface StandardSectionReport {
-    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"`, `"ellipse"` or `"z"`. */
-    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't' | 'ellipse' | 'z';
+    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"`, `"ellipse"`, `"triangle"` or `"z"`. */
+    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't' | 'ellipse' | 'triangle' | 'z';
     /** Unit system the dimensions were interpreted in. */
     readonly units: Units;
     /** Cross-sectional area. */
@@ -297,6 +297,16 @@ export interface TSectionGeometry {
 export interface EllipseSectionGeometry {
     readonly width: number;
     readonly height: number;
+}
+
+/**
+ * Geometry of a solid equilateral triangle: side `a`, with `a > 0`. The base
+ * lies along the bottom edge of the bounding box and the apex is at the top
+ * centre, so the bounding box is `a` wide and `a·√3/2` tall with the origin at
+ * the lower-left corner.
+ */
+export interface TriangleSectionGeometry {
+    readonly side: number;
 }
 
 /**

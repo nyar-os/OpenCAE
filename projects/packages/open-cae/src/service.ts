@@ -86,6 +86,7 @@ import type {
     TSectionGeometry,
     TensionOnlyOptions,
     TensionOnlySolution,
+    TriangleSectionGeometry,
     ValidationReport,
     ZSectionGeometry,
 } from './types.js';
@@ -295,6 +296,13 @@ export function sectionT(geometry: TSectionGeometry, units: 'mm' | 'm'): Standar
 export function sectionEllipse(geometry: EllipseSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
     return decode<StandardSectionReport>(() =>
         binding('section.ellipse').section_ellipse(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of an equilateral triangle. */
+export function sectionTriangle(geometry: TriangleSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.triangle').section_triangle(JSON.stringify({ ...geometry, units })),
     );
 }
 

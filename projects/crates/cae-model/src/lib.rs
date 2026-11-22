@@ -58,8 +58,8 @@ pub use crate::{
     library::{
         MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, SectionProperties, SectionReport, StandardSectionReport,
         angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json,
-        material_preset, polygon_section_report, section_report, t_section_report, tube_standard_section_report,
-        z_section_report,
+        material_preset, polygon_section_report, section_report, t_section_report, triangle_section_report,
+        tube_standard_section_report, z_section_report,
     },
     model::{
         Element, ElementKind, ElementMaterial, ElementSplit, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,

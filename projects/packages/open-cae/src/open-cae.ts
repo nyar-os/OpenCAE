@@ -30,6 +30,7 @@ import type {
     SectionReport,
     StandardSectionReport,
     TSectionGeometry,
+    TriangleSectionGeometry,
     Units,
     ZSectionGeometry,
 } from './types.js';
@@ -186,6 +187,22 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionEllipse(geometry, units);
+    }
+
+    /**
+     * Derived properties of a solid equilateral triangle. The base lies along
+     * the bottom edge of the bounding box and the apex is at the top centre,
+     * so the centroid is `(side/2, side·√3/6)` and `Ixy = 0`.
+     * `polarMoment` carries the exact Saint-Venant torsion constant
+     * `√3·side⁴/80`, not `Ix + Iy`. Requires a positive, finite `side`.
+     */
+    async sectionTriangle(
+        geometry: TriangleSectionGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionTriangle(geometry, units);
     }
 
     /**
