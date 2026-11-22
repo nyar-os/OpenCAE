@@ -3997,18 +3997,18 @@ fn condense_releases(stiffness: &[[f64; 6]; 6], load: &[f64; 6], released: [bool
         }
         // `z = K_rr⁻¹·K_erᵀ` for this row.
         let mut z = vec![0.0; count];
-        for a in 0..count {
+        for (a, value) in z.iter_mut().enumerate() {
             for b in 0..count {
-                z[a] += inverse[a * count + b] * stiffness[row][indices[b]];
+                *value += inverse[a * count + b] * stiffness[row][indices[b]];
             }
         }
-        for column in 0..6 {
+        for (column, value) in condensed_stiffness[row].iter_mut().enumerate() {
             if released[column] {
-                condensed_stiffness[row][column] = 0.0;
+                *value = 0.0;
             }
             else {
                 let correction: f64 = (0..count).map(|k| z[k] * stiffness[indices[k]][column]).sum();
-                condensed_stiffness[row][column] = stiffness[row][column] - correction;
+                *value = stiffness[row][column] - correction;
             }
         }
         let correction: f64 = (0..count).map(|k| z[k] * load[indices[k]]).sum();
@@ -4034,9 +4034,9 @@ fn restore_released_rotations(beam: &BeamLocal, local: &mut [f64; 6]) {
     let mut rhs = vec![0.0; count];
     for (a, &index) in indices.iter().enumerate() {
         let mut value = beam.load[index];
-        for column in 0..6 {
+        for (column, local_value) in local.iter().enumerate() {
             if !beam.released[column] {
-                value -= beam.stiffness[index][column] * local[column];
+                value -= beam.stiffness[index][column] * local_value;
             }
         }
         rhs[a] = value;

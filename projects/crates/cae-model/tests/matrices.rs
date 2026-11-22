@@ -47,9 +47,9 @@ fn axial_bar_stiffness_and_lumped_mass_match_the_closed_form() {
     assert_eq!(matrices.dofs[2].component, "ux");
 
     let expected = [[axial, 0.0, -axial, 0.0], [0.0, 0.0, 0.0, 0.0], [-axial, 0.0, axial, 0.0], [0.0, 0.0, 0.0, 0.0]];
-    for row in 0..4 {
-        for column in 0..4 {
-            assert_close(matrices.stiffness[row][column], expected[row][column], 1e-12);
+    for (row, expected_row) in expected.iter().enumerate() {
+        for (column, expected_value) in expected_row.iter().enumerate() {
+            assert_close(matrices.stiffness[row][column], *expected_value, 1e-12);
             assert_close(matrices.stiffness[row][column], matrices.stiffness[column][row], 1e-12);
         }
     }
