@@ -99,6 +99,13 @@ export interface Material {
     readonly allowableStress?: number;
     /** Coefficient of thermal expansion in `1/K`; required by thermal loads. */
     readonly alpha?: number;
+    /**
+     * Thermal conductivity `k` in `W/(m·K)`; required only by `heat()`.
+     *
+     * Units are never converted, so a millimetre document must supply the
+     * length-consistent conductivity.
+     */
+    readonly conductivity?: number;
     /** Parametric section geometry, when declared. */
     readonly section?: Section;
 }
@@ -303,6 +310,62 @@ export interface Solution {
     readonly maxDisplacement: NodeDisplacement;
     readonly maxAxialForce: MaxAxialForce;
     readonly maxMoment: MaxMoment;
+}
+
+/** Solved temperature of one node in a heat-conduction result. */
+export interface HeatTemperature {
+    readonly id: string;
+    readonly temperature: number;
+    /** `true` when the temperature was fixed by a Dirichlet boundary. */
+    readonly fixed: boolean;
+}
+
+/** Steady-state axial heat flow of one member. */
+export interface HeatElementFlux {
+    readonly id: string;
+    readonly from: string;
+    readonly to: string;
+    readonly length: number;
+    readonly conductivity: number;
+    readonly area: number;
+    readonly temperatureFrom: number;
+    readonly temperatureTo: number;
+    /**
+     * `q = k·A·(T_from − T_to)/L`, in watts, positive from `from` to `to`.
+     */
+    readonly flux: number;
+}
+
+/** Heat supplied by one fixed-temperature boundary; positive enters the model. */
+export interface HeatReaction {
+    readonly node: string;
+    readonly heat: number;
+}
+
+/**
+ * Result of a steady-state heat-conduction analysis.
+ *
+ * This report carries no displacement, strain or force fields. It contains
+ * only temperatures and axial heat flows, so it is never a structural result.
+ */
+export interface HeatSolution {
+    readonly format: string;
+    readonly version: number;
+    /** Always `heat`. */
+    readonly analysis: string;
+    readonly units: string;
+    readonly temperatures: readonly HeatTemperature[];
+    readonly elementFlux: readonly HeatElementFlux[];
+    readonly reactions: readonly HeatReaction[];
+    /** Largest absolute free-degree-of-freedom balance residual. */
+    readonly residual: number;
+    readonly ok: boolean;
+}
+
+/** Options of `heat()`. */
+export interface HeatOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
 }
 
 /** Active state of one tension-only truss in a tension-only solution. */
@@ -1051,6 +1114,20 @@ export interface NodeMassRequest {
     readonly mass: number;
 }
 
+/** Request of `setNodeTemperature()`; `null` clears the fixed temperature. */
+export interface NodeTemperatureRequest {
+    readonly id: string;
+    /** Fixed temperature in K or °C, or `null` to remove the boundary. */
+    readonly temperature: number | null;
+}
+
+/** Request of `setNodeHeat()`; `0` clears the heat load. */
+export interface NodeHeatRequest {
+    readonly id: string;
+    /** Concentrated heat flow in watts, positive into the node. */
+    readonly heat: number;
+}
+
 /** Request of `mergeNodes()`; the `into` node survives with its coordinates. */
 export interface NodeMergeRequest {
     /** Node that is removed after its references move to `into`. */
@@ -1159,6 +1236,8 @@ export interface MaterialSetRequest {
     readonly allowableStress?: number;
     /** Coefficient of thermal expansion in `1/K`. */
     readonly alpha?: number;
+    /** Thermal conductivity `k` in `W/(m·K)`, used only by `heat()`. */
+    readonly conductivity?: number;
     /** Parametric section geometry. */
     readonly section?: Section;
 }

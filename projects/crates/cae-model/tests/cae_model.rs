@@ -162,7 +162,7 @@ fn fully_constrained_structure_balances_external_loads() {
 #[test]
 fn validation_reports_required_error_codes() {
     let mut duplicate = single_bar_model();
-    duplicate.nodes.push(Node { id: "n2".to_string(), x: 10.0, y: 10.0, z: 0.0, mass: 0.0 });
+    duplicate.nodes.push(Node { id: "n2".to_string(), x: 10.0, y: 10.0, z: 0.0, mass: 0.0, temperature: None, heat: 0.0 });
     assert!(duplicate.validate().iter().any(|issue| issue.code == "node/duplicate-id"));
 
     let mut zero_length = single_bar_model();
@@ -311,7 +311,8 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["solver"]["thermalExpansion"], "supported");
     assert_eq!(capabilities["solver"]["thermalGradient"], "supported");
     assert_eq!(capabilities["solver"]["partialSpanLoad"], "supported");
-    assert_eq!(capabilities["solver"]["thermal"], "unsupported");
+    assert_eq!(capabilities["solver"]["thermal"], "supported");
+    assert_eq!(capabilities["solver"]["heatTransfer"], "supported");
     assert_eq!(capabilities["io"]["csv"], "supported");
     assert_eq!(capabilities["io"]["vtk"], "supported");
     assert_eq!(capabilities["io"]["md"], "supported");

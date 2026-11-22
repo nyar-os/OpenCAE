@@ -12,6 +12,8 @@
 //! * uniform member temperature changes with linear thermal expansion
 //!   (`α·ΔT`) and the matching equivalent nodal loads;
 //! * prescribed (enforced) nodal displacements and support settlements;
+//! * steady-state axial heat conduction with fixed nodal temperatures,
+//!   concentrated nodal heat flows, element heat fluxes and boundary reactions;
 //! * modal analysis with a diagonal (lumped) mass matrix and a symmetric
 //!   Jacobi eigen-solver, including steady-state harmonic (frequency-response)
 //!   sweeps by modal superposition;
@@ -29,11 +31,11 @@
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
-//! Three-dimensional beams, frames, material nonlinearity, temperature
-//! gradients, heat transfer, contact and solver-specific import formats
-//! (Abaqus `.inp`, STEP, ...) are **not** implemented. See [`CAPABILITIES_JSON`]
-//! for the machine-readable capability matrix and the repository Readme for the
-//! user facing description.
+//! Three-dimensional beams, frames, material nonlinearity, transient heat
+//! transfer (convection, radiation and time stepping), contact and
+//! solver-specific import formats (Abaqus `.inp`, STEP, ...) are **not**
+//! implemented. See [`CAPABILITIES_JSON`] for the machine-readable capability
+//! matrix and the repository Readme for the user facing description.
 
 #![deny(missing_docs)]
 
@@ -67,7 +69,8 @@ pub use crate::{
         ConstructionStageResult, ConstructionStageSolution, DEFLECTION_REPORT_FORMAT, DEFLECTION_REPORT_VERSION,
         DeflectionGoverning, DeflectionSolution, DeflectionStation, ElementDeflection, ElementDiagram, ElementEnvelope,
         ElementResult, ElementStress, EndForces, EnvelopeValue, FREQUENCY_RESPONSE_REPORT_FORMAT,
-        FREQUENCY_RESPONSE_REPORT_VERSION, ForceResultant, FrequencyResponsePoint, FrequencyResponseSolution,
+        FREQUENCY_RESPONSE_REPORT_VERSION, ForceResultant, FrequencyResponsePoint, FrequencyResponseSolution, HEAT_ANALYSIS,
+        HEAT_REPORT_FORMAT, HEAT_REPORT_VERSION, HeatElementFlux, HeatReaction, HeatSolution, HeatTemperature,
         INTERNAL_FORCE_REPORT_FORMAT, INTERNAL_FORCE_REPORT_VERSION, InternalForceSolution, LOAD_CASE_REPORT_FORMAT,
         LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT, MATRIX_REPORT_VERSION,
         MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MatrixDof, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape,
@@ -78,8 +81,8 @@ pub use crate::{
         STRESS_REPORT_VERSION, SectionForces, Solution, SpectrumCombination, SpectrumMode, SpectrumPoint, StationStress,
         StressGoverning, StressSolution, SupportReaction, SystemMatrices, TENSION_ONLY_REPORT_FORMAT,
         TENSION_ONLY_REPORT_VERSION, TensionOnlyElement, TensionOnlySolution, solve, solve_buckling,
-        solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection,
-        solve_frequency_response, solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear,
+        solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response,
+        solve_heat, solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear,
         solve_response_spectrum, solve_stress, solve_tension_only, summarize_load_cases,
     },
     validate::{Issue, Severity},
@@ -121,7 +124,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "thermalExpansion": "supported",
     "thermalGradient": "supported",
     "partialSpanLoad": "supported",
-    "thermal": "unsupported"
+    "thermal": "supported",
+    "heatTransfer": "supported"
   },
   "io": {
     "ocae": "supported",

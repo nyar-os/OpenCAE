@@ -171,6 +171,14 @@ pub struct Material {
     /// change, and is never used by analyses without thermal loads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha: Option<f64>,
+    /// Thermal conductivity `k` in `W/(m·K)`.
+    ///
+    /// It is required only by steady-state heat-conduction analysis and is
+    /// ignored by every structural analysis. Units are never converted; with a
+    /// metre document use `W/(m·K)`, with a millimetre document supply the
+    /// length-consistent value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conductivity: Option<f64>,
     /// Parametric section geometry.
     ///
     /// Supplying a section lets beams omit their own `inertia` and enables
@@ -251,6 +259,25 @@ pub struct Node {
     /// (`kg`). It defaults to `0`, so older documents load unchanged.
     #[serde(default)]
     pub mass: f64,
+    /// Fixed temperature of a steady-state heat-conduction analysis, in kelvin
+    /// or degrees Celsius (a difference is what matters).
+    ///
+    /// A node with a temperature is a Dirichlet boundary of [`crate::solve_heat`]
+    /// and the matching fixed-temperature reaction is reported. It is ignored
+    /// by every structural analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    /// Concentrated nodal heat flow in watts, positive into the node.
+    ///
+    /// It is an external load of [`crate::solve_heat`] only and defaults to `0`,
+    /// so existing documents and every structural analysis are unchanged.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub heat: f64,
+}
+
+/// Returns `true` when a number is exactly zero, so it is omitted from JSON.
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 
 /// Optional per-element material override.
@@ -608,6 +635,7 @@ impl Model {
                 density: 0.0,
                 allowable_stress: None,
                 alpha: None,
+                conductivity: None,
                 section: None,
             },
             nodes: Vec::new(),
@@ -668,7 +696,7 @@ impl Model {
                 "a two-dimensional document cannot add node `{id}` with z={z}; set dimension to 3 first"
             )));
         }
-        self.nodes.push(Node { id, x, y, z, mass: 0.0 });
+        self.nodes.push(Node { id, x, y, z, mass: 0.0, temperature: None, heat: 0.0 });
         self.bump_revision();
         Ok(())
     }
@@ -690,6 +718,47 @@ impl Model {
         }
         let node = self.nodes.iter_mut().find(|node| node.id == id).expect("node was looked up above");
         node.mass = mass;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the fixed temperature of a node.
+    ///
+    /// The value is a heat-conduction Dirichlet boundary and is ignored by
+    /// structural analysis. `None` removes the boundary again. Unknown
+    /// identifiers are rejected with `node/unknown-id` and a non-finite value
+    /// with `node/invalid-temperature` before the document is modified.
+    pub fn set_node_temperature(&mut self, id: &str, temperature: Option<f64>) -> Result<(), CaeError> {
+        if self.node(id).is_none() {
+            return Err(CaeError::new("node/unknown-id", format!("unknown node `{id}`")));
+        }
+        if temperature.is_some_and(|value| !value.is_finite()) {
+            return Err(CaeError::new("node/invalid-temperature", format!("fixed temperature of node `{id}` must be finite")));
+        }
+        let node = self.nodes.iter_mut().find(|node| node.id == id).expect("node was looked up above");
+        node.temperature = temperature;
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets the concentrated nodal heat flow of a node.
+    ///
+    /// The value is a steady-state heat-conduction load in watts, positive into
+    /// the node, and is ignored by structural analysis. `0` removes it. Unknown
+    /// identifiers are rejected with `node/unknown-id` and a non-finite value
+    /// with `load/invalid-heat` before the document is modified.
+    pub fn set_node_heat(&mut self, id: &str, heat: f64) -> Result<(), CaeError> {
+        if self.node(id).is_none() {
+            return Err(CaeError::new("node/unknown-id", format!("unknown node `{id}`")));
+        }
+        if !heat.is_finite() {
+            return Err(CaeError::new(
+                "load/invalid-heat",
+                format!("heat flow of node `{id}` must be finite (currently {heat})"),
+            ));
+        }
+        let node = self.nodes.iter_mut().find(|node| node.id == id).expect("node was looked up above");
+        node.heat = heat;
         self.bump_revision();
         Ok(())
     }
@@ -979,6 +1048,12 @@ impl Model {
             return Err(CaeError::new(
                 "material/invalid-alpha",
                 format!("coefficient of thermal expansion alpha must be finite (currently {:?})", material.alpha),
+            ));
+        }
+        if material.conductivity.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "material/invalid-conductivity",
+                format!("thermal conductivity must be positive and finite (currently {:?})", material.conductivity),
             ));
         }
         if let Some(section) = material.section {

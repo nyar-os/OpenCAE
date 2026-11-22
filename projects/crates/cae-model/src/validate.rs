@@ -139,6 +139,15 @@ impl Model {
                 ),
             ));
         }
+        if self.material.conductivity.is_some_and(|value| !positive_finite(value)) {
+            report.push(check_error(
+                "material/invalid-conductivity",
+                format!(
+                    "thermal conductivity of material `{}` must be positive and finite (currently {:?})",
+                    self.material.name, self.material.conductivity
+                ),
+            ));
+        }
         let section_inertia = match self.material.section {
             Some(section) => match section.properties() {
                 Ok(properties) => Some(properties.inertia_strong),
@@ -159,6 +168,18 @@ impl Model {
                 report.push(check_error(
                     "node/invalid-mass",
                     format!("mass of node `{}` must be finite and non-negative (currently {})", node.id, node.mass),
+                ));
+            }
+            if node.temperature.is_some_and(|value| !value.is_finite()) {
+                report.push(check_error(
+                    "node/invalid-temperature",
+                    format!("fixed temperature of node `{}` must be finite", node.id),
+                ));
+            }
+            if !node.heat.is_finite() {
+                report.push(check_error(
+                    "load/invalid-heat",
+                    format!("heat flow of node `{}` must be finite (currently {})", node.id, node.heat),
                 ));
             }
             if self.dimension == 2 && node.z != 0.0 {
@@ -220,8 +241,7 @@ impl Model {
                     "element/degenerate",
                     format!("element `{}` has identical start and end nodes", element.id),
                 ));
-            }
-            else if let (Some(start), Some(end)) = (start, end) {
+            } else if let (Some(start), Some(end)) = (start, end) {
                 let delta_x = end.x - start.x;
                 let delta_y = end.y - start.y;
                 let delta_z = end.z - start.z;
@@ -231,8 +251,7 @@ impl Model {
                 }
                 let pair = if element.from <= element.to {
                     (element.from.as_str(), element.to.as_str())
-                }
-                else {
+                } else {
                     (element.to.as_str(), element.from.as_str())
                 };
                 if !element_pairs.insert(pair) {
@@ -344,8 +363,7 @@ impl Model {
                         "element/invalid-temperature",
                         format!("temperature change of element `{}` must be finite", element.id),
                     ));
-                }
-                else if self.material.alpha.is_none() {
+                } else if self.material.alpha.is_none() {
                     report.push(check_error(
                         "material/missing-alpha",
                         format!(
@@ -353,8 +371,7 @@ impl Model {
                             element.id
                         ),
                     ));
-                }
-                else if self.material.alpha == Some(0.0) && delta != 0.0 {
+                } else if self.material.alpha == Some(0.0) && delta != 0.0 {
                     report.push(check_warning(
                         "element/inactive-temperature",
                         format!(
@@ -370,8 +387,7 @@ impl Model {
                         "element/invalid-temperature-gradient",
                         format!("temperature gradient of element `{}` must be finite", element.id),
                     ));
-                }
-                else if element.kind != ElementKind::Beam {
+                } else if element.kind != ElementKind::Beam {
                     report.push(check_error(
                         "element/gradient-requires-beam",
                         format!(
@@ -379,8 +395,7 @@ impl Model {
                             element.id
                         ),
                     ));
-                }
-                else if self.material.alpha.is_none() {
+                } else if self.material.alpha.is_none() {
                     report.push(check_error(
                         "material/missing-alpha",
                         format!(
@@ -388,8 +403,7 @@ impl Model {
                             element.id
                         ),
                     ));
-                }
-                else if self.material.alpha == Some(0.0) && gradient != 0.0 {
+                } else if self.material.alpha == Some(0.0) && gradient != 0.0 {
                     report.push(check_warning(
                         "element/inactive-temperature",
                         format!(
@@ -397,8 +411,7 @@ impl Model {
                             element.id
                         ),
                     ));
-                }
-                else if gradient != 0.0 && section_inertia.is_none() {
+                } else if gradient != 0.0 && section_inertia.is_none() {
                     report.push(check_error(
                         "material/missing-section",
                         format!(
@@ -417,8 +430,7 @@ impl Model {
                             element.id
                         ),
                     ));
-                }
-                else if release.is_empty() {
+                } else if release.is_empty() {
                     report.push(check_error(
                         "element/invalid-release",
                         format!("release of element `{}` must free at least one end", element.id),
@@ -459,8 +471,7 @@ impl Model {
                             support.node
                         ),
                     ));
-                }
-                else {
+                } else {
                     let norm = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
                     if !norm.is_finite() || norm <= 0.0 {
                         report.push(check_error(
@@ -488,8 +499,7 @@ impl Model {
                         "document/dimension-mismatch",
                         format!("node `{}` in a three-dimensional document cannot constrain rz rotation; beam elements are two-dimensional only", support.node),
                     ));
-                }
-                else if !rotation_nodes.contains(support.node.as_str()) {
+                } else if !rotation_nodes.contains(support.node.as_str()) {
                     report.push(check_error(
                         "support/inactive-dof",
                         format!("node `{}` has no rz rotational degree of freedom: it has no beam element, or every beam end at the node is released", support.node),
@@ -512,8 +522,7 @@ impl Model {
                                 support.node
                             ),
                         ));
-                    }
-                    else if stiffness > 0.0 && constrained {
+                    } else if stiffness > 0.0 && constrained {
                         report.push(check_error(
                             "support/spring-constrained",
                             format!(
@@ -550,8 +559,7 @@ impl Model {
                                 support.node
                             ),
                         ));
-                    }
-                    else if !rotation_nodes.contains(support.node.as_str()) {
+                    } else if !rotation_nodes.contains(support.node.as_str()) {
                         report.push(check_error(
                             "support/inactive-dof",
                             format!(
@@ -571,8 +579,7 @@ impl Model {
                             "support/invalid-prescribed",
                             format!("prescribed `{name}` of node `{}` must be finite", support.node),
                         ));
-                    }
-                    else if value != 0.0 && !constrained {
+                    } else if value != 0.0 && !constrained {
                         report.push(check_error(
                             "support/prescribed-unconstrained",
                             format!(
@@ -588,8 +595,7 @@ impl Model {
                             "document/dimension-mismatch",
                             format!("node `{}` in a two-dimensional document cannot prescribe a Z displacement (uz); set dimension to 3 for 3D models", support.node),
                         ));
-                    }
-                    else if !support.dz {
+                    } else if !support.dz {
                         report.push(check_error(
                             "support/prescribed-unconstrained",
                             format!(
@@ -627,8 +633,7 @@ impl Model {
                         "document/dimension-mismatch",
                         format!("node `{}` in a three-dimensional document cannot carry an mz moment; beam elements are two-dimensional only", load.node),
                     ));
-                }
-                else if !rotation_nodes.contains(load.node.as_str()) {
+                } else if !rotation_nodes.contains(load.node.as_str()) {
                     report.push(check_error(
                         "load/inactive-dof",
                         format!("node `{}` has no rotational degree of freedom for the mz moment: it has no beam element, or every beam end at the node is released", load.node),
@@ -662,8 +667,7 @@ impl Model {
         for combination in &self.combinations {
             if combination.name.trim().is_empty() {
                 report.push(check_error("combination/invalid-name", "a load combination requires a non-empty name"));
-            }
-            else if !combination_names.insert(combination.name.as_str()) {
+            } else if !combination_names.insert(combination.name.as_str()) {
                 report.push(check_error(
                     "combination/duplicate-name",
                     format!("load combination name `{}` is duplicated", combination.name),
@@ -674,8 +678,7 @@ impl Model {
                     "combination/invalid-factor",
                     format!("load combination `{}` factors must be finite", combination.name),
                 ));
-            }
-            else if combination.gravity != 0.0 && self.gravity.is_none() {
+            } else if combination.gravity != 0.0 && self.gravity.is_none() {
                 report.push(check_notice(
                     "combination/no-gravity",
                     format!(
@@ -708,8 +711,7 @@ fn into_issues(report: CheckReport) -> Vec<Issue> {
 fn mechanism_issue(unconstrained: Vec<String>) -> CheckIssue {
     let detail = if unconstrained.is_empty() {
         "the stiffness matrix is singular; enough supports exist but some constraints are collinear or degenerate".to_string()
-    }
-    else {
+    } else {
         format!(
             "the stiffness matrix is singular; these nodes are not constrained by any support: {}",
             unconstrained.join(", ")

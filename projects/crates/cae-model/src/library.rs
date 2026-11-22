@@ -92,6 +92,7 @@ impl MaterialPreset {
             density: self.density(units),
             allowable_stress: self.allowable_stress(units),
             alpha: None,
+            conductivity: None,
             section,
         }
     }

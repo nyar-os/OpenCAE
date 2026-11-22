@@ -21,6 +21,8 @@ export interface NativeBinding {
     node_add(path: string, requestJson: string): string;
     node_update(path: string, requestJson: string): string;
     node_mass(path: string, requestJson: string): string;
+    node_temperature(path: string, requestJson: string): string;
+    node_heat(path: string, requestJson: string): string;
     node_merge(path: string, requestJson: string): string;
     node_remove(path: string, requestJson: string): string;
     element_add(path: string, requestJson: string): string;
@@ -44,6 +46,7 @@ export interface NativeBinding {
     solve_buckling_combinations(path: string, requestJson?: string): string;
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
+    heat(path: string, requestJson?: string): string;
     reactions(path: string, requestJson?: string): string;
     node_displacement(path: string, requestJson: string): string;
     element_result(path: string, requestJson: string): string;

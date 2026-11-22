@@ -34,6 +34,8 @@ import type {
     FrequencyResponseOptions,
     FrequencyResponseSolution,
     GravitySetRequest,
+    HeatOptions,
+    HeatSolution,
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
@@ -46,8 +48,10 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeHeatRequest,
     NodeMassRequest,
     NodeMergeRequest,
+    NodeTemperatureRequest,
     NodeUpdateRequest,
     NodalStressOptions,
     NodalStressSolution,
@@ -151,6 +155,18 @@ export function updateNode(path: string, request: NodeUpdateRequest): DocumentSu
 /** Sets or clears the concentrated mass of a node and returns the updated summary. */
 export function setNodeMass(path: string, request: NodeMassRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('node.mass').node_mass(path, JSON.stringify(request)));
+}
+
+/** Sets or clears the fixed temperature of a node. */
+export function setNodeTemperature(path: string, request: NodeTemperatureRequest): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        binding('node.temperature').node_temperature(path, JSON.stringify(request)),
+    );
+}
+
+/** Sets the concentrated nodal heat flow. */
+export function setNodeHeat(path: string, request: NodeHeatRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('node.heat').node_heat(path, JSON.stringify(request)));
 }
 
 /** Merges one node into another and returns the updated summary. */
@@ -271,6 +287,15 @@ export function solve(
               });
     return decode<Solution | ModalSolution | BucklingSolution | TensionOnlySolution>(() =>
         request === undefined ? binding('solve').solve(path) : binding('solve').solve(path, request),
+    );
+}
+
+/** Solves steady-state heat conduction and optionally writes the JSON report. */
+export function heat(path: string, options: HeatOptions = {}): HeatSolution {
+    return decode<HeatSolution>(() =>
+        options.out === undefined
+            ? binding('heat').heat(path)
+            : binding('heat').heat(path, JSON.stringify({ out: options.out })),
     );
 }
 

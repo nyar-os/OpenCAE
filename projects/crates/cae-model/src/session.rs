@@ -21,13 +21,13 @@ use crate::{
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
-        DeflectionSolution, ElementResult, FrequencyResponseSolution, InternalForceSolution, LoadCaseSummary, ModalSolution,
-        NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary,
-        ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint, StressSolution, SupportReaction,
-        SystemMatrices, TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations, solve_combinations,
-        solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces, solve_matrices,
-        solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only,
-        summarize_load_cases,
+        DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InternalForceSolution, LoadCaseSummary,
+        ModalSolution, NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION,
+        ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint, StressSolution,
+        SupportReaction, SystemMatrices, TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations,
+        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_heat,
+        solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum,
+        solve_stress, solve_tension_only, summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -325,6 +325,22 @@ impl OpenCae {
         self.edit(|model| model.set_node_mass(id, mass))
     }
 
+    /// Sets or clears the fixed temperature of a node and saves the document.
+    ///
+    /// `None` removes the Dirichlet boundary again. The value is used only by
+    /// [`OpenCae::solve_heat`].
+    pub fn set_node_temperature(&mut self, id: &str, temperature: Option<f64>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_node_temperature(id, temperature))
+    }
+
+    /// Sets the concentrated nodal heat flow and saves the document.
+    ///
+    /// `0` removes the heat load. The value is used only by
+    /// [`OpenCae::solve_heat`].
+    pub fn set_node_heat(&mut self, id: &str, heat: f64) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_node_heat(id, heat))
+    }
+
     /// Appends a truss element and saves the document.
     ///
     /// `youngs_modulus` and `area` are optional per-element overrides of the
@@ -551,6 +567,7 @@ impl OpenCae {
             };
             let mut material = preset.material(units, area, section);
             material.alpha = document.model.material.alpha;
+            material.conductivity = document.model.material.conductivity;
             if let Some(stress) = allowable_stress {
                 material.allowable_stress = Some(stress);
             }
@@ -770,6 +787,21 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(solution)
+    }
+
+    /// Solves steady-state heat conduction through the open document.
+    ///
+    /// When `out` is given the JSON heat report is written atomically to that
+    /// path. A failed analysis writes nothing and leaves the document unchanged.
+    pub fn solve_heat(&self, out: Option<&Path>) -> Result<HeatSolution, CaeError> {
+        let model = &self.current()?.model;
+        let heat = solve_heat(model)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&heat)
+                .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize heat result: {error}")))?;
+            write_atomic(path, &json)?;
+        }
+        Ok(heat)
     }
 
     /// Solves the open document for `modes` natural frequencies.

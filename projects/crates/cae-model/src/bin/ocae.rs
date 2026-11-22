@@ -24,6 +24,8 @@ Usage:
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
   ocae node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]
   ocae node mass <file> --id <id> --mass <mass>
+  ocae node temperature <file> --id <id> [--temperature <t>] [--clear]
+  ocae node heat <file> --id <id> --heat <w>
   ocae node remove <file> --id <id>
   ocae node merge <file> --from <id> --into <id>
   ocae node displacement <file> --id <id>
@@ -35,7 +37,7 @@ Usage:
   ocae element release <file> --id <id> [--start] [--end]
   ocae element gradient <file> --id <id> [--value <dT>]
   ocae element span <file> --id <id> [--start <s>] [--end <s>]
-  ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--alpha <a>]
+  ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--alpha <a>] [--conductivity <k>]
   ocae material preset <file> --preset <name> [--section rectangle|circle|i|box|tube|channel]
                         [--width <w>] [--height <h>] [--diameter <d>] [--depth <d>]
                         [--flange-width <b>] [--flange-thickness <t>] [--web-thickness <t>]
@@ -60,6 +62,7 @@ Usage:
   ocae reaction <file> --node <node>
                    [--element truss|beam] [--dimension 2|3]
   ocae modal <file> [--modes N] [--out report.json]
+  ocae heat <file> [--out report.json]
   ocae buckling <file> [--modes N] [--out report.json]
   ocae buckling-combinations <file> [--modes N] [--out report.json]
   ocae forces <file> [--stations N] [--out report.json]
@@ -129,6 +132,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "load-cases" => load_cases_command(&args[1..]),
         "matrices" => matrices_command(&args[1..]),
         "spectrum" => spectrum_command(&args[1..]),
+        "heat" => heat_command(&args[1..]),
         "export" => export(&args[1..]),
         "report" => report(&args[1..]),
         "import" => Err(not_implemented("Abaqus .inp import")),
@@ -137,7 +141,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
             Err(CaeError::new("cli/unknown-command", "`beam` is not a command; use `--kind beam --I <I>` with `element add`"))
         }
         "frame" | "frame3d" => Err(not_implemented("3D frame elements")),
-        "thermal" => Err(not_implemented("thermal analysis")),
+        "thermal" => heat_command(&args[1..]),
         "contact" => Err(not_implemented("contact analysis")),
         other => Err(CaeError::new("cli/unknown-command", format!("unknown command `{other}`; run --help for usage"))),
     }
@@ -152,18 +156,20 @@ fn node_command(args: &[String]) -> Result<i32, CaeError> {
         Some("add") => node_add(&args[1..]),
         Some("update") => node_update(&args[1..]),
         Some("mass") => node_mass(&args[1..]),
+        Some("temperature") => node_temperature(&args[1..]),
+        Some("heat") => node_heat(&args[1..]),
         Some("remove") => node_remove(&args[1..]),
         Some("merge") => node_merge(&args[1..]),
         Some("displacement") => node_displacement(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `mass`, `remove`, `merge` or `displacement` is supported"
+                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `mass`, `temperature`, `heat`, `remove`, `merge` or `displacement` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`node` is missing a subcommand; only `add`, `update`, `mass`, `remove`, `merge` or `displacement` is supported",
+            "`node` is missing a subcommand; only `add`, `update`, `mass`, `temperature`, `heat`, `remove`, `merge` or `displacement` is supported",
         )),
     }
 }
@@ -257,6 +263,33 @@ fn node_mass(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.set_node_mass(id, mass)?;
     println!("node `{id}` mass set to {mass} (revision {})", summary.revision);
+    Ok(0)
+}
+
+fn node_temperature(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--temperature"], &["--clear"])?;
+    let file = positional(&parsed, 0, "node temperature <file> --id <id> [--temperature <t>] [--clear]")?;
+    let id = required(&parsed, "--id")?;
+    let temperature = if parsed.flags.contains("--clear") { None } else { number(&parsed, "--temperature")? };
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_node_temperature(id, temperature)?;
+    match temperature {
+        Some(value) => println!("node `{id}` temperature set to {value} (revision {})", summary.revision),
+        None => println!("node `{id}` temperature cleared (revision {})", summary.revision),
+    }
+    Ok(0)
+}
+
+fn node_heat(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--heat"], &[])?;
+    let file = positional(&parsed, 0, "node heat <file> --id <id> --heat <w>")?;
+    let id = required(&parsed, "--id")?;
+    let heat = required_number(&parsed, "--heat")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_node_heat(id, heat)?;
+    println!("node `{id}` heat set to {heat} (revision {})", summary.revision);
     Ok(0)
 }
 
@@ -637,6 +670,7 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
             "--name",
             "--allowable",
             "--alpha",
+            "--conductivity",
             "--section",
             "--width",
             "--height",
@@ -657,6 +691,7 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
     let density = number(&parsed, "--density")?;
     let allowable = number(&parsed, "--allowable")?;
     let alpha = number(&parsed, "--alpha")?;
+    let conductivity = number(&parsed, "--conductivity")?;
     let section = optional_section(&parsed)?;
     let name = parsed.options.get("--name").cloned();
     let mut session = session();
@@ -668,6 +703,7 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
         density: density.unwrap_or(current.material.density),
         allowable_stress: allowable.or(current.material.allowable_stress),
         alpha: alpha.or(current.material.alpha),
+        conductivity: conductivity.or(current.material.conductivity),
         section: section.or(current.material.section),
     };
     let summary = session.set_material_data(material)?;
@@ -988,6 +1024,17 @@ fn modal_command(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn heat_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--out"], &[])?;
+    let file = positional(&parsed, 0, "heat <file> [--out report.json]")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let out = parsed.options.get("--out").map(PathBuf::from);
+    let result = session.solve_heat(out.as_deref())?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(0)
+}
+
 fn buckling_command(args: &[String]) -> Result<i32, CaeError> {
     let parsed = parse(args, &["--modes", "--out"], &[])?;
     let file = positional(&parsed, 0, "buckling <file> [--modes N] [--out report.json]")?;
@@ -1122,9 +1169,11 @@ fn spectrum_command(args: &[String]) -> Result<i32, CaeError> {
     };
     let combination = SpectrumCombination::parse(parsed.options.get("--combination").map_or("srss", String::as_str))?;
     let damping = match parsed.options.get("--damping") {
-        Some(value) => Some(value.parse::<f64>().map_err(|_| {
-            CaeError::new("cli/invalid-number", format!("value `{value}` of `--damping` is not a number"))
-        })?),
+        Some(value) => Some(
+            value
+                .parse::<f64>()
+                .map_err(|_| CaeError::new("cli/invalid-number", format!("value `{value}` of `--damping` is not a number")))?,
+        ),
         None => None,
     };
     let spectrum_value = required(&parsed, "--spectrum")?;

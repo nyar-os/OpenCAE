@@ -200,6 +200,36 @@ fn node_mass(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Sets or clears the fixed temperature of a node and saves the document.
+///
+/// The request accepts `id` and `temperature`; `null` removes the heat boundary.
+#[function]
+fn node_temperature(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let temperature = number_field(&request, "temperature")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_node_temperature(&id, temperature).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Sets the concentrated nodal heat flow and saves the document.
+///
+/// The request accepts `id` and a finite `heat` in watts; `0` removes the load.
+#[function]
+fn node_heat(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let heat = required_number_field(&request, "heat")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_node_heat(&id, heat).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
 /// Removes a node from a document and saves it.
 ///
 /// A node referenced by an element, a support or a load is rejected with
@@ -367,6 +397,7 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
     let density = number_field(&request, "density")?;
     let allowable_stress = number_field(&request, "allowableStress")?;
     let alpha = number_field(&request, "alpha")?;
+    let conductivity = number_field(&request, "conductivity")?;
     let section = section_field(&request)?;
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
     let mut session = OpenCae::new(OpenCaeOptions::default());
@@ -378,6 +409,7 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
         density: density.unwrap_or(summary.material.density),
         allowable_stress: allowable_stress.or(summary.material.allowable_stress),
         alpha: alpha.or(summary.material.alpha),
+        conductivity: conductivity.or(summary.material.conductivity),
         section: section.or(summary.material.section),
     };
     let summary = session.set_material_data(material).map_err(fail)?;
@@ -665,6 +697,20 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
     }
 }
 
+/// Solves steady-state heat conduction and returns the temperature report.
+///
+/// The request accepts an optional `out` path for the JSON report.
+#[function]
+fn heat(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.solve_heat(out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Solves the linear buckling eigenproblem for every stored load combination.
 ///
 /// The request accepts `modes` (default 5) and an optional `out` path for the
@@ -850,14 +896,13 @@ fn response_spectrum(ctx: CallContext) -> Result<JsValue> {
         "z" => 2,
         other => return Err(argument_error(&format!("`axis` must be `x`, `y` or `z`, not `{other}`"))),
     };
-    let combination = SpectrumCombination::parse(request.get("combination").and_then(Value::as_str).unwrap_or("srss"))
-        .map_err(fail)?;
+    let combination =
+        SpectrumCombination::parse(request.get("combination").and_then(Value::as_str).unwrap_or("srss")).map_err(fail)?;
     let damping = number_field(&request, "damping")?;
     let out = request.get("out").and_then(Value::as_str);
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let result =
-        session.response_spectrum(modes, axis, &spectrum, combination, damping, out.map(Path::new)).map_err(fail)?;
+    let result = session.response_spectrum(modes, axis, &spectrum, combination, damping, out.map(Path::new)).map_err(fail)?;
     respond(&ctx, &result)
 }
 
@@ -1017,6 +1062,8 @@ register_module![
     node_add,
     node_update,
     node_mass,
+    node_temperature,
+    node_heat,
     node_merge,
     node_remove,
     element_add,
@@ -1039,6 +1086,7 @@ register_module![
     solve_buckling_combinations,
     validate,
     solve,
+    heat,
     reactions,
     node_displacement,
     element_result,

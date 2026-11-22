@@ -81,6 +81,7 @@ fn load_case_summary_reports_gravity_dominated_cases() {
             density: 1.0e-9,
             allowable_stress: None,
             alpha: None,
+            conductivity: None,
             section: None,
         })
         .expect("material");

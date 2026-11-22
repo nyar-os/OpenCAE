@@ -226,6 +226,9 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return bucklingCommand(args.slice(1));
         case 'tension-only':
             return tensionOnlyCommand(args.slice(1));
+        case 'heat':
+        case 'thermal':
+            return heatCommand(args.slice(1));
         case 'forces':
             return forcesCommand(args.slice(1));
         case 'reactions':
@@ -258,8 +261,6 @@ async function dispatch(args: readonly string[]): Promise<number> {
         case 'frame':
         case 'frame3d':
             throw new NotImplementedError('3D frame element');
-        case 'thermal':
-            throw new NotImplementedError('thermal analysis');
         case 'contact':
             throw new NotImplementedError('contact analysis');
         default:
@@ -278,6 +279,12 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === 'mass') {
         return nodeMass(args.slice(1));
     }
+    if (action === 'temperature') {
+        return nodeTemperature(args.slice(1));
+    }
+    if (action === 'heat') {
+        return nodeHeat(args.slice(1));
+    }
     if (action === 'remove') {
         return nodeRemove(args.slice(1));
     }
@@ -290,13 +297,13 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'node',
-            expected: 'add, update, mass, remove, merge or displacement',
+            expected: 'add, update, mass, temperature, heat, remove, merge or displacement',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'node',
         action,
-        expected: 'add, update, mass, remove, merge or displacement',
+        expected: 'add, update, mass, temperature, heat, remove, merge or displacement',
     });
 }
 
@@ -389,6 +396,38 @@ async function nodeMass(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const summary = document.setNodeMass({ id, mass });
         console.log(message('nodeMassSet', { id, mass: String(mass), revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function nodeTemperature(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id', '--temperature'], ['--clear']);
+    const file = positional(parsed, 0, 'node temperature <file> --id <id> [--temperature <t>] [--clear]');
+    const id = required(parsed, '--id');
+    const temperature = parsed.flags.has('--clear') ? null : requiredNumber(parsed, '--temperature');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.setNodeTemperature({ id, temperature });
+        console.log(
+            message('nodeTemperatureSet', {
+                id,
+                temperature: temperature === null ? 'cleared' : String(temperature),
+                revision: String(summary.revision),
+            }),
+        );
+        return 0;
+    });
+}
+
+async function nodeHeat(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id', '--heat'], []);
+    const file = positional(parsed, 0, 'node heat <file> --id <id> --heat <w>');
+    const id = required(parsed, '--id');
+    const heat = requiredNumber(parsed, '--heat');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.setNodeHeat({ id, heat });
+        console.log(message('nodeHeatSet', { id, heat: String(heat), revision: String(summary.revision) }));
         return 0;
     });
 }
@@ -623,6 +662,7 @@ async function materialSet(args: readonly string[]): Promise<number> {
             '--name',
             '--allowable',
             '--alpha',
+            '--conductivity',
             '--section',
             '--width',
             '--height',
@@ -644,10 +684,20 @@ async function materialSet(args: readonly string[]): Promise<number> {
     const name = parsed.options.get('--name');
     const allowableStress = number(parsed, '--allowable');
     const alpha = number(parsed, '--alpha');
+    const conductivity = number(parsed, '--conductivity');
     const section = sectionOption(parsed);
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const summary = document.setMaterial({ youngsModulus, area, density, name, allowableStress, alpha, section });
+        const summary = document.setMaterial({
+            youngsModulus,
+            area,
+            density,
+            name,
+            allowableStress,
+            alpha,
+            conductivity,
+            section,
+        });
         console.log(
             message('materialSet', {
                 youngsModulus: String(summary.material.youngsModulus),
@@ -1227,6 +1277,17 @@ async function tensionOnlyCommand(args: readonly string[]): Promise<number> {
             tolerance: number(parsed, '--tolerance'),
             out: parsed.options.get('--out'),
         });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function heatCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--out'], []);
+    const file = positional(parsed, 0, 'heat <file> [--out report.json]');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.heat({ out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });

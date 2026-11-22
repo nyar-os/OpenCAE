@@ -42,6 +42,7 @@ fn material(alpha: Option<f64>) -> Material {
         density: 0.0,
         allowable_stress: None,
         alpha,
+        conductivity: None,
         section: None,
     }
 }
@@ -156,6 +157,7 @@ fn temperature_edits_reject_invalid_input_and_round_trip() {
         density: 0.0,
         allowable_stress: None,
         alpha: Some(ALPHA),
+        conductivity: None,
         section: None,
     };
     session.set_material_data(document).expect("material with alpha");
@@ -172,7 +174,16 @@ const DEPTH: f64 = 200.0;
 const GRADIENT: f64 = 40.0;
 
 fn gradient_material(alpha: Option<f64>, section: Option<Section>) -> Material {
-    Material { name: "steel".to_string(), youngs_modulus: E, area: A, density: 0.0, allowable_stress: None, alpha, section }
+    Material {
+        name: "steel".to_string(),
+        youngs_modulus: E,
+        area: A,
+        density: 0.0,
+        allowable_stress: None,
+        alpha,
+        conductivity: None,
+        section,
+    }
 }
 
 fn gradient_beam(fixed_both_ends: bool) -> Model {

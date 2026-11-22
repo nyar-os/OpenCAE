@@ -29,6 +29,7 @@ fn material(section: Section) -> Material {
         density: 0.0,
         allowable_stress: Some(235.0),
         alpha: None,
+        conductivity: None,
         section: Some(section),
     }
 }

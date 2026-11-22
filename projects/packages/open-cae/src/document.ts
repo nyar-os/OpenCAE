@@ -34,6 +34,8 @@ import type {
     FrequencyResponseOptions,
     FrequencyResponseSolution,
     GravitySetRequest,
+    HeatOptions,
+    HeatSolution,
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
@@ -46,8 +48,10 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeHeatRequest,
     NodeMassRequest,
     NodeMergeRequest,
+    NodeTemperatureRequest,
     NodeUpdateRequest,
     NodalStressOptions,
     NodalStressSolution,
@@ -163,6 +167,25 @@ export class CaeDocument {
     setNodeMass(request: NodeMassRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.setNodeMass(this.path, request));
+    }
+
+    /**
+     * Sets or clears the fixed temperature of a node and saves the file.
+     * `temperature: null` removes the Dirichlet boundary; the value is used only
+     * by {@link heat}.
+     */
+    setNodeTemperature(request: NodeTemperatureRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.setNodeTemperature(this.path, request));
+    }
+
+    /**
+     * Sets the concentrated nodal heat flow in watts and saves the file.
+     * `0` clears it; the value is used only by {@link heat}.
+     */
+    setNodeHeat(request: NodeHeatRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.setNodeHeat(this.path, request));
     }
 
     /**
@@ -295,6 +318,16 @@ export class CaeDocument {
     tensionOnly(options: TensionOnlyOptions = {}): TensionOnlySolution {
         this.assertOpen();
         return service.tensionOnly(this.path, options);
+    }
+
+    /**
+     * Solves steady-state axial heat conduction and optionally writes the JSON
+     * report. The result contains temperatures and heat flows only; it is not a
+     * structural solution.
+     */
+    heat(options: HeatOptions = {}): HeatSolution {
+        this.assertOpen();
+        return service.heat(this.path, options);
     }
 
     /** Adds or replaces a linear load combination and saves the file. */
