@@ -76,12 +76,16 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | `open-cae section ellipse` | `--width <w> --height <h> [--units mm\|m]` | Solid ellipse with semi-axes `a = w/2` and `b = h/2`: area `πab`, centroid `(a, b)`, `Ix = πab³/4`, `Iy = πa³b/4`, `Ixy = 0`, exact torsion constant `J = πa³b³/(a² + b²)` and radii of gyration `b/2`, `a/2`. Requires positive, finite `w` and `h`; invalid dimensions report `section/invalid-dimensions`. |
 | `open-cae section triangle` | `--side <a> [--units mm\|m]` | Solid equilateral triangle with side `a`, base along the bottom edge and apex at the top centre: area `√3/4·a²`, centroid `(a/2, a·√3/6)`, `Ix = Iy = √3·a⁴/96`, `Ixy = 0`, exact torsion constant `J = √3·a⁴/80` and radii of gyration `a/√24`. Requires a positive, finite `a`; invalid dimensions report `section/invalid-dimensions`. |
 | `open-cae section z` | `--height <h> --width <w> --thickness <t> [--units mm\|m]` | Equal-thickness Z-section: area, centroid `(w/2, h/2)`, `Ix`/`Iy`/`Ixy`, torsion constant `J` and radii of gyration. The origin is the lower-left corner of the bounding rectangle, the web is centred (`w/2 − t/2 … w/2 + t/2`), the top flange reaches the right edge and the bottom flange the left edge, so `Ixy` is generally non-zero. `A = t(w + h − t)` and `J = (w + h − t)·t³/3`. Requires `0 < t < w` and `2t < h`; invalid dimensions report `section/invalid-dimensions`. |
+| `open-cae section principal` | `--ix <Ix> --iy <Iy> --ixy <Ixy> [--units mm\|m]` | Principal second moments of a centroidal moment matrix: `I1` (major), `I2` (minor), polar moment `Ix + Iy` and the counter-clockwise major-axis angle from `+x` in degrees, normalised to `(-90, 90]`. Echoes `ix`, `iy` and `ixy`; `--units` labels the unit system and does not scale the values. Requires positive `ix`/`iy` and `ix·iy ≥ ixy²` (within `1e-12`); violations report `section/invalid-second-moments`. |
 
 `section i`, `section tube`, `section channel`, `section angle`, `section t`,
 `section ellipse`, `section triangle` and `section z` print the same field names
 as `section polygon` (`area`, `centroidX`, `centroidY`, `ix`, `iy`, `ixy`,
 `polarMoment`, `radiusOfGyrationX`, `radiusOfGyrationY`), but `polarMoment`
-holds the Saint-Venant torsion constant `J`, not `Ix + Iy`. The coordinates
+holds the Saint-Venant torsion constant `J`, not `Ix + Iy`. `section principal`
+prints `units`, the echoed `ix`, `iy`, `ixy`, the principal moments `i1` and
+`i2`, the polar moment `polarMoment = Ix + Iy` and `principalAngle` in degrees.
+The coordinates
 place the origin at the lower-left corner of the bounding rectangle. Note that
 `section tube` is the rectangular tube, whereas `--section tube` in
 `section properties` and `material preset` remains the circular hollow section

@@ -45,6 +45,7 @@ export interface NativeBinding {
     section_ellipse(requestJson: string): string;
     section_triangle(requestJson: string): string;
     section_z(requestJson: string): string;
+    section_principal(requestJson: string): string;
     support_add(path: string, requestJson: string): string;
     support_remove(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;

@@ -67,6 +67,8 @@ import type {
     ISectionGeometry,
     PolygonPoint,
     PolygonSectionReport,
+    PrincipalSectionInput,
+    PrincipalSectionResult,
     RectangularTubeGeometry,
     Report,
     ReactionOptions,
@@ -310,6 +312,13 @@ export function sectionTriangle(geometry: TriangleSectionGeometry, units: 'mm' |
 export function sectionZ(geometry: ZSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
     return decode<StandardSectionReport>(() =>
         binding('section.z').section_z(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports principal second moments and the major-axis angle of a section. */
+export function sectionPrincipal(input: PrincipalSectionInput, units: 'mm' | 'm'): PrincipalSectionResult {
+    return decode<PrincipalSectionResult>(() =>
+        binding('section.principal').section_principal(JSON.stringify({ ...input, units })),
     );
 }
 

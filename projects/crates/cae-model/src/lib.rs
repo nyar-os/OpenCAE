@@ -56,10 +56,10 @@ pub use crate::{
     error::CaeError,
     export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::{
-        MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, SectionProperties, SectionReport, StandardSectionReport,
-        angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json,
-        material_preset, polygon_section_report, section_report, t_section_report, triangle_section_report,
-        tube_standard_section_report, z_section_report,
+        MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, PrincipalSectionReport, SectionProperties, SectionReport,
+        StandardSectionReport, angle_section_report, channel_standard_section_report, ellipse_section_report,
+        i_standard_section_report, library_json, material_preset, polygon_section_report, principal_section_report,
+        section_report, t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
     },
     model::{
         Element, ElementKind, ElementMaterial, ElementSplit, ElementUpdate, EndRelease, FORMAT, Load, LoadCombination,
@@ -123,6 +123,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "materialLibrary": "supported",
     "polygonSection": "supported",
     "standardSection": "supported",
+    "principalSection": "supported",
     "elasticSupports": "supported",
     "inclinedSupports": "supported",
     "matrixExport": "supported",

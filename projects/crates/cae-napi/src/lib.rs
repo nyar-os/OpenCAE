@@ -17,8 +17,8 @@ use std::path::Path;
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions, Material, OpenCae,
     OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
-    ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, section_report, t_section_report,
-    triangle_section_report, tube_standard_section_report, z_section_report,
+    ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, principal_section_report,
+    section_report, t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -709,6 +709,27 @@ fn section_z(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &report)
 }
 
+/// Reports principal second moments and the major-axis angle of a section.
+///
+/// The request accepts `ix`, `iy`, `ixy` and an optional `units` value (`mm` or
+/// `m`, default `mm`). The moments must be positive and define a positive
+/// semidefinite matrix. `i1` is the major principal moment, `i2` the minor one,
+/// `polarMoment` is `Ix + Iy` and `principalAngle` is the counter-clockwise
+/// angle of the major axis from `+x` in degrees within `(-90, 90]`.
+#[function]
+fn section_principal(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report = principal_section_report(
+        required_number_field(&request, "ix")?,
+        required_number_field(&request, "iy")?,
+        required_number_field(&request, "ixy")?,
+        units,
+    )
+    .map_err(fail)?;
+    respond(&ctx, &report)
+}
+
 fn polygon_points_field(request: &Value) -> Result<Vec<(f64, f64)>> {
     let values = match request.get("points").and_then(Value::as_array) {
         Some(values) => values,
@@ -1351,6 +1372,7 @@ register_module![
     section_ellipse,
     section_triangle,
     section_z,
+    section_principal,
     support_add,
     support_remove,
     load_add,

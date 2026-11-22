@@ -321,6 +321,44 @@ export interface ZSectionGeometry {
     readonly thickness: number;
 }
 
+/** Centroidal second moments supplied to `sectionPrincipal()`, in `units⁴`. */
+export interface PrincipalSectionInput {
+    /** Second moment of area about the `x` axis. */
+    readonly ix: number;
+    /** Second moment of area about the `y` axis. */
+    readonly iy: number;
+    /** Product of inertia about the `x`/`y` axes. */
+    readonly ixy: number;
+}
+
+/**
+ * Principal second moments and the major-axis orientation of a section.
+ *
+ * `i1` is the major principal second moment, `i2` the minor one, and
+ * `polarMoment` is `ix + iy`. `principalAngle` is the counter-clockwise angle
+ * of the major axis from the positive `x` axis in degrees, normalised to
+ * `(-90, 90]`. The three input moments are echoed unchanged; `units` labels
+ * the unit system and does not scale the values.
+ */
+export interface PrincipalSectionResult {
+    /** Unit system of the second moments. */
+    readonly units: Units;
+    /** Second moment of area about the `x` axis, echoed from the input. */
+    readonly ix: number;
+    /** Second moment of area about the `y` axis, echoed from the input. */
+    readonly iy: number;
+    /** Product of inertia about the `x`/`y` axes, echoed from the input. */
+    readonly ixy: number;
+    /** Major principal second moment, `(ix + iy)/2 + r`. */
+    readonly i1: number;
+    /** Minor principal second moment, `(ix + iy)/2 − r`. */
+    readonly i2: number;
+    /** Polar second moment, `ix + iy`. */
+    readonly polarMoment: number;
+    /** Counter-clockwise angle of the major axis from `+x`, in degrees. */
+    readonly principalAngle: number;
+}
+
 /** Request of `applyMaterialPreset()`. */
 export interface MaterialPresetRequest {
     /** Built-in preset name, for example `steel` or `aluminum`. */

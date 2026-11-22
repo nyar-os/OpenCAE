@@ -878,6 +878,93 @@ pub fn z_section_report(height: f64, width: f64, thickness: f64, units: Units) -
     Ok(standard_section_report("z", units, area, width / 2.0, height / 2.0, ix, iy, ixy, torsion))
 }
 
+/// Principal second moments and the major-axis orientation of a section.
+///
+/// The input is a centroidal second-moment matrix `Ix`, `Iy`, `Ixy` already
+/// expressed in `units⁴`; the report echoes the three values unchanged.
+/// `i1` is the major principal second moment, `i2` the minor one and
+/// `principal_angle` the counter-clockwise angle of the major axis from the
+/// positive `x` axis in degrees, normalised to the half-open interval
+/// `(-90, 90]`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrincipalSectionReport {
+    /// Unit system label (`mm` or `m`) of the second moments.
+    pub units: String,
+    /// Second moment of area about the `x` axis, echoed from the input.
+    pub ix: f64,
+    /// Second moment of area about the `y` axis, echoed from the input.
+    pub iy: f64,
+    /// Product of inertia about the `x`/`y` axes, echoed from the input.
+    pub ixy: f64,
+    /// Major principal second moment, `(Ix + Iy)/2 + r`.
+    pub i1: f64,
+    /// Minor principal second moment, `(Ix + Iy)/2 − r`.
+    pub i2: f64,
+    /// Polar second moment about the centroid, `Ix + Iy`.
+    pub polar_moment: f64,
+    /// Counter-clockwise angle of the major axis from `+x`, in degrees.
+    pub principal_angle: f64,
+}
+
+/// Computes the principal second moments and the major-axis angle.
+///
+/// With `mean = (Ix + Iy)/2` and
+/// `r = √(((Ix − Iy)/2)² + Ixy²)`, the principal moments are
+/// `I1 = mean + r` (major) and `I2 = mean − r` (minor), and the polar moment
+/// is `Ix + Iy`. The principal angle is `½·atan2(2·Ixy, Ix − Iy)` in degrees,
+/// normalised to `(-90, 90]` so it is the counter-clockwise angle of the major
+/// axis from `+x`.
+///
+/// `Ix` and `Iy` must be positive and finite and the matrix must be positive
+/// semidefinite, `Ix·Iy − Ixy² ≥ −1e-12·max(Ix·Iy, 1)`. Violations, including
+/// non-finite values, report `section/invalid-second-moments`. The values are
+/// not scaled by `units`; they are already second moments in `units⁴`.
+pub fn principal_section_report(ix: f64, iy: f64, ixy: f64, units: Units) -> Result<PrincipalSectionReport, CaeError> {
+    validate_second_moments(ix, iy, ixy)?;
+    let mean = (ix + iy) / 2.0;
+    let half_difference = (ix - iy) / 2.0;
+    let radius = (half_difference * half_difference + ixy * ixy).sqrt();
+    let mut principal_angle = (0.5 * (2.0 * ixy).atan2(ix - iy)).to_degrees();
+    if principal_angle <= -90.0 {
+        principal_angle += 180.0;
+    }
+    Ok(PrincipalSectionReport {
+        units: units.as_str().to_string(),
+        ix,
+        iy,
+        ixy,
+        i1: mean + radius,
+        i2: mean - radius,
+        polar_moment: ix + iy,
+        principal_angle,
+    })
+}
+
+fn validate_second_moments(ix: f64, iy: f64, ixy: f64) -> Result<(), CaeError> {
+    if !ix.is_finite() || !iy.is_finite() || !ixy.is_finite() {
+        return Err(invalid_second_moments(format!("section second moments must be finite (ix={ix}, iy={iy}, ixy={ixy})")));
+    }
+    if ix <= 0.0 || iy <= 0.0 {
+        return Err(invalid_second_moments(format!(
+            "section second moments `ix` and `iy` must be positive (ix={ix}, iy={iy})"
+        )));
+    }
+    let product = ix * iy;
+    let tolerance = 1e-12 * product.max(1.0);
+    if product - ixy * ixy < -tolerance {
+        return Err(invalid_second_moments(format!(
+            "section second moments are not positive semidefinite: ix*iy - ixy^2 = {} must be non-negative (ix={ix}, iy={iy}, ixy={ixy})",
+            product - ixy * ixy
+        )));
+    }
+    Ok(())
+}
+
+fn invalid_second_moments(message: impl Into<String>) -> CaeError {
+    CaeError::new("section/invalid-second-moments", message)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn standard_section_report(
     shape: &str,

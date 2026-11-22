@@ -44,6 +44,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
 | parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse / equilateral triangle / equal-thickness Z; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
+| principal section axes (`principalSection`, Ix/Iy/Ixy; principal moments, polar moment and major-axis angle) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -72,6 +73,9 @@ and `z_section_report()` in Rust, `section_i`, `section_tube`,
 `sectionEllipse()`, `sectionTriangle()` and `sectionZ()` in the SDK, with CLI
 subcommands `section i`, `section tube`, `section channel`, `section angle`,
 `section t`, `section ellipse`, `section triangle` and `section z`.
+Principal section axes (`principalSection`) are exposed as
+`principal_section_report()` in Rust, `section_principal` in the addon and
+`sectionPrincipal()` in the SDK, with CLI subcommand `section principal`.
 Parametric element splitting is the `edits`
 entry `elementSplit` of the capability matrix and is available at the same
 three entry points plus the CLI (`open-cae element split`). In-place element
@@ -528,6 +532,22 @@ be finite and positive and a model without nodes is rejected with
     report `section/invalid-dimensions`. Results are deterministic and, like the
     polygon calculator, are not stored in documents or consumed by the beam
     solver.
+32. **Principal section axes**: `principal_section_report(ix, iy, ixy, units)`
+    (CLI `open-cae section principal --ix <Ix> --iy <Iy> --ixy <Ixy>`, SDK
+    `sectionPrincipal()`) treats `Ix`, `Iy` and `Ixy` as a centroidal
+    second-moment matrix and reports its principal values. With
+    `mean = (Ix + Iy)/2` and `r = √(((Ix − Iy)/2)² + Ixy²)`, the major and minor
+    principal moments are `I1 = mean + r` and `I2 = mean − r`, the polar moment
+    is `Ix + Iy`, and the major-axis angle is `½·atan2(2·Ixy, Ix − Iy)` in
+    degrees, normalised to the half-open interval `(-90, 90]` (add `180` when
+    the raw angle is `≤ −90`). The angle is counter-clockwise from `+x`. The
+    report echoes `ix`, `iy`, `ixy` and `units`, which labels the unit system
+    and does not scale the values (they are already second moments in
+    `units⁴`). `Ix` and `Iy` must be positive and finite and the matrix must be
+    positive semidefinite, `Ix·Iy − Ixy² ≥ −1e-12·max(Ix·Iy, 1)`; zero,
+    negative, non-finite or impossible combinations report
+    `section/invalid-second-moments`. The calculator is standalone and its
+    output is neither stored in documents nor consumed by the solver.
 
 ## Validation and tests
 ```shell
@@ -713,6 +733,14 @@ stable codes.
 - invalid flange, web, leg and wall thicknesses report
   `section/invalid-dimensions`, and repeated calls return identical reports
   with the documented CLI/SDK field names;
+- the principal-axes calculator reproduces `I1 = 100`, `I2 = 50` and angle `0`
+  for `(100, 50, 0)`, `120`/`80` and angle `45°` for `(100, 100, 20)`, `100`/`50`
+  and angle `90°` for `(50, 100, 0)`, angle `−45°` for a negative `Ixy`, and
+  normalises the `−90°` boundary to `+90°`; it reports `Ix + Iy` as the polar
+  moment, rejects zero/negative `Ix` or `Iy`, impossible `Ixy`
+  (`Ix·Iy < Ixy²`) and non-finite input with `section/invalid-second-moments`,
+  and repeated calls return identical reports with the documented CLI/SDK field
+  names;
 - presets convert between `mm` (`210000 MPa`, `7.85e-9 t/mm³`) and `m`
   (`2.1e11 Pa`, `7850 kg/m³`);
 - a cantilever beam that omits `inertia` uses the stored section and
@@ -920,10 +948,10 @@ threshold of `1e-9`.
   (`support/merge-conflict`). It does not renumber nodes or snap coordinates.
 - The material and section are **global**: all elements share one material and
   one parametric section. Per-element `E`/`A` overrides still exist, but there
-  is no per-element section library yet. Custom polygon and standard-section
-  properties are standalone calculators: they are neither stored in `.ocae`
-  documents nor fed into the beam solver as inertia or extreme-fibre
-  distances.
+  is no per-element section library yet. Custom polygon, standard-section and
+  principal-axes properties are standalone calculators: they are neither
+  stored in `.ocae` documents nor fed into the beam solver as inertia or
+  extreme-fibre distances.
 - Spring supports are **linear elastic and two-way**: no
   tension-only/compression-only (gap) behaviour, no friction, no plasticity,
   and no nonlinear force-displacement law is modelled.

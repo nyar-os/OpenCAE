@@ -7,8 +7,8 @@ use std::{
 use cae_model::{
     ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, angle_section_report,
     channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json, material_preset,
-    polygon_section_report, section_report, solve, t_section_report, triangle_section_report, tube_standard_section_report,
-    z_section_report,
+    polygon_section_report, principal_section_report, section_report, solve, t_section_report, triangle_section_report,
+    tube_standard_section_report, z_section_report,
 };
 
 const E: f64 = 210_000.0;
@@ -1088,4 +1088,78 @@ fn z_section_report_is_deterministic_with_cli_field_names() {
     assert_eq!(json["units"], "m");
     assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
     assert!(json.get("centroid_x").is_none());
+}
+
+#[test]
+fn principal_section_matches_closed_form_cases() {
+    for (ix, iy, ixy, expected_major, expected_minor, expected_angle) in [
+        (100.0, 50.0, 0.0, 100.0, 50.0, 0.0),
+        (100.0, 100.0, 20.0, 120.0, 80.0, 45.0),
+        (50.0, 100.0, 0.0, 100.0, 50.0, 90.0),
+        (100.0, 100.0, -20.0, 120.0, 80.0, -45.0),
+    ] {
+        let report = principal_section_report(ix, iy, ixy, Units::Millimeter).expect("principal section");
+        assert_eq!(report.units, "mm");
+        assert_close(report.ix, ix, 1e-12);
+        assert_close(report.iy, iy, 1e-12);
+        assert_close(report.ixy, ixy, 1e-12);
+        assert_close(report.i1, expected_major, 1e-12);
+        assert_close(report.i2, expected_minor, 1e-12);
+        assert_close(report.polar_moment, ix + iy, 1e-12);
+        assert_close(report.principal_angle, expected_angle, 1e-12);
+        assert!(report.i1 >= report.i2, "the major moment must not be smaller than the minor one");
+        assert!(
+            report.principal_angle > -90.0 && report.principal_angle <= 90.0,
+            "the angle must lie in (-90, 90], got {}",
+            report.principal_angle
+        );
+    }
+}
+
+#[test]
+fn principal_section_normalises_the_negative_right_angle_boundary() {
+    let report = principal_section_report(50.0, 100.0, -0.0, Units::Millimeter).expect("principal section");
+    assert_close(report.principal_angle, 90.0, 1e-12);
+    assert!(report.principal_angle > -90.0 && report.principal_angle <= 90.0);
+}
+
+#[test]
+fn principal_section_rejects_invalid_second_moments() {
+    for result in [
+        principal_section_report(0.0, 100.0, 0.0, Units::Millimeter),
+        principal_section_report(-1.0, 100.0, 0.0, Units::Millimeter),
+        principal_section_report(100.0, 0.0, 0.0, Units::Millimeter),
+        principal_section_report(100.0, -1.0, 0.0, Units::Millimeter),
+        principal_section_report(100.0, 50.0, 80.0, Units::Millimeter),
+        principal_section_report(100.0, 50.0, -80.0, Units::Millimeter),
+        principal_section_report(f64::NAN, 50.0, 0.0, Units::Millimeter),
+        principal_section_report(100.0, f64::INFINITY, 0.0, Units::Millimeter),
+        principal_section_report(100.0, 50.0, f64::NAN, Units::Millimeter),
+        principal_section_report(100.0, 50.0, f64::NEG_INFINITY, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid second moments");
+        assert_eq!(error.code, "section/invalid-second-moments");
+    }
+}
+
+#[test]
+fn principal_section_report_is_deterministic_with_cli_field_names() {
+    let first = principal_section_report(100.0, 100.0, 20.0, Units::Meter).expect("principal section");
+    let second = principal_section_report(100.0, 100.0, 20.0, Units::Meter).expect("principal section");
+    assert_eq!(first, second);
+    let millimetres = principal_section_report(100.0, 100.0, 20.0, Units::Millimeter).expect("principal section");
+    assert_eq!(millimetres.i1, first.i1);
+    assert_eq!(millimetres.i2, first.i2);
+    assert_eq!(millimetres.polar_moment, first.polar_moment);
+    assert_eq!(millimetres.principal_angle, first.principal_angle);
+
+    let json = serde_json::to_value(&first).expect("json");
+    let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["i1", "i2", "ix", "ixy", "iy", "polarMoment", "principalAngle", "units"]);
+    assert_eq!(json["units"], "m");
+    assert_close(json["ix"].as_f64().expect("ix"), 100.0, 1e-12);
+    assert_close(json["iy"].as_f64().expect("iy"), 100.0, 1e-12);
+    assert_close(json["ixy"].as_f64().expect("ixy"), 20.0, 1e-12);
+    assert!(json.get("principal_angle").is_none());
 }

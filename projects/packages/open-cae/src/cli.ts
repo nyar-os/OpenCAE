@@ -954,16 +954,19 @@ async function sectionCommand(args: readonly string[]): Promise<number> {
     if (action === 'z') {
         return sectionZCommand(args.slice(1));
     }
+    if (action === 'principal') {
+        return sectionPrincipalCommand(args.slice(1));
+    }
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'section',
-            expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle or z',
+            expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle, z or principal',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'section',
         action,
-        expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle or z',
+        expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle, z or principal',
     });
 }
 
@@ -1124,6 +1127,21 @@ async function sectionZCommand(args: readonly string[]): Promise<number> {
     };
     return withSession(async (session) => {
         const report = await session.sectionZ(geometry, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionPrincipalCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--ix', '--iy', '--ixy'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const input = {
+        ix: requiredNumber(parsed, '--ix'),
+        iy: requiredNumber(parsed, '--iy'),
+        ixy: requiredNumber(parsed, '--ixy'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionPrincipal(input, units);
         console.log(JSON.stringify(report, null, 2));
         return 0;
     });

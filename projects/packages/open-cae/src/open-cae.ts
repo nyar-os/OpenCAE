@@ -25,6 +25,8 @@ import type {
     OpenCAEOptions,
     PolygonPoint,
     PolygonSectionReport,
+    PrincipalSectionInput,
+    PrincipalSectionResult,
     RectangularTubeGeometry,
     Section,
     SectionReport,
@@ -219,6 +221,24 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionZ(geometry, units);
+    }
+
+    /**
+     * Principal second moments and the major-axis orientation of a section
+     * described by its centroidal `ix`, `iy` and `ixy` in `units⁴`.
+     * `i1` and `i2` are the major and minor principal moments,
+     * `polarMoment` is `ix + iy` and `principalAngle` is the counter-clockwise
+     * angle of the major axis from `+x` in degrees, normalised to `(-90, 90]`.
+     * Requires positive `ix` and `iy` and a positive semidefinite moment
+     * matrix; violations report `section/invalid-second-moments`.
+     */
+    async sectionPrincipal(
+        input: PrincipalSectionInput,
+        units: Units = this.units,
+    ): Promise<PrincipalSectionResult> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionPrincipal(input, units);
     }
 
     /** Creates an empty document at `path` and returns it. */

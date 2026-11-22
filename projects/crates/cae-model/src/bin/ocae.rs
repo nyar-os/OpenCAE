@@ -14,8 +14,8 @@ use std::{
 use cae_model::{
     CaeError, ElementKind, ElementUpdate, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section,
     SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report, ellipse_section_report,
-    i_standard_section_report, not_implemented, polygon_section_report, section_report, t_section_report,
-    triangle_section_report, tube_standard_section_report, z_section_report,
+    i_standard_section_report, not_implemented, polygon_section_report, principal_section_report, section_report,
+    t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
 };
 
 const USAGE: &str = "\
@@ -61,6 +61,7 @@ Usage:
   ocae section ellipse --width <w> --height <h> [--units mm|m]
   ocae section triangle --side <a> [--units mm|m]
   ocae section z --height <h> --width <w> --thickness <t> [--units mm|m]
+  ocae section principal --ix <Ix> --iy <Iy> --ixy <Ixy> [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
@@ -689,15 +690,16 @@ fn section_command(args: &[String]) -> Result<i32, CaeError> {
         Some("ellipse") => section_ellipse(&args[1..]),
         Some("triangle") => section_triangle(&args[1..]),
         Some("z") => section_z(&args[1..]),
+        Some("principal") => section_principal(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `section` does not exist; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle`, `t`, `ellipse`, `triangle` or `z` is supported"
+                "subcommand `{other}` of `section` does not exist; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle`, `t`, `ellipse`, `triangle`, `z` or `principal` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`section` is missing a subcommand; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle`, `t`, `ellipse`, `triangle` or `z` is supported",
+            "`section` is missing a subcommand; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle`, `t`, `ellipse`, `triangle`, `z` or `principal` is supported",
         )),
     }
 }
@@ -863,6 +865,22 @@ fn section_z(args: &[String]) -> Result<i32, CaeError> {
         required_number(&parsed, "--height")?,
         required_number(&parsed, "--width")?,
         required_number(&parsed, "--thickness")?,
+        units,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    Ok(0)
+}
+
+fn section_principal(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--units", "--ix", "--iy", "--ixy"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let report = principal_section_report(
+        required_number(&parsed, "--ix")?,
+        required_number(&parsed, "--iy")?,
+        required_number(&parsed, "--ixy")?,
         units,
     )?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
