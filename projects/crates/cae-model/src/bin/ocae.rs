@@ -168,10 +168,9 @@ fn support_command(args: &[String]) -> Result<i32, CaeError> {
             "cli/unknown-command",
             format!("subcommand `{other}` of `support` does not exist; only `add` or `remove` is supported"),
         )),
-        None => Err(CaeError::new(
-            "cli/missing-argument",
-            "`support` is missing a subcommand; only `add` or `remove` is supported",
-        )),
+        None => {
+            Err(CaeError::new("cli/missing-argument", "`support` is missing a subcommand; only `add` or `remove` is supported"))
+        }
     }
 }
 
@@ -519,10 +518,7 @@ fn section_command(args: &[String]) -> Result<i32, CaeError> {
             "cli/unknown-command",
             format!("subcommand `{other}` of `section` does not exist; only `properties` is supported"),
         )),
-        None => Err(CaeError::new(
-            "cli/missing-argument",
-            "`section` is missing a subcommand; only `properties` is supported",
-        )),
+        None => Err(CaeError::new("cli/missing-argument", "`section` is missing a subcommand; only `properties` is supported")),
     }
 }
 

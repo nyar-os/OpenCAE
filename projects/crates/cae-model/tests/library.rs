@@ -5,8 +5,7 @@ use std::{
 };
 
 use cae_model::{
-    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset,
-    section_report, solve,
+    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset, section_report, solve,
 };
 
 const E: f64 = 210_000.0;
@@ -262,8 +261,7 @@ fn section_report_serialises_camel_case_and_labels_the_units() {
 
 #[test]
 fn section_report_rejects_invalid_geometry() {
-    let error = section_report(Section::Rectangle { width: 0.0, height: 20.0 }, Units::Millimeter)
-        .expect_err("invalid width");
+    let error = section_report(Section::Rectangle { width: 0.0, height: 20.0 }, Units::Millimeter).expect_err("invalid width");
     assert_eq!(error.code, "material/invalid-section");
 }
 

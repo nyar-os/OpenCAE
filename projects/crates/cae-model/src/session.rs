@@ -24,10 +24,9 @@ use crate::{
         DeflectionSolution, ElementResult, FrequencyResponseSolution, InternalForceSolution, LoadCaseSummary, ModalSolution,
         NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary,
         ResponseSpectrumSolution, Solution, SpectrumPoint, StressSolution, SupportReaction, SystemMatrices, solve,
-        solve_buckling, solve_buckling_combinations,
-        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces,
-        solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress,
-        summarize_load_cases,
+        solve_buckling, solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection,
+        solve_frequency_response, solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear,
+        solve_response_spectrum, solve_stress, summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
