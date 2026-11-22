@@ -61,13 +61,17 @@ import type {
     NonlinearOptions,
     NonlinearSolution,
     OpenCAECapabilities,
+    ChannelSectionGeometry,
+    ISectionGeometry,
     PolygonPoint,
     PolygonSectionReport,
+    RectangularTubeGeometry,
     Report,
     ReactionOptions,
     ReactionSummary,
     Section,
     SectionReport,
+    StandardSectionReport,
     ResponseSpectrumOptions,
     ResponseSpectrumSolution,
     Solution,
@@ -245,6 +249,27 @@ export function sectionProperties(section: Section, units: 'mm' | 'm'): SectionR
 export function sectionPolygon(points: readonly PolygonPoint[], units: 'mm' | 'm'): PolygonSectionReport {
     return decode<PolygonSectionReport>(() =>
         binding('section.polygon').section_polygon(JSON.stringify({ points, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of an I-section. */
+export function sectionI(geometry: ISectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.i').section_i(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of a rectangular tube. */
+export function sectionTube(geometry: RectangularTubeGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.tube').section_tube(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of an open channel. */
+export function sectionChannel(geometry: ChannelSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.channel').section_channel(JSON.stringify({ ...geometry, units })),
     );
 }
 

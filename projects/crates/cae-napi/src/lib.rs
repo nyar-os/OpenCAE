@@ -16,7 +16,8 @@ use std::path::Path;
 
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
-    Section, SpectrumCombination, SpectrumPoint, Units, library_json, polygon_section_report, section_report,
+    Section, SpectrumCombination, SpectrumPoint, Units, channel_standard_section_report, i_standard_section_report,
+    library_json, polygon_section_report, section_report, tube_standard_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -535,6 +536,75 @@ fn section_polygon(ctx: CallContext) -> Result<JsValue> {
         None => Units::Millimeter,
     };
     let report = polygon_section_report(&vertices, units).map_err(fail)?;
+    respond(&ctx, &report)
+}
+
+fn request_units(request: &Value) -> Result<Units> {
+    match request.get("units").and_then(Value::as_str) {
+        Some(raw) => raw.parse::<Units>().map_err(fail),
+        None => Ok(Units::Millimeter),
+    }
+}
+
+/// Reports area, centroid, second moments and torsion constant of an
+/// I-section.
+///
+/// The request accepts `height` (`h`), `width` (`b`), `webThickness` (`tw`),
+/// `flangeThickness` (`tf`) and an optional `units` value (`mm` or `m`, default
+/// `mm`). Dimensions must satisfy `0 < tf < h/2` and `0 < tw < b`.
+#[function]
+fn section_i(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report = i_standard_section_report(
+        required_number_field(&request, "height")?,
+        required_number_field(&request, "width")?,
+        required_number_field(&request, "webThickness")?,
+        required_number_field(&request, "flangeThickness")?,
+        units,
+    )
+    .map_err(fail)?;
+    respond(&ctx, &report)
+}
+
+/// Reports area, centroid, second moments and torsion constant of a hollow
+/// rectangular tube.
+///
+/// The request accepts `height` (`h`), `width` (`b`), `thickness` (`t`) and an
+/// optional `units` value (`mm` or `m`, default `mm`). The wall must satisfy
+/// `0 < t < min(b, h)/2`.
+#[function]
+fn section_tube(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report = tube_standard_section_report(
+        required_number_field(&request, "height")?,
+        required_number_field(&request, "width")?,
+        required_number_field(&request, "thickness")?,
+        units,
+    )
+    .map_err(fail)?;
+    respond(&ctx, &report)
+}
+
+/// Reports area, centroid, second moments and torsion constant of an open
+/// channel whose opening faces right.
+///
+/// The request accepts `height` (`h`), `width` (`b`), `webThickness` (`tw`),
+/// `flangeThickness` (`tf`) and an optional `units` value (`mm` or `m`, default
+/// `mm`). Dimensions must satisfy `0 < tf < h/2` and `0 < tw < b`.
+#[function]
+fn section_channel(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report = channel_standard_section_report(
+        required_number_field(&request, "height")?,
+        required_number_field(&request, "width")?,
+        required_number_field(&request, "webThickness")?,
+        required_number_field(&request, "flangeThickness")?,
+        units,
+    )
+    .map_err(fail)?;
     respond(&ctx, &report)
 }
 
@@ -1172,6 +1242,9 @@ register_module![
     library,
     section_properties,
     section_polygon,
+    section_i,
+    section_tube,
+    section_channel,
     support_add,
     support_remove,
     load_add,

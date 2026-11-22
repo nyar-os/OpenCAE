@@ -13,7 +13,8 @@ use std::{
 
 use cae_model::{
     CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination,
-    SpectrumPoint, Units, not_implemented, polygon_section_report, section_report,
+    SpectrumPoint, Units, channel_standard_section_report, i_standard_section_report, not_implemented, polygon_section_report,
+    section_report, tube_standard_section_report,
 };
 
 const USAGE: &str = "\
@@ -49,6 +50,9 @@ Usage:
   ocae library [--units mm|m]
   ocae section properties --section rectangle|circle|i|box|tube|channel [geometry] [--units mm|m]
   ocae section polygon --points \"x,y;x,y;...\" [--units mm|m]
+  ocae section i --height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm|m]
+  ocae section tube --height <h> --width <b> --thickness <t> [--units mm|m]
+  ocae section channel --height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
@@ -670,13 +674,18 @@ fn section_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("properties") => section_properties(&args[1..]),
         Some("polygon") => section_polygon(&args[1..]),
+        Some("i") => section_i(&args[1..]),
+        Some("tube") => section_tube(&args[1..]),
+        Some("channel") => section_channel(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `section` does not exist; only `properties` or `polygon` is supported"),
+            format!(
+                "subcommand `{other}` of `section` does not exist; only `properties`, `polygon`, `i`, `tube` or `channel` is supported"
+            ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`section` is missing a subcommand; only `properties` or `polygon` is supported",
+            "`section` is missing a subcommand; only `properties`, `polygon`, `i`, `tube` or `channel` is supported",
         )),
     }
 }
@@ -723,6 +732,56 @@ fn section_polygon(args: &[String]) -> Result<i32, CaeError> {
     };
     let points = parse_points(required(&parsed, "--points")?)?;
     let report = polygon_section_report(&points, units)?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    Ok(0)
+}
+
+fn section_i(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--units", "--height", "--width", "--web-thickness", "--flange-thickness"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let report = i_standard_section_report(
+        required_number(&parsed, "--height")?,
+        required_number(&parsed, "--width")?,
+        required_number(&parsed, "--web-thickness")?,
+        required_number(&parsed, "--flange-thickness")?,
+        units,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    Ok(0)
+}
+
+fn section_tube(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--units", "--height", "--width", "--thickness"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let report = tube_standard_section_report(
+        required_number(&parsed, "--height")?,
+        required_number(&parsed, "--width")?,
+        required_number(&parsed, "--thickness")?,
+        units,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    Ok(0)
+}
+
+fn section_channel(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--units", "--height", "--width", "--web-thickness", "--flange-thickness"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let report = channel_standard_section_report(
+        required_number(&parsed, "--height")?,
+        required_number(&parsed, "--width")?,
+        required_number(&parsed, "--web-thickness")?,
+        required_number(&parsed, "--flange-thickness")?,
+        units,
+    )?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
     Ok(0)
 }

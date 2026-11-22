@@ -14,15 +14,19 @@ import { CaeDocument } from './document.js';
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
+    ChannelSectionGeometry,
     CreateOptions,
     Dimension,
+    ISectionGeometry,
     MaterialLibrary,
     OpenCAECapabilities,
     OpenCAEOptions,
     PolygonPoint,
     PolygonSectionReport,
+    RectangularTubeGeometry,
     Section,
     SectionReport,
+    StandardSectionReport,
     Units,
 } from './types.js';
 
@@ -98,6 +102,43 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionPolygon(points, units);
+    }
+
+    /**
+     * Derived properties of a doubly symmetric I-section: area, centroid,
+     * second moments, torsion constant and radii of gyration. Requires
+     * `0 < flangeThickness < height/2` and `0 < webThickness < width`.
+     */
+    async sectionI(geometry: ISectionGeometry, units: Units = this.units): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionI(geometry, units);
+    }
+
+    /**
+     * Derived properties of a hollow rectangular tube. Requires
+     * `0 < thickness < min(width, height)/2`.
+     */
+    async sectionTube(
+        geometry: RectangularTubeGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionTube(geometry, units);
+    }
+
+    /**
+     * Derived properties of an open channel whose opening faces right. The
+     * centroid `x` is measured from the web face, so it is not `width/2`.
+     */
+    async sectionChannel(
+        geometry: ChannelSectionGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionChannel(geometry, units);
     }
 
     /** Creates an empty document at `path` and returns it. */

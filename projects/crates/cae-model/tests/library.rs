@@ -5,8 +5,9 @@ use std::{
 };
 
 use cae_model::{
-    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset,
-    polygon_section_report, section_report, solve,
+    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, channel_standard_section_report,
+    i_standard_section_report, library_json, material_preset, polygon_section_report, section_report, solve,
+    tube_standard_section_report,
 };
 
 const E: f64 = 210_000.0;
@@ -459,4 +460,157 @@ fn invalid_sections_and_allowable_stress_are_rejected() {
         .add_element_kind("b2", "n1", "n2", None, ElementKind::Beam, Some(-1.0), None)
         .expect_err("an explicit negative inertia is always invalid");
     assert_eq!(error.code, "element/invalid-inertia");
+}
+
+#[test]
+fn standard_i_section_matches_closed_form() {
+    let height: f64 = 200.0;
+    let flange_width: f64 = 100.0;
+    let web_thickness: f64 = 6.0;
+    let flange_thickness: f64 = 10.0;
+    let report =
+        i_standard_section_report(height, flange_width, web_thickness, flange_thickness, Units::Millimeter).expect("i section");
+
+    let web_height = height - 2.0 * flange_thickness;
+    let area = 2.0 * flange_width * flange_thickness + web_height * web_thickness;
+    let ix = (flange_width * height.powi(3) - (flange_width - web_thickness) * web_height.powi(3)) / 12.0;
+    let iy = (2.0 * flange_thickness * flange_width.powi(3) + web_height * web_thickness.powi(3)) / 12.0;
+    let torsion = (2.0 * flange_width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+
+    assert_eq!(report.shape, "i");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, flange_width / 2.0, 1e-12);
+    assert_close(report.centroid_y, height / 2.0, 1e-12);
+    assert_close(report.ix, ix, 1e-12);
+    assert_close(report.iy, iy, 1e-12);
+    assert_close(report.ixy, 0.0, 1e-12);
+    assert_close(report.polar_moment, torsion, 1e-12);
+    assert_close(report.radius_of_gyration_x, (ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (iy / area).sqrt(), 1e-12);
+    assert!(report.ix > report.iy);
+}
+
+#[test]
+fn standard_tube_section_matches_closed_form() {
+    let height: f64 = 200.0;
+    let width: f64 = 100.0;
+    let thickness: f64 = 5.0;
+    let report = tube_standard_section_report(height, width, thickness, Units::Millimeter).expect("rectangular tube");
+
+    let inner_width = width - 2.0 * thickness;
+    let inner_height = height - 2.0 * thickness;
+    let area = width * height - inner_width * inner_height;
+    let ix = (width * height.powi(3) - inner_width * inner_height.powi(3)) / 12.0;
+    let iy = (height * width.powi(3) - inner_height * inner_width.powi(3)) / 12.0;
+    let torsion =
+        2.0 * thickness * (width - thickness).powi(2) * (height - thickness).powi(2) / (width + height - 2.0 * thickness);
+
+    assert_eq!(report.shape, "tube");
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, width / 2.0, 1e-12);
+    assert_close(report.centroid_y, height / 2.0, 1e-12);
+    assert_close(report.ix, ix, 1e-12);
+    assert_close(report.iy, iy, 1e-12);
+    assert_close(report.ixy, 0.0, 1e-12);
+    assert_close(report.polar_moment, torsion, 1e-12);
+    assert_close(report.radius_of_gyration_x, (ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (iy / area).sqrt(), 1e-12);
+}
+
+#[test]
+fn standard_channel_section_matches_parallel_axis_formula() {
+    let height: f64 = 200.0;
+    let flange_width: f64 = 80.0;
+    let web_thickness: f64 = 6.0;
+    let flange_thickness: f64 = 10.0;
+    let report = channel_standard_section_report(height, flange_width, web_thickness, flange_thickness, Units::Millimeter)
+        .expect("channel");
+
+    let web_height = height - 2.0 * flange_thickness;
+    let area = 2.0 * flange_width * flange_thickness + web_height * web_thickness;
+    let centroid_x = (2.0 * flange_width * flange_thickness * (flange_width / 2.0)
+        + web_height * web_thickness * (web_thickness / 2.0))
+        / area;
+    let flange_offset = height / 2.0 - flange_thickness / 2.0;
+    let ix = 2.0 * (flange_width * flange_thickness.powi(3) / 12.0 + flange_width * flange_thickness * flange_offset.powi(2))
+        + web_thickness * web_height.powi(3) / 12.0;
+    let iy = 2.0
+        * (flange_thickness * flange_width.powi(3) / 12.0
+            + flange_width * flange_thickness * (flange_width / 2.0 - centroid_x).powi(2))
+        + (web_height * web_thickness.powi(3) / 12.0 + web_height * web_thickness * (centroid_x - web_thickness / 2.0).powi(2));
+    let torsion = (2.0 * flange_width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+
+    assert_eq!(report.shape, "channel");
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.area, 2680.0, 1e-12);
+    assert_close(report.centroid_x, centroid_x, 1e-12);
+    assert_close(report.centroid_x, 1681.0 / 67.0, 1e-12);
+    assert!(report.centroid_x > 0.0 && report.centroid_x < flange_width / 2.0);
+    assert_close(report.centroid_y, height / 2.0, 1e-12);
+    assert_close(report.ix, ix, 1e-12);
+    assert_close(report.iy, iy, 1e-12);
+    assert_close(report.ixy, 0.0, 1e-12);
+    assert_close(report.polar_moment, torsion, 1e-12);
+    assert_close(report.radius_of_gyration_x, (ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (iy / area).sqrt(), 1e-12);
+
+    // The standalone calculator agrees with the parametric channel section.
+    let parametric = Section::channel(height, flange_width, flange_thickness, web_thickness)
+        .expect("parametric channel")
+        .properties()
+        .expect("properties");
+    assert_close(report.area, parametric.area, 1e-12);
+    assert_close(report.ix, parametric.inertia_strong, 1e-12);
+    assert_close(report.iy, parametric.inertia_weak, 1e-12);
+    assert_close(report.polar_moment, parametric.torsion_constant, 1e-12);
+}
+
+#[test]
+fn standard_section_reports_are_deterministic_and_serialise_camel_case() {
+    let first = i_standard_section_report(200.0, 100.0, 6.0, 10.0, Units::Meter).expect("i section");
+    let second = i_standard_section_report(200.0, 100.0, 6.0, 10.0, Units::Meter).expect("i section");
+    assert_eq!(first, second);
+
+    let json = serde_json::to_value(&first).expect("json");
+    assert_eq!(json["shape"], "i");
+    assert_eq!(json["units"], "m");
+    assert!(json["centroidX"].as_f64().is_some_and(|value| (value - 50.0).abs() < 1e-12));
+    assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json.get("radiusOfGyrationX").is_some());
+    assert!(json.get("centroid_x").is_none());
+}
+
+#[test]
+fn standard_sections_reject_invalid_dimensions() {
+    for result in [
+        i_standard_section_report(200.0, 100.0, 6.0, 100.0, Units::Millimeter),
+        i_standard_section_report(200.0, 100.0, 6.0, 0.0, Units::Millimeter),
+        i_standard_section_report(200.0, 100.0, 100.0, 10.0, Units::Millimeter),
+        i_standard_section_report(f64::NAN, 100.0, 6.0, 10.0, Units::Millimeter),
+        i_standard_section_report(200.0, f64::INFINITY, 6.0, 10.0, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid i-section dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+
+    for result in [
+        tube_standard_section_report(200.0, 100.0, 50.0, Units::Millimeter),
+        tube_standard_section_report(200.0, 100.0, 0.0, Units::Millimeter),
+        tube_standard_section_report(200.0, -100.0, 5.0, Units::Millimeter),
+        tube_standard_section_report(200.0, 100.0, f64::NAN, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid rectangular tube dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+
+    for result in [
+        channel_standard_section_report(200.0, 80.0, 6.0, 100.0, Units::Millimeter),
+        channel_standard_section_report(200.0, 80.0, 6.0, 0.0, Units::Millimeter),
+        channel_standard_section_report(200.0, 80.0, 80.0, 10.0, Units::Millimeter),
+        channel_standard_section_report(200.0, 80.0, f64::NAN, 10.0, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid channel dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
 }

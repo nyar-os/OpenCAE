@@ -26,6 +26,7 @@ export const errorCodes = [
     'document/closed',
     'material/invalid',
     'material/invalid-section',
+    'section/invalid-dimensions',
     'material/invalid-alpha',
     'material/missing-alpha',
     'material/invalid-conductivity',

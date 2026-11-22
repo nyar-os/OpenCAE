@@ -191,6 +191,79 @@ export interface PolygonSectionReport {
     readonly radiusOfGyrationY: number;
 }
 
+/**
+ * Derived properties of a parametric standard section (I, rectangular tube or
+ * channel).
+ *
+ * Coordinates use the lower-left corner of the bounding rectangle: `x` runs
+ * across the width and `y` along the depth, and the second moments are taken
+ * about centroidal axes. `polarMoment` keeps the polygon report key but carries
+ * the Saint-Venant torsion constant `J`, which equals `Ix + Iy` only for a
+ * circular section.
+ */
+export interface StandardSectionReport {
+    /** Shape identifier: `"i"`, `"tube"` or `"channel"`. */
+    readonly shape: 'i' | 'tube' | 'channel';
+    /** Unit system the dimensions were interpreted in. */
+    readonly units: Units;
+    /** Cross-sectional area. */
+    readonly area: number;
+    /** Centroid `x` coordinate from the lower-left corner. */
+    readonly centroidX: number;
+    /** Centroid `y` coordinate from the lower-left corner. */
+    readonly centroidY: number;
+    /** Second moment of area about the centroidal `x` axis. */
+    readonly ix: number;
+    /** Second moment of area about the centroidal `y` axis. */
+    readonly iy: number;
+    /** Product of inertia about the centroidal axes. */
+    readonly ixy: number;
+    /** Saint-Venant torsion constant `J` (thin-walled approximation). */
+    readonly polarMoment: number;
+    /** Radius of gyration about the centroidal `x` axis, `sqrt(Ix / A)`. */
+    readonly radiusOfGyrationX: number;
+    /** Radius of gyration about the centroidal `y` axis, `sqrt(Iy / A)`. */
+    readonly radiusOfGyrationY: number;
+}
+
+/**
+ * Geometry of a doubly symmetric I-section.
+ *
+ * `height` is the total depth `h`, `width` the flange width `b`,
+ * `webThickness` the web thickness `tw` and `flangeThickness` the flange
+ * thickness `tf`; `0 < tf < h/2` and `0 < tw < b` are required.
+ */
+export interface ISectionGeometry {
+    readonly height: number;
+    readonly width: number;
+    readonly webThickness: number;
+    readonly flangeThickness: number;
+}
+
+/**
+ * Geometry of a hollow rectangular tube: total `height` `h`, total `width`
+ * `b` and wall `thickness` `t`, with `0 < t < min(b, h)/2`.
+ */
+export interface RectangularTubeGeometry {
+    readonly height: number;
+    readonly width: number;
+    readonly thickness: number;
+}
+
+/**
+ * Geometry of an open channel whose opening faces right.
+ *
+ * `height` is the total depth `h`, `width` the flange width `b`,
+ * `webThickness` the web thickness `tw` and `flangeThickness` the flange
+ * thickness `tf`; `0 < tf < h/2` and `0 < tw < b` are required.
+ */
+export interface ChannelSectionGeometry {
+    readonly height: number;
+    readonly width: number;
+    readonly webThickness: number;
+    readonly flangeThickness: number;
+}
+
 /** Request of `applyMaterialPreset()`. */
 export interface MaterialPresetRequest {
     /** Built-in preset name, for example `steel` or `aluminum`. */

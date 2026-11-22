@@ -68,6 +68,18 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | `open-cae library` | `[--units mm\|m]` | Prints presets and supported section shapes. |
 | `open-cae section properties` | `--section <shape> [...geometry] [--units mm\|m]` | Prints area, inertias, torsion constant, extreme fibre and section modulus. |
 | `open-cae section polygon` | `--points "x,y;x,y;..." [--units mm\|m]` | Prints area, centroid, `Ix`/`Iy`/`Ixy` about the centroid, polar moment `J = Ix + Iy` and radii of gyration of a closed polygon. Vertices may be clockwise or counter-clockwise and the closing vertex may be repeated. |
+| `open-cae section i` | `--height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm\|m]` | I-section: area, centroid, `Ix`/`Iy`/`Ixy`, torsion constant `J` and radii of gyration. Requires `0 < tf < h/2` and `0 < tw < b`; invalid dimensions report `section/invalid-dimensions`. |
+| `open-cae section tube` | `--height <h> --width <b> --thickness <t> [--units mm\|m]` | Hollow **rectangular** tube: area, centroid, `Ix`/`Iy`/`Ixy`, torsion constant `J` and radii of gyration. Requires `0 < t < min(b, h)/2`. |
+| `open-cae section channel` | `--height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm\|m]` | Open channel with the opening facing right: area, centroid, `Ix`/`Iy`/`Ixy`, torsion constant `J` and radii of gyration. The centroid `x` is measured from the web face and is not `b/2`. |
+
+`section i`, `section tube` and `section channel` print the same field names
+as `section polygon` (`area`, `centroidX`, `centroidY`, `ix`, `iy`, `ixy`,
+`polarMoment`, `radiusOfGyrationX`, `radiusOfGyrationY`), but `polarMoment`
+holds the Saint-Venant torsion constant `J`, not `Ix + Iy`. The coordinates
+place the origin at the lower-left corner of the bounding rectangle. Note that
+`section tube` is the rectangular tube, whereas `--section tube` in
+`section properties` and `material preset` remains the circular hollow section
+with `--outer-diameter`/`--inner-diameter`.
 
 Section shapes and their geometry flags:
 

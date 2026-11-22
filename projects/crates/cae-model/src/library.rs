@@ -506,6 +506,214 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
     })
 }
 
+/// Derived properties of a parametric standard section (I, rectangular tube or
+/// channel), reported with the same fields as [`PolygonSectionReport`].
+///
+/// Coordinates use the millimetre-style layout of the section: `x` runs across
+/// the width and `y` along the depth, with the origin at the lower-left corner
+/// of the bounding rectangle. All second moments are taken about centroidal
+/// axes parallel to `x` and `y`, so they compare directly with the polygon
+/// report. `polar_moment` keeps the polygon field name but holds the
+/// Saint-Venant torsion constant `J` of the standard section, which is only
+/// `Ix + Iy` for a circular section.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandardSectionReport {
+    /// Shape identifier: `"i"`, `"tube"` or `"channel"`.
+    pub shape: String,
+    /// Unit system label (`mm` or `m`) the dimensions were interpreted in.
+    pub units: String,
+    /// Cross-sectional area.
+    pub area: f64,
+    /// Centroid `x` coordinate from the lower-left bounding corner.
+    pub centroid_x: f64,
+    /// Centroid `y` coordinate from the lower-left bounding corner.
+    pub centroid_y: f64,
+    /// Second moment of area about the centroidal `x` axis.
+    pub ix: f64,
+    /// Second moment of area about the centroidal `y` axis.
+    pub iy: f64,
+    /// Product of inertia about the centroidal axes.
+    pub ixy: f64,
+    /// Saint-Venant torsion constant `J` (thin-walled approximation).
+    pub polar_moment: f64,
+    /// Radius of gyration about the centroidal `x` axis, `sqrt(Ix / A)`.
+    pub radius_of_gyration_x: f64,
+    /// Radius of gyration about the centroidal `y` axis, `sqrt(Iy / A)`.
+    pub radius_of_gyration_y: f64,
+}
+
+/// Computes the properties of a doubly symmetric I-section.
+///
+/// `height` is the total depth `h`, `flange_width` the flange width `b`,
+/// `web_thickness` the web thickness `tw` and `flange_thickness` the flange
+/// thickness `tf`. The geometry requires `0 < tf < h/2` and `0 < tw < b`.
+///
+/// `Ix = (b·h³ − (b − tw)·(h − 2tf)³)/12`,
+/// `Iy = (2·tf·b³ + (h − 2tf)·tw³)/12`, and `J` uses the thin-walled open
+/// approximation `(2·b·tf³ + (h − 2tf)·tw³)/3`. Invalid dimensions report
+/// `section/invalid-dimensions`.
+pub fn i_standard_section_report(
+    height: f64,
+    flange_width: f64,
+    web_thickness: f64,
+    flange_thickness: f64,
+    units: Units,
+) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions(
+        "i",
+        &[
+            ("height", height),
+            ("flangeWidth", flange_width),
+            ("webThickness", web_thickness),
+            ("flangeThickness", flange_thickness),
+        ],
+    )?;
+    let web_height = height - 2.0 * flange_thickness;
+    if web_height <= 0.0 {
+        return Err(invalid_dimensions(format!(
+            "i section flange thickness must be smaller than half the height (tf={flange_thickness}, h={height})"
+        )));
+    }
+    if web_thickness >= flange_width {
+        return Err(invalid_dimensions(format!(
+            "i section web thickness must be smaller than the flange width (tw={web_thickness}, b={flange_width})"
+        )));
+    }
+    let area = 2.0 * flange_width * flange_thickness + web_height * web_thickness;
+    let ix = (flange_width * height.powi(3) - (flange_width - web_thickness) * web_height.powi(3)) / 12.0;
+    let iy = (2.0 * flange_thickness * flange_width.powi(3) + web_height * web_thickness.powi(3)) / 12.0;
+    let torsion = (2.0 * flange_width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+    Ok(standard_section_report("i", units, area, flange_width / 2.0, height / 2.0, ix, iy, 0.0, torsion))
+}
+
+/// Computes the properties of a hollow rectangular tube (box section).
+///
+/// `height` is the total depth `h`, `flange_width` the total width `b` and
+/// `wall` the wall thickness `t`. The geometry requires
+/// `0 < t < min(b, h)/2`.
+///
+/// `Ix = (b·h³ − (b − 2t)·(h − 2t)³)/12`,
+/// `Iy = (h·b³ − (h − 2t)·(b − 2t)³)/12` and
+/// `J = 2t·(b − t)²·(h − t)²/(b + h − 2t)`. This is the rectangular tube; the
+/// circular hollow `Section::Tube` remains the parametric member section.
+/// Invalid dimensions report `section/invalid-dimensions`.
+pub fn tube_standard_section_report(
+    height: f64,
+    width: f64,
+    wall: f64,
+    units: Units,
+) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions("tube", &[("height", height), ("width", width), ("thickness", wall)])?;
+    if wall >= width.min(height) / 2.0 {
+        return Err(invalid_dimensions(format!(
+            "rectangular tube wall thickness must be smaller than half of the width and half of the height (t={wall}, b={width}, h={height})"
+        )));
+    }
+    let inner_width = width - 2.0 * wall;
+    let inner_height = height - 2.0 * wall;
+    let area = width * height - inner_width * inner_height;
+    let ix = (width * height.powi(3) - inner_width * inner_height.powi(3)) / 12.0;
+    let iy = (height * width.powi(3) - inner_height * inner_width.powi(3)) / 12.0;
+    let torsion = 2.0 * wall * (width - wall).powi(2) * (height - wall).powi(2) / (width + height - 2.0 * wall);
+    Ok(standard_section_report("tube", units, area, width / 2.0, height / 2.0, ix, iy, 0.0, torsion))
+}
+
+/// Computes the properties of an open channel with the opening facing right.
+///
+/// `height` is the total depth `h`, `flange_width` the flange width `b`,
+/// `web_thickness` the web thickness `tw` and `flange_thickness` the flange
+/// thickness `tf`. The web lies on the left edge, so the centroid `x` is
+/// measured from the web face and is smaller than `b/2`. The geometry requires
+/// `0 < tf < h/2` and `0 < tw < b`.
+///
+/// `Ix` and `Iy` use the parallel-axis theorem over the web and both flanges,
+/// and `J` uses the same thin-walled open approximation as the I-section.
+/// Invalid dimensions report `section/invalid-dimensions`.
+pub fn channel_standard_section_report(
+    height: f64,
+    flange_width: f64,
+    web_thickness: f64,
+    flange_thickness: f64,
+    units: Units,
+) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions(
+        "channel",
+        &[
+            ("height", height),
+            ("flangeWidth", flange_width),
+            ("webThickness", web_thickness),
+            ("flangeThickness", flange_thickness),
+        ],
+    )?;
+    let web_height = height - 2.0 * flange_thickness;
+    if web_height <= 0.0 {
+        return Err(invalid_dimensions(format!(
+            "channel section flange thickness must be smaller than half the height (tf={flange_thickness}, h={height})"
+        )));
+    }
+    if web_thickness >= flange_width {
+        return Err(invalid_dimensions(format!(
+            "channel section web thickness must be smaller than the flange width (tw={web_thickness}, b={flange_width})"
+        )));
+    }
+    let area = 2.0 * flange_width * flange_thickness + web_height * web_thickness;
+    let centroid_x = (2.0 * flange_width * flange_thickness * (flange_width / 2.0)
+        + web_height * web_thickness * (web_thickness / 2.0))
+        / area;
+    let flange_offset = height / 2.0 - flange_thickness / 2.0;
+    let ix = 2.0 * (flange_width * flange_thickness.powi(3) / 12.0 + flange_width * flange_thickness * flange_offset.powi(2))
+        + web_thickness * web_height.powi(3) / 12.0;
+    let iy = 2.0
+        * (flange_thickness * flange_width.powi(3) / 12.0
+            + flange_width * flange_thickness * (flange_width / 2.0 - centroid_x).powi(2))
+        + (web_height * web_thickness.powi(3) / 12.0 + web_height * web_thickness * (centroid_x - web_thickness / 2.0).powi(2));
+    let torsion = (2.0 * flange_width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+    Ok(standard_section_report("channel", units, area, centroid_x, height / 2.0, ix, iy, 0.0, torsion))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn standard_section_report(
+    shape: &str,
+    units: Units,
+    area: f64,
+    centroid_x: f64,
+    centroid_y: f64,
+    ix: f64,
+    iy: f64,
+    ixy: f64,
+    torsion: f64,
+) -> StandardSectionReport {
+    StandardSectionReport {
+        shape: shape.to_string(),
+        units: units.as_str().to_string(),
+        area,
+        centroid_x,
+        centroid_y,
+        ix,
+        iy,
+        ixy,
+        polar_moment: torsion,
+        radius_of_gyration_x: (ix / area).sqrt(),
+        radius_of_gyration_y: (iy / area).sqrt(),
+    }
+}
+
+fn validate_standard_dimensions(shape: &str, dimensions: &[(&str, f64)]) -> Result<(), CaeError> {
+    for (name, value) in dimensions {
+        if !value.is_finite() || *value <= 0.0 {
+            return Err(invalid_dimensions(format!(
+                "{shape} section `{name}` must be positive and finite (currently {value})"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn invalid_dimensions(message: impl Into<String>) -> CaeError {
+    CaeError::new("section/invalid-dimensions", message)
+}
+
 /// Validates a vertex list and returns it de-duplicated and counter-clockwise.
 fn normalize_polygon(vertices: &[(f64, f64)]) -> Result<Vec<(f64, f64)>, CaeError> {
     if vertices.len() < 3 {

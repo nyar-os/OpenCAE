@@ -894,16 +894,25 @@ async function sectionCommand(args: readonly string[]): Promise<number> {
     if (action === 'polygon') {
         return sectionPolygonCommand(args.slice(1));
     }
+    if (action === 'i') {
+        return sectionICommand(args.slice(1));
+    }
+    if (action === 'tube') {
+        return sectionTubeCommand(args.slice(1));
+    }
+    if (action === 'channel') {
+        return sectionChannelCommand(args.slice(1));
+    }
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'section',
-            expected: 'properties or polygon',
+            expected: 'properties, polygon, i, tube or channel',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'section',
         action,
-        expected: 'properties or polygon',
+        expected: 'properties, polygon, i, tube or channel',
     });
 }
 
@@ -944,6 +953,53 @@ async function sectionPolygonCommand(args: readonly string[]): Promise<number> {
     const points = parsePolygonPoints(required(parsed, '--points'));
     return withSession(async (session) => {
         const report = await session.sectionPolygon(points, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionICommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--height', '--width', '--web-thickness', '--flange-thickness'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const geometry = {
+        height: requiredNumber(parsed, '--height'),
+        width: requiredNumber(parsed, '--width'),
+        webThickness: requiredNumber(parsed, '--web-thickness'),
+        flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionI(geometry, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionTubeCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--height', '--width', '--thickness'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const geometry = {
+        height: requiredNumber(parsed, '--height'),
+        width: requiredNumber(parsed, '--width'),
+        thickness: requiredNumber(parsed, '--thickness'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionTube(geometry, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionChannelCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--height', '--width', '--web-thickness', '--flange-thickness'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const geometry = {
+        height: requiredNumber(parsed, '--height'),
+        width: requiredNumber(parsed, '--width'),
+        webThickness: requiredNumber(parsed, '--web-thickness'),
+        flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionChannel(geometry, units);
         console.log(JSON.stringify(report, null, 2));
         return 0;
     });

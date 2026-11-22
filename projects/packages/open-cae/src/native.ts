@@ -37,6 +37,9 @@ export interface NativeBinding {
     library(requestJson?: string): string;
     section_properties(requestJson: string): string;
     section_polygon(requestJson: string): string;
+    section_i(requestJson: string): string;
+    section_tube(requestJson: string): string;
+    section_channel(requestJson: string): string;
     support_add(path: string, requestJson: string): string;
     support_remove(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;
