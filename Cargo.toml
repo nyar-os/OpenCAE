@@ -9,6 +9,7 @@ exclude = [
     "projects/.DS_Store",
     "projects/crates/",
     "projects/packages",
+    "projects/sites",
 ]
 
 [workspace.package]
