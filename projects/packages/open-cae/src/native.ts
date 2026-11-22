@@ -38,6 +38,9 @@ export interface NativeBinding {
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
     reactions(path: string, requestJson?: string): string;
+    node_displacement(path: string, requestJson: string): string;
+    element_result(path: string, requestJson: string): string;
+    node_reaction(path: string, requestJson: string): string;
     internal_forces(path: string, requestJson?: string): string;
     stresses(path: string, requestJson?: string): string;
     deflections(path: string, requestJson?: string): string;

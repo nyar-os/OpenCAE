@@ -21,9 +21,10 @@ use crate::{
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
-        DeflectionSolution, FrequencyResponseSolution, InternalForceSolution, LoadCaseSummary, ModalSolution,
-        NodalStressSolution, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution,
-        Solution, SpectrumPoint, StressSolution, SystemMatrices, solve, solve_buckling, solve_buckling_combinations,
+        DeflectionSolution, ElementResult, FrequencyResponseSolution, InternalForceSolution, LoadCaseSummary, ModalSolution,
+        NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary,
+        ResponseSpectrumSolution, Solution, SpectrumPoint, StressSolution, SupportReaction, SystemMatrices, solve,
+        solve_buckling, solve_buckling_combinations,
         solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_internal_forces,
         solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress,
         summarize_load_cases,
@@ -788,6 +789,45 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(summary)
+    }
+
+    /// Returns the solved displacement of one node by identifier.
+    ///
+    /// An identifier that is not part of the model is rejected with
+    /// `result/unknown-node`.
+    pub fn node_displacement(&self, id: &str) -> Result<NodeDisplacement, CaeError> {
+        let solution = self.solve(None)?;
+        solution
+            .nodes
+            .into_iter()
+            .find(|node| node.id == id)
+            .ok_or_else(|| CaeError::new("result/unknown-node", format!("the solution has no node `{id}`")))
+    }
+
+    /// Returns the solved member result of one element by identifier.
+    ///
+    /// The result carries the axial force/stress and the local end forces. An
+    /// identifier that is not part of the model is rejected with
+    /// `result/unknown-element`.
+    pub fn element_result(&self, id: &str) -> Result<ElementResult, CaeError> {
+        let solution = self.solve(None)?;
+        solution
+            .elements
+            .into_iter()
+            .find(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("result/unknown-element", format!("the solution has no element `{id}`")))
+    }
+
+    /// Returns the support reaction of one node by identifier.
+    ///
+    /// A node without a support entry is rejected with `result/no-reaction`.
+    pub fn node_reaction(&self, node: &str) -> Result<SupportReaction, CaeError> {
+        let summary = self.reactions(None)?;
+        summary
+            .supports
+            .into_iter()
+            .find(|support| support.node == node)
+            .ok_or_else(|| CaeError::new("result/no-reaction", format!("node `{node}` has no support reaction")))
     }
 
     /// Recovers extreme-fibre stresses from the sampled internal forces.

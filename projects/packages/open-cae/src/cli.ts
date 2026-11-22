@@ -217,6 +217,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return forcesCommand(args.slice(1));
         case 'reactions':
             return reactionsCommand(args.slice(1));
+        case 'reaction':
+            return reactionCommand(args.slice(1));
         case 'stresses':
             return stressesCommand(args.slice(1));
         case 'deflections':
@@ -260,10 +262,20 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === 'remove') {
         return nodeRemove(args.slice(1));
     }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'node', expected: 'add or remove' });
+    if (action === 'displacement') {
+        return nodeDisplacement(args.slice(1));
     }
-    throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'node', action, expected: 'add or remove' });
+    if (action === undefined) {
+        throw failure('cli/missing-argument', 'missingSubcommand', {
+            group: 'node',
+            expected: 'add, remove or displacement',
+        });
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', {
+        group: 'node',
+        action,
+        expected: 'add, remove or displacement',
+    });
 }
 
 async function supportCommand(args: readonly string[]): Promise<number> {
@@ -343,6 +355,17 @@ async function nodeRemove(args: readonly string[]): Promise<number> {
     });
 }
 
+async function nodeDisplacement(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id'], []);
+    const file = positional(parsed, 0, 'node displacement <file> --id <id>');
+    const id = required(parsed, '--id');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        console.log(JSON.stringify(document.nodeDisplacement(id), null, 2));
+        return 0;
+    });
+}
+
 function elementKindOption(parsed: Parsed): ElementKind | undefined {
     const raw = parsed.options.get('--kind');
     if (raw === undefined) {
@@ -411,19 +434,22 @@ async function elementCommand(args: readonly string[]): Promise<number> {
     if (action === 'remove') {
         return elementRemove(args.slice(1));
     }
+    if (action === 'forces') {
+        return elementForces(args.slice(1));
+    }
     if (action === 'release') {
         return elementRelease(args.slice(1));
     }
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'element',
-            expected: 'add, remove or release',
+            expected: 'add, remove, forces or release',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'element',
         action,
-        expected: 'add, remove or release',
+        expected: 'add, remove, forces or release',
     });
 }
 
@@ -452,6 +478,17 @@ async function elementRemove(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const summary = document.removeElement(id);
         console.log(message('elementRemoved', { id, revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function elementForces(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id'], []);
+    const file = positional(parsed, 0, 'element forces <file> --id <id>');
+    const id = required(parsed, '--id');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        console.log(JSON.stringify(document.elementResult(id), null, 2));
         return 0;
     });
 }
@@ -1033,6 +1070,17 @@ async function reactionsCommand(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const result = document.reactions({ out: parsed.options.get('--out') });
         console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+async function reactionCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--node'], []);
+    const file = positional(parsed, 0, 'reaction <file> --node <node>');
+    const node = required(parsed, '--node');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        console.log(JSON.stringify(document.nodeReaction(node), null, 2));
         return 0;
     });
 }

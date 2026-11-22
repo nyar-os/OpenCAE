@@ -23,9 +23,11 @@ Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
   ocae node remove <file> --id <id>
+  ocae node displacement <file> --id <id>
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
   ocae element remove <file> --id <id>
+  ocae element forces <file> --id <id>
   ocae element release <file> --id <id> [--start] [--end]
   ocae element gradient <file> --id <id> [--value <dT>]
   ocae element span <file> --id <id> [--start <s>] [--end <s>]
@@ -50,6 +52,7 @@ Usage:
   ocae validate <file>
   ocae solve <file> [--out report.json] [--analysis static|modal|buckling] [--modes N]
   ocae reactions <file> [--out report.json]
+  ocae reaction <file> --node <node>
                    [--element truss|beam] [--dimension 2|3]
   ocae modal <file> [--modes N] [--out report.json]
   ocae buckling <file> [--modes N] [--out report.json]
@@ -110,6 +113,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "validate" => validate(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "reactions" => reactions_command(&args[1..]),
+        "reaction" => reaction_command(&args[1..]),
         "modal" => modal_command(&args[1..]),
         "buckling" => buckling_command(&args[1..]),
         "buckling-combinations" => buckling_combinations_command(&args[1..]),
@@ -142,13 +146,15 @@ fn node_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => node_add(&args[1..]),
         Some("remove") => node_remove(&args[1..]),
+        Some("displacement") => node_displacement(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `node` does not exist; only `add` or `remove` is supported"),
+            format!("subcommand `{other}` of `node` does not exist; only `add`, `remove` or `displacement` is supported"),
         )),
-        None => {
-            Err(CaeError::new("cli/missing-argument", "`node` is missing a subcommand; only `add` or `remove` is supported"))
-        }
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`node` is missing a subcommand; only `add`, `remove` or `displacement` is supported",
+        )),
     }
 }
 
@@ -224,6 +230,17 @@ fn node_remove(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn node_displacement(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "node displacement <file> --id <id>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let displacement = session.node_displacement(id)?;
+    println!("{}", serde_json::to_string_pretty(&displacement).unwrap_or_default());
+    Ok(0)
+}
+
 fn element_add(args: &[String]) -> Result<i32, CaeError> {
     let parsed = parse(args, &["--id", "--from", "--to", "--E", "--A", "--kind", "--I", "--w", "--w2", "--dt"], &[])?;
     let file = positional(
@@ -266,18 +283,19 @@ fn element_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => element_add(&args[1..]),
         Some("remove") => element_remove(&args[1..]),
+        Some("forces") => element_forces(&args[1..]),
         Some("release") => element_release(&args[1..]),
         Some("gradient") => element_gradient(&args[1..]),
         Some("span") => element_span(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `element` does not exist; only `add`, `remove`, `release`, `gradient` or `span` is supported"
+                "subcommand `{other}` of `element` does not exist; only `add`, `remove`, `forces`, `release`, `gradient` or `span` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`element` is missing a subcommand; only `add`, `remove`, `release`, `gradient` or `span` is supported",
+            "`element` is missing a subcommand; only `add`, `remove`, `forces`, `release`, `gradient` or `span` is supported",
         )),
     }
 }
@@ -290,6 +308,17 @@ fn element_remove(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.remove_element(id)?;
     println!("element `{id}` removed (revision {})", summary.revision);
+    Ok(0)
+}
+
+fn element_forces(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "element forces <file> --id <id>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let result = session.element_result(id)?;
+    println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
     Ok(0)
 }
 
@@ -780,6 +809,17 @@ fn reactions_command(args: &[String]) -> Result<i32, CaeError> {
         summary.balanced
     );
     println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
+    Ok(0)
+}
+
+fn reaction_command(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--node"], &[])?;
+    let file = positional(&parsed, 0, "reaction <file> --node <node>")?;
+    let node = required(&parsed, "--node")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let reaction = session.node_reaction(node)?;
+    println!("{}", serde_json::to_string_pretty(&reaction).unwrap_or_default());
     Ok(0)
 }
 

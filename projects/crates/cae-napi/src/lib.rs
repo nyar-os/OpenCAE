@@ -604,6 +604,49 @@ fn reactions(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Returns the solved displacement of one node.
+///
+/// The request accepts a required `id`.
+#[function]
+fn node_displacement(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.node_displacement(&id).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
+/// Returns the solved member result of one element.
+///
+/// The request accepts a required `id` and the reply includes the local end
+/// forces.
+#[function]
+fn element_result(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.element_result(&id).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
+/// Returns the support reaction of one node.
+///
+/// The request accepts a required `node`.
+#[function]
+fn node_reaction(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let node = text_field(&request, "node")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.node_reaction(&node).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Recovers extreme-fibre beam stresses from the sampled internal forces.
 ///
 /// The request accepts `stations` (default 11, at least 2) and an optional
@@ -843,6 +886,9 @@ register_module![
     validate,
     solve,
     reactions,
+    node_displacement,
+    element_result,
+    node_reaction,
     internal_forces,
     stresses,
     deflections,

@@ -25,6 +25,7 @@ import type {
     DocumentSummary,
     ElementAddRequest,
     ElementReleaseRequest,
+    ElementResult,
     ExportFormat,
     ExportReport,
     FrequencyResponseOptions,
@@ -41,6 +42,7 @@ import type {
     MatrixOptions,
     ModalSolution,
     NodeAddRequest,
+    NodeDisplacement,
     NodalStressOptions,
     NodalStressSolution,
     NonlinearOptions,
@@ -56,6 +58,7 @@ import type {
     StressOptions,
     StressSolution,
     SupportAddRequest,
+    SupportReaction,
     SystemMatrices,
     ValidationReport,
 } from './types.js';
@@ -258,6 +261,23 @@ export function reactions(path: string, options: ReactionOptions = {}): Reaction
     return decode<ReactionSummary>(() =>
         request === undefined ? binding('solve.reactions').reactions(path) : binding('solve.reactions').reactions(path, request),
     );
+}
+
+/** Returns the solved displacement of one node. */
+export function nodeDisplacement(path: string, id: string): NodeDisplacement {
+    return decode<NodeDisplacement>(() =>
+        binding('node.displacement').node_displacement(path, JSON.stringify({ id })),
+    );
+}
+
+/** Returns the solved member result of one element, including its end forces. */
+export function elementResult(path: string, id: string): ElementResult {
+    return decode<ElementResult>(() => binding('element.result').element_result(path, JSON.stringify({ id })));
+}
+
+/** Returns the support reaction of one node. */
+export function nodeReaction(path: string, node: string): SupportReaction {
+    return decode<SupportReaction>(() => binding('reaction.node').node_reaction(path, JSON.stringify({ node })));
 }
 
 /** Samples internal axial force, shear and bending moment per element. */

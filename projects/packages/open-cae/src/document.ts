@@ -25,6 +25,7 @@ import type {
     DocumentSummary,
     ElementAddRequest,
     ElementReleaseRequest,
+    ElementResult,
     ExportFormat,
     ExportReport,
     FrequencyResponseOptions,
@@ -41,6 +42,7 @@ import type {
     MatrixOptions,
     ModalSolution,
     NodeAddRequest,
+    NodeDisplacement,
     NodalStressOptions,
     NodalStressSolution,
     NonlinearOptions,
@@ -55,6 +57,7 @@ import type {
     StressOptions,
     StressSolution,
     SupportAddRequest,
+    SupportReaction,
     SystemMatrices,
     Units,
     ValidationReport,
@@ -265,6 +268,24 @@ export class CaeDocument {
     reactions(options: ReactionOptions = {}): ReactionSummary {
         this.assertOpen();
         return service.reactions(this.path, options);
+    }
+
+    /** Returns the solved displacement of one node by identifier. */
+    nodeDisplacement(id: string): NodeDisplacement {
+        this.assertOpen();
+        return service.nodeDisplacement(this.path, id);
+    }
+
+    /** Returns the solved member result of one element, including its end forces. */
+    elementResult(id: string): ElementResult {
+        this.assertOpen();
+        return service.elementResult(this.path, id);
+    }
+
+    /** Returns the support reaction of one node by identifier. */
+    nodeReaction(node: string): SupportReaction {
+        this.assertOpen();
+        return service.nodeReaction(this.path, node);
     }
 
     /** Recovers extreme-fibre stresses and utilisation per element. */
