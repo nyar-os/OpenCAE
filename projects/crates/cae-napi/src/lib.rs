@@ -79,7 +79,8 @@ fn boolean_field(request: &Value, name: &str) -> Result<bool> {
 }
 
 fn options_from(value: Option<&Value>) -> Result<OpenCaeOptions> {
-    let Some(value) = value else {
+    let Some(value) = value
+    else {
         return Ok(OpenCaeOptions::default());
     };
     if !value.is_object() {

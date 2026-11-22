@@ -63,7 +63,8 @@ fn apex_settlement(half_span: f64, rise: f64, load: f64) -> f64 {
         let middle = 0.5 * (lower + upper);
         if residual(middle) > 0.0 {
             lower = middle;
-        } else {
+        }
+        else {
             upper = middle;
         }
     }

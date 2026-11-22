@@ -1368,13 +1368,16 @@ impl System {
     fn to_global_vector(&self, values: &[f64]) -> Vec<f64> {
         let mut global = values.to_vec();
         for (node, rotation) in self.rotations.iter().enumerate() {
-            let Some(rotation) = rotation else {
+            let Some(rotation) = rotation
+            else {
                 continue;
             };
-            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten() else {
+            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten()
+            else {
                 continue;
             };
-            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten() else {
+            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten()
+            else {
                 continue;
             };
             let a = values[first];
@@ -1390,13 +1393,16 @@ impl System {
         let size = self.layout.size;
         let mut global = matrix.to_vec();
         for (node, rotation) in self.rotations.iter().enumerate() {
-            let Some(rotation) = rotation else {
+            let Some(rotation) = rotation
+            else {
                 continue;
             };
-            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten() else {
+            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten()
+            else {
                 continue;
             };
-            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten() else {
+            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten()
+            else {
                 continue;
             };
             for row in 0..size {
@@ -1419,13 +1425,16 @@ impl System {
         let size = self.layout.size;
         let mut local = matrix.to_vec();
         for (node, rotation) in self.rotations.iter().enumerate() {
-            let Some(rotation) = rotation else {
+            let Some(rotation) = rotation
+            else {
                 continue;
             };
-            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten() else {
+            let Some(first) = self.layout.index.get(node * self.layout.slots).copied().flatten()
+            else {
                 continue;
             };
-            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten() else {
+            let Some(second) = self.layout.index.get(node * self.layout.slots + 1).copied().flatten()
+            else {
                 continue;
             };
             for row in 0..size {
@@ -1450,13 +1459,16 @@ impl System {
 fn apply_node_rotation(stiffness: &mut [f64], forces: &mut [f64], layout: &Layout, rotations: &[Option<[[f64; 2]; 2]>]) {
     let size = layout.size;
     for (node, rotation) in rotations.iter().enumerate() {
-        let Some(rotation) = rotation else {
+        let Some(rotation) = rotation
+        else {
             continue;
         };
-        let Some(first) = layout.index.get(node * layout.slots).copied().flatten() else {
+        let Some(first) = layout.index.get(node * layout.slots).copied().flatten()
+        else {
             continue;
         };
-        let Some(second) = layout.index.get(node * layout.slots + 1).copied().flatten() else {
+        let Some(second) = layout.index.get(node * layout.slots + 1).copied().flatten()
+        else {
             continue;
         };
         for row in 0..size {
@@ -1650,7 +1662,8 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
             element: element.id.clone(),
             moment: if element.end_forces.m1.abs() >= element.end_forces.m2.abs() {
                 element.end_forces.m1
-            } else {
+            }
+            else {
                 element.end_forces.m2
             },
         })
@@ -1952,7 +1965,8 @@ pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
     let mut dofs = Vec::with_capacity(size);
     for node in 0..model.nodes.len() {
         for component in 0..layout.slots {
-            let Some(dof) = layout.index.get(node * layout.slots + component).copied().flatten() else {
+            let Some(dof) = layout.index.get(node * layout.slots + component).copied().flatten()
+            else {
                 continue;
             };
             let name = component_name(model, layout, component);
@@ -1983,9 +1997,11 @@ pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
 fn component_name(model: &Model, layout: &Layout, component: usize) -> &'static str {
     if model.dimension == 3 {
         ["ux", "uy", "uz"][component]
-    } else if layout.uses_rotation {
+    }
+    else if layout.uses_rotation {
         ["ux", "uy", "rz"][component]
-    } else {
+    }
+    else {
         ["ux", "uy"][component]
     }
 }
@@ -2181,7 +2197,8 @@ pub fn solve_response_spectrum(
     let damping = match combination {
         SpectrumCombination::Srss => None,
         SpectrumCombination::Cqc => {
-            let Some(value) = damping else {
+            let Some(value) = damping
+            else {
                 return Err(CaeError::new("spectrum/invalid-damping", "the CQC combination requires a modal damping ratio"));
             };
             if !value.is_finite() || value <= 0.0 || value > 1.0 {
@@ -2300,7 +2317,8 @@ fn combine_cqc(frequencies: &[f64], contributions: &[Vec<[f64; 4]>], damping: f6
 
 /// Piecewise-linear spectral acceleration with constant end values.
 fn interpolate_spectrum(points: &[SpectrumPoint], period: f64) -> f64 {
-    let Some(first) = points.first() else {
+    let Some(first) = points.first()
+    else {
         return 0.0;
     };
     if period <= first.period {
@@ -2435,7 +2453,8 @@ pub fn solve_frequency_response(
                 if let Some(dof) = system.layout.index.get(base + 2).copied().flatten() {
                     shape[dof] = entry.uz;
                 }
-            } else if system.layout.uses_rotation {
+            }
+            else if system.layout.uses_rotation {
                 if let Some(dof) = system.layout.index.get(base + 2).copied().flatten() {
                     shape[dof] = entry.rz;
                 }
@@ -2597,11 +2616,13 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
                 local[5][5] = 2.0 * length * length / 15.0;
                 let transform = &beam.transform;
                 for (row, &row_dof) in element.displacement_dofs.iter().enumerate() {
-                    let Some(row_dof) = row_dof else {
+                    let Some(row_dof) = row_dof
+                    else {
                         continue;
                     };
                     for (column, &column_dof) in element.displacement_dofs.iter().enumerate() {
-                        let Some(column_dof) = column_dof else {
+                        let Some(column_dof) = column_dof
+                        else {
                             continue;
                         };
                         let value: f64 = (0..6)
@@ -2799,7 +2820,8 @@ pub fn solve_buckling_combinations(
 
     let mut envelope: Option<BucklingEnvelope> = None;
     for case in &cases {
-        let Some(first) = case.solution.modes.first() else {
+        let Some(first) = case.solution.modes.first()
+        else {
             continue;
         };
         let lower = envelope.as_ref().is_none_or(|current| first.factor < current.factor);
@@ -3154,7 +3176,8 @@ pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolu
             let rotation = d1 * v1 + d2 * theta1 + d3 * v2 + d4 * theta2 + particular_slope;
             let axial_particular = if element.youngs_modulus > 0.0 && element.area > 0.0 {
                 axial_uniform * position * (length - position) / (2.0 * element.youngs_modulus * element.area)
-            } else {
+            }
+            else {
                 0.0
             };
             let axial = u1 + (u2 - u1) * xi + axial_particular;
@@ -3234,14 +3257,17 @@ pub fn solve_nodal_stress(model: &Model, stations: usize) -> Result<NodalStressS
     let mut accumulators: Vec<Option<NodeStressAccumulator>> = (0..model.nodes.len()).map(|_| None).collect();
 
     for (element, result) in model.elements.iter().zip(&stress.elements) {
-        let Some(first) = result.stations.first() else {
+        let Some(first) = result.stations.first()
+        else {
             continue;
         };
-        let Some(last) = result.stations.last() else {
+        let Some(last) = result.stations.last()
+        else {
             continue;
         };
         for (node_id, station) in [(&element.from, first), (&element.to, last)] {
-            let Some(&position) = positions.get(node_id.as_str()) else {
+            let Some(&position) = positions.get(node_id.as_str())
+            else {
                 continue;
             };
             let accumulator = accumulators[position].get_or_insert_with(|| NodeStressAccumulator {
@@ -3586,11 +3612,13 @@ fn nonlinear_tangent(
         for row in 0..2 {
             for column in 0..2 {
                 for i in 0..components {
-                    let Some(row_dof) = layout.index.get(nodes[row] * layout.slots + i).copied().flatten() else {
+                    let Some(row_dof) = layout.index.get(nodes[row] * layout.slots + i).copied().flatten()
+                    else {
                         continue;
                     };
                     for j in 0..components {
-                        let Some(column_dof) = layout.index.get(nodes[column] * layout.slots + j).copied().flatten() else {
+                        let Some(column_dof) = layout.index.get(nodes[column] * layout.slots + j).copied().flatten()
+                        else {
                             continue;
                         };
                         let value = bar.axial_stiffness * state.direction[i] * state.direction[j]
@@ -4151,7 +4179,8 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
                     }
                 }
                 for (row, &row_dof) in displacement_dofs.iter().enumerate() {
-                    let Some(row_dof) = row_dof else {
+                    let Some(row_dof) = row_dof
+                    else {
                         continue;
                     };
                     for (column, &column_dof) in displacement_dofs.iter().enumerate() {
@@ -4270,7 +4299,8 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
     let mut constrained = vec![false; size];
     let mut prescribed = vec![0.0; size];
     for support in &model.supports {
-        let Some(&node) = index.get(support.node.as_str()) else {
+        let Some(&node) = index.get(support.node.as_str())
+        else {
             continue;
         };
         let base = node * layout.slots;
@@ -4318,10 +4348,12 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
     }
 
     for support in &model.supports {
-        let Some(&node) = index.get(support.node.as_str()) else {
+        let Some(&node) = index.get(support.node.as_str())
+        else {
             continue;
         };
-        let Some(spring) = support.spring else {
+        let Some(spring) = support.spring
+        else {
             continue;
         };
         let base = node * layout.slots;
@@ -4336,14 +4368,16 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
         add(base + 1, spring.ky);
         if model.dimension == 3 {
             add(base + 2, spring.kz);
-        } else if layout.uses_rotation {
+        }
+        else if layout.uses_rotation {
             add(base + 2, spring.kr);
         }
     }
 
     let mut rotations: Vec<Option<[[f64; 2]; 2]>> = vec![None; model.nodes.len()];
     for support in &model.supports {
-        let (Some(&node), Some(direction)) = (index.get(support.node.as_str()), support.direction) else {
+        let (Some(&node), Some(direction)) = (index.get(support.node.as_str()), support.direction)
+        else {
             continue;
         };
         if model.dimension != 2 {
@@ -4475,7 +4509,8 @@ fn invert_release_block(stiffness: &[[f64; 6]; 6], indices: &[usize]) -> Vec<f64
     }
     if count == 1 {
         vec![1.0 / block[0]]
-    } else {
+    }
+    else {
         let determinant = block[0] * block[3] - block[1] * block[2];
         vec![block[3] / determinant, -block[1] / determinant, -block[2] / determinant, block[0] / determinant]
     }
@@ -4510,7 +4545,8 @@ fn condense_releases(stiffness: &[[f64; 6]; 6], load: &[f64; 6], released: [bool
         for (column, value) in condensed_stiffness[row].iter_mut().enumerate() {
             if released[column] {
                 *value = 0.0;
-            } else {
+            }
+            else {
                 let correction: f64 = (0..count).map(|k| z[k] * stiffness[indices[k]][column]).sum();
                 *value = stiffness[row][column] - correction;
             }
@@ -4866,9 +4902,11 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
             let component = |rigid: bool, stiffness: f64, index: usize| -> f64 {
                 if rigid {
                     node_value(layout, residual, node, index)
-                } else if stiffness > 0.0 {
+                }
+                else if stiffness > 0.0 {
                     -stiffness * node_value(layout, displacement, node, index)
-                } else {
+                }
+                else {
                     0.0
                 }
             };
@@ -4877,7 +4915,8 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
                 // both global components are reported from the equilibrium
                 // residual instead of splitting local and global constraints.
                 (node_value(layout, residual, node, 0), node_value(layout, residual, node, 1))
-            } else {
+            }
+            else {
                 (component(support.dx, spring.kx, 0), component(support.dy, spring.ky, 1))
             };
             Some(SupportReaction {
@@ -4932,7 +4971,8 @@ fn cholesky(matrix: &[f64], size: usize) -> Option<Vec<f64>> {
                     return None;
                 }
                 lower[row * size + column] = sum.sqrt();
-            } else {
+            }
+            else {
                 lower[row * size + column] = sum / lower[column * size + column];
             }
         }

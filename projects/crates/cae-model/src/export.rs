@@ -19,7 +19,8 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CaeError> {
     }
     let target = if path.parent().is_some_and(|parent| !parent.as_os_str().is_empty()) {
         path.to_path_buf()
-    } else {
+    }
+    else {
         Path::new(".").join(path)
     };
     boost_session::save_atomic(&target, contents.as_bytes())
@@ -93,7 +94,8 @@ pub fn export_vtk(model: &Model, solution: &Solution, path: &Path) -> Result<(),
     check_alignment(model, solution)?;
     let target = if path.extension().and_then(|extension| extension.to_str()) == Some("vtk") {
         path.to_path_buf()
-    } else {
+    }
+    else {
         path.join("model.vtk")
     };
 
@@ -160,7 +162,8 @@ pub fn export_md(
     check_alignment(model, solution)?;
     let target = if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
         path.to_path_buf()
-    } else {
+    }
+    else {
         path.join("report.md")
     };
 
@@ -194,14 +197,16 @@ pub fn export_md(
             format_float(gravity[1]),
             format_float(gravity[2])
         );
-    } else {
+    }
+    else {
         text.push_str("| gravity | not set |\n");
     }
 
     text.push_str("\n## Validation\n\n");
     if issues.is_empty() {
         text.push_str("Passed, no issues found.\n");
-    } else {
+    }
+    else {
         text.push_str("| Severity | Code | Message |\n| --- | --- | --- |\n");
         for issue in issues {
             let severity = match issue.severity {
@@ -300,7 +305,8 @@ pub fn export_md(
             );
             if modal.modes.is_empty() {
                 text.push_str("No positive eigenvalues available.\n");
-            } else {
+            }
+            else {
                 text.push_str("| Mode | Frequency (Hz) | Eigenvalue | Max amplitude |\n| --- | --- | --- | --- |\n");
                 for (index, mode) in modal.modes.iter().enumerate() {
                     let _ = writeln!(
@@ -357,7 +363,8 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
     }
     let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
         path.to_path_buf()
-    } else {
+    }
+    else {
         path.join("model.svg")
     };
 
@@ -478,7 +485,8 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
         if !constrained {
             continue;
         }
-        let Some(index) = model.nodes.iter().position(|node| node.id == support.node) else {
+        let Some(index) = model.nodes.iter().position(|node| node.id == support.node)
+        else {
             continue;
         };
         let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
@@ -496,7 +504,8 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
         if magnitude <= 0.0 || !magnitude.is_finite() {
             continue;
         }
-        let Some(index) = model.nodes.iter().position(|node| node.id == load.node) else {
+        let Some(index) = model.nodes.iter().position(|node| node.id == load.node)
+        else {
             continue;
         };
         let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
@@ -617,7 +626,8 @@ pub fn export_html(
     text.push_str("<section>\n<h2>Validation</h2>\n");
     if issues.is_empty() {
         text.push_str("<p class=\"passed\">Passed, no issues found.</p>\n");
-    } else {
+    }
+    else {
         text.push_str("<table>\n<tr><th>Severity</th><th>Code</th><th>Message</th></tr>\n");
         for issue in issues {
             let severity = match issue.severity {
@@ -730,7 +740,8 @@ pub fn export_html(
             );
             if modal.modes.is_empty() {
                 text.push_str("<p>No positive eigenvalues available.</p>\n");
-            } else {
+            }
+            else {
                 text.push_str(
                     "<table>\n<tr><th>Mode</th><th>Frequency (Hz)</th><th>Eigenvalue</th><th>Max amplitude</th></tr>\n",
                 );
@@ -785,7 +796,8 @@ fn mesh_error(error: MeshError) -> CaeError {
 fn csv_field(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))
-    } else {
+    }
+    else {
         value.to_string()
     }
 }

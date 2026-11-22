@@ -79,7 +79,8 @@ fn horizontal_roller_direction_matches_a_global_y_support() {
         model.add_support("n1", true, true).expect("pin");
         if direction {
             model.add_support_direction("n2", 0.0, 1.0).expect("inclined roller");
-        } else {
+        }
+        else {
             model.add_support("n2", false, true).expect("roller");
         }
         model.add_load_3d("n2", Some(LOAD), Some(0.0), None).expect("axial load");

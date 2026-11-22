@@ -93,7 +93,8 @@ fn main() {
 }
 
 fn dispatch(args: &[String]) -> Result<i32, CaeError> {
-    let Some(command) = args.first().map(String::as_str) else {
+    let Some(command) = args.first().map(String::as_str)
+    else {
         print!("{USAGE}");
         return Ok(0);
     };
@@ -551,7 +552,8 @@ fn material_preset(args: &[String]) -> Result<i32, CaeError> {
 }
 
 fn optional_section(parsed: &Parsed) -> Result<Option<Section>, CaeError> {
-    let Some(shape) = parsed.options.get("--section") else {
+    let Some(shape) = parsed.options.get("--section")
+    else {
         let geometry = [
             "--width",
             "--height",
@@ -1301,7 +1303,8 @@ fn parse(args: &[String], value_options: &[&str], flag_options: &[&str]) -> Resu
             if flag_options.contains(&argument.as_str()) {
                 parsed.flags.insert(argument.clone());
                 index += 1;
-            } else if value_options.contains(&argument.as_str()) {
+            }
+            else if value_options.contains(&argument.as_str()) {
                 let value = args
                     .get(index + 1)
                     .ok_or_else(|| CaeError::new("cli/missing-value", format!("`{argument}` is missing a value")))?;
@@ -1310,10 +1313,12 @@ fn parse(args: &[String], value_options: &[&str], flag_options: &[&str]) -> Resu
                 }
                 parsed.options.insert(argument.clone(), value.clone());
                 index += 2;
-            } else {
+            }
+            else {
                 return Err(CaeError::new("cli/unknown-option", format!("unknown option `{argument}`")));
             }
-        } else {
+        }
+        else {
             parsed.positionals.push(argument.clone());
             index += 1;
         }

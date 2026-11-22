@@ -1273,7 +1273,8 @@ impl Model {
         if let Some(existing) = self.combinations.iter_mut().find(|combination| combination.name == name) {
             existing.loads = loads;
             existing.gravity = gravity;
-        } else {
+        }
+        else {
             self.combinations.push(LoadCombination { name, loads, gravity });
         }
         self.bump_revision();
@@ -1334,7 +1335,8 @@ impl Model {
             support.dy |= dy;
             support.dz |= dz;
             support.rz |= rz;
-        } else {
+        }
+        else {
             self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None, spring: None, direction: None });
         }
         self.bump_revision();
@@ -1379,7 +1381,8 @@ impl Model {
                 ));
             }
             support.direction = Some([nx, ny]);
-        } else {
+        }
+        else {
             self.supports.push(Support {
                 node,
                 dx: false,
@@ -1614,7 +1617,8 @@ impl Model {
             if let Some(mz) = mz {
                 load.mz = mz;
             }
-        } else {
+        }
+        else {
             self.loads.push(Load {
                 node,
                 fx: fx.unwrap_or(0.0),
