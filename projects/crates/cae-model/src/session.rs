@@ -283,6 +283,20 @@ impl OpenCae {
         self.edit(|model| model.add_node_3d(id, x, y, z.unwrap_or(0.0)))
     }
 
+    /// Moves an existing node and saves the document.
+    ///
+    /// Only the coordinates supplied as `Some` change; an empty request is
+    /// rejected with `node/invalid-coordinate`.
+    pub fn update_node(
+        &mut self,
+        id: &str,
+        x: Option<f64>,
+        y: Option<f64>,
+        z: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.update_node(id, x, y, z))
+    }
+
     /// Appends a truss element and saves the document.
     ///
     /// `youngs_modulus` and `area` are optional per-element overrides of the
@@ -402,6 +416,15 @@ impl OpenCae {
     /// `None` removes the thermal load again.
     pub fn set_element_temperature(&mut self, id: &str, temperature: Option<f64>) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.set_element_temperature(id, temperature))
+    }
+
+    /// Reconnects an existing element to new endpoint nodes and saves the
+    /// document.
+    ///
+    /// Only the endpoints supplied as `Some` change; an empty request is
+    /// rejected with `element/degenerate`.
+    pub fn update_element(&mut self, id: &str, from: Option<&str>, to: Option<&str>) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.update_element_endpoints(id, from, to))
     }
 
     /// Sets or clears the loaded segment of an existing beam's distributed

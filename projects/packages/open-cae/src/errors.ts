@@ -43,6 +43,7 @@ export const errorCodes = [
     'combination/unknown-name',
     'node/duplicate-id',
     'node/unknown-id',
+    'node/invalid-coordinate',
     'node/referenced-by-element',
     'node/referenced-by-support',
     'node/referenced-by-load',

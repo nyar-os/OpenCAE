@@ -26,6 +26,7 @@ import type {
     ElementAddRequest,
     ElementReleaseRequest,
     ElementResult,
+    ElementUpdateRequest,
     ExportFormat,
     ExportReport,
     FrequencyResponseOptions,
@@ -43,6 +44,7 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeUpdateRequest,
     NodalStressOptions,
     NodalStressSolution,
     NonlinearOptions,
@@ -139,6 +141,15 @@ export class CaeDocument {
     }
 
     /**
+     * Moves a node in place, keeping its identifier and every reference to it,
+     * and saves the file. Only the supplied coordinates change.
+     */
+    updateNode(request: NodeUpdateRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.updateNode(this.path, request));
+    }
+
+    /**
      * Removes a node and saves the file. A node referenced by an element, a
      * support or a load is rejected with `node/referenced-by-*`.
      */
@@ -151,6 +162,15 @@ export class CaeDocument {
     addElement(request: ElementAddRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.elementAdd(this.path, request));
+    }
+
+    /**
+     * Reconnects an element to new endpoint nodes and saves the file. Material,
+     * loads, temperature and releases are preserved.
+     */
+    updateElement(request: ElementUpdateRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.updateElement(this.path, request));
     }
 
     /** Removes an element and saves the file. */

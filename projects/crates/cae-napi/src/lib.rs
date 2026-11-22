@@ -168,6 +168,24 @@ fn node_add(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Moves an existing node of a document and saves it.
+///
+/// The request accepts `id` and any of `x`, `y` or `z`; omitted coordinates
+/// keep their current value.
+#[function]
+fn node_update(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let x = number_field(&request, "x")?;
+    let y = number_field(&request, "y")?;
+    let z = number_field(&request, "z")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.update_node(&id, x, y, z).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
 /// Removes a node from a document and saves it.
 ///
 /// A node referenced by an element, a support or a load is rejected with
@@ -239,6 +257,23 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
         };
         session.set_element_load_span(&id, span).map_err(fail)?;
     }
+    respond(&ctx, &summary)
+}
+
+/// Reconnects an existing element of a document and saves it.
+///
+/// The request accepts `id` and any of `from` or `to`; omitted endpoints keep
+/// their current node. Material, loads, temperature and releases are preserved.
+#[function]
+fn element_update(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let from = request.get("from").and_then(Value::as_str);
+    let to = request.get("to").and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.update_element(&id, from, to).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -885,8 +920,10 @@ register_module![
     open,
     save,
     node_add,
+    node_update,
     node_remove,
     element_add,
+    element_update,
     element_remove,
     element_release,
     material_set,

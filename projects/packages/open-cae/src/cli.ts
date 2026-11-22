@@ -261,6 +261,9 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === 'add') {
         return nodeAdd(args.slice(1));
     }
+    if (action === 'update') {
+        return nodeUpdate(args.slice(1));
+    }
     if (action === 'remove') {
         return nodeRemove(args.slice(1));
     }
@@ -270,13 +273,13 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'node',
-            expected: 'add, remove or displacement',
+            expected: 'add, update, remove or displacement',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'node',
         action,
-        expected: 'add, remove or displacement',
+        expected: 'add, update, remove or displacement',
     });
 }
 
@@ -341,6 +344,21 @@ async function nodeAdd(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const summary = document.addNode({ id, x, y, z });
         console.log(message('nodeAdded', { id, z: String(z), revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function nodeUpdate(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id', '--x', '--y', '--z'], []);
+    const file = positional(parsed, 0, 'node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]');
+    const id = required(parsed, '--id');
+    const x = number(parsed, '--x');
+    const y = number(parsed, '--y');
+    const z = number(parsed, '--z');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.updateNode({ id, x, y, z });
+        console.log(message('nodeUpdated', { id, revision: String(summary.revision) }));
         return 0;
     });
 }
@@ -428,10 +446,27 @@ async function elementAdd(args: readonly string[]): Promise<number> {
     });
 }
 
+async function elementUpdate(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id', '--from', '--to'], []);
+    const file = positional(parsed, 0, 'element update <file> --id <id> [--from <node>] [--to <node>]');
+    const id = required(parsed, '--id');
+    const from = parsed.options.get('--from');
+    const to = parsed.options.get('--to');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.updateElement({ id, from, to });
+        console.log(message('elementUpdated', { id, revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
 async function elementCommand(args: readonly string[]): Promise<number> {
     const action = args[0];
     if (action === 'add') {
         return elementAdd(args.slice(1));
+    }
+    if (action === 'update') {
+        return elementUpdate(args.slice(1));
     }
     if (action === 'remove') {
         return elementRemove(args.slice(1));
@@ -445,13 +480,13 @@ async function elementCommand(args: readonly string[]): Promise<number> {
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'element',
-            expected: 'add, remove, forces or release',
+            expected: 'add, update, remove, forces or release',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'element',
         action,
-        expected: 'add, remove, forces or release',
+        expected: 'add, update, remove, forces or release',
     });
 }
 

@@ -966,6 +966,17 @@ export interface NodeAddRequest {
     readonly z?: number;
 }
 
+/** Request of `updateNode()`. */
+export interface NodeUpdateRequest {
+    readonly id: string;
+    /** New X coordinate; omitted values keep their current coordinate. */
+    readonly x?: number;
+    /** New Y coordinate. */
+    readonly y?: number;
+    /** New Z coordinate; only valid in three dimensions. */
+    readonly z?: number;
+}
+
 /** Request of `addElement()`. */
 export interface ElementAddRequest {
     readonly id: string;
@@ -1030,6 +1041,18 @@ export interface ElementReleaseRequest {
     readonly id: string;
     readonly start?: boolean;
     readonly end?: boolean;
+}
+
+/**
+ * Request of `updateElement()`. Only the supplied endpoints change; material,
+ * loads, temperature and releases are preserved.
+ */
+export interface ElementUpdateRequest {
+    readonly id: string;
+    /** New start node identifier. */
+    readonly from?: string;
+    /** New end node identifier. */
+    readonly to?: string;
 }
 
 /** Request of `setMaterial()`. */

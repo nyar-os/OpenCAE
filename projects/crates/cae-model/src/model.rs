@@ -652,6 +652,59 @@ impl Model {
         Ok(())
     }
 
+    /// Moves an existing node in place, keeping its identifier and every
+    /// reference to it.
+    ///
+    /// Only the coordinates supplied as `Some` change. Unknown identifiers are
+    /// rejected with `node/unknown-id`, non-finite or all-omitted coordinates
+    /// with `node/invalid-coordinate`, and a Z coordinate in a two-dimensional
+    /// document with `document/dimension-mismatch`. A move that would collapse
+    /// an attached element onto its other node is rejected with
+    /// `element/zero-length` before the document is modified.
+    pub fn update_node(&mut self, id: &str, x: Option<f64>, y: Option<f64>, z: Option<f64>) -> Result<(), CaeError> {
+        if x.is_none() && y.is_none() && z.is_none() {
+            return Err(CaeError::new(
+                "node/invalid-coordinate",
+                format!("node `{id}` needs at least one of x, y or z to move"),
+            ));
+        }
+        let node = self.node(id).ok_or_else(|| CaeError::new("node/unknown-id", format!("unknown node `{id}`")))?;
+        let x = x.unwrap_or(node.x);
+        let y = y.unwrap_or(node.y);
+        let z = z.unwrap_or(node.z);
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err(CaeError::new(
+                "node/invalid-coordinate",
+                format!("coordinates of node `{id}` must be finite (x={x}, y={y}, z={z})"),
+            ));
+        }
+        if self.dimension != 3 && z != 0.0 {
+            return Err(dimension_mismatch(format!(
+                "a two-dimensional document cannot move node `{id}` to z={z}; set dimension to 3 first"
+            )));
+        }
+        for element in &self.elements {
+            if element.from != id && element.to != id {
+                continue;
+            }
+            let other = if element.from == id { &element.to } else { &element.from };
+            if let Some(other) = self.node(other) {
+                if other.x == x && other.y == y && other.z == z {
+                    return Err(CaeError::new(
+                        "element/zero-length",
+                        format!("moving node `{id}` would collapse element `{}` to zero length", element.id),
+                    ));
+                }
+            }
+        }
+        let node = self.nodes.iter_mut().find(|node| node.id == id).expect("node was looked up above");
+        node.x = x;
+        node.y = y;
+        node.z = z;
+        self.bump_revision();
+        Ok(())
+    }
+
     /// Appends a truss element after checking identifiers, endpoints and
     /// geometric degeneracy.
     pub fn add_element(
@@ -785,6 +838,49 @@ impl Model {
             temperature_gradient: None,
             release: None,
         });
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Reconnects an existing element to new endpoint nodes in place.
+    ///
+    /// Only the endpoints supplied as `Some` change; material overrides,
+    /// section data, distributed loads, temperature and releases are preserved.
+    /// An unknown element is rejected with `element/unknown-id`, an unknown
+    /// endpoint with `element/unknown-node`, identical endpoints with
+    /// `element/degenerate` and coincident endpoint coordinates with
+    /// `element/zero-length`.
+    pub fn update_element_endpoints(&mut self, id: &str, from: Option<&str>, to: Option<&str>) -> Result<(), CaeError> {
+        if from.is_none() && to.is_none() {
+            return Err(CaeError::new(
+                "element/degenerate",
+                format!("element `{id}` needs at least one of `from` or `to` to reconnect"),
+            ));
+        }
+        let index = self
+            .elements
+            .iter()
+            .position(|element| element.id == id)
+            .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+        let from = from.map(str::to_string).unwrap_or_else(|| self.elements[index].from.clone());
+        let to = to.map(str::to_string).unwrap_or_else(|| self.elements[index].to.clone());
+        if from == to {
+            return Err(CaeError::new(
+                "element/degenerate",
+                format!("element `{id}` must not have identical start and end nodes"),
+            ));
+        }
+        let start = self
+            .node(&from)
+            .ok_or_else(|| CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{from}`")))?;
+        let end = self
+            .node(&to)
+            .ok_or_else(|| CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{to}`")))?;
+        if start.x == end.x && start.y == end.y && start.z == end.z {
+            return Err(CaeError::new("element/zero-length", format!("element `{id}` has zero length")));
+        }
+        self.elements[index].from = from;
+        self.elements[index].to = to;
         self.bump_revision();
         Ok(())
     }

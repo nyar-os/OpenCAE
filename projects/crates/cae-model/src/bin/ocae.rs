@@ -22,10 +22,12 @@ ocae - OpenCAE truss/beam linear-static, modal and buckling solver (2D/3D)
 Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
+  ocae node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]
   ocae node remove <file> --id <id>
   ocae node displacement <file> --id <id>
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
+  ocae element update <file> --id <id> [--from <node>] [--to <node>]
   ocae element remove <file> --id <id>
   ocae element forces <file> --id <id>
   ocae element release <file> --id <id> [--start] [--end]
@@ -147,15 +149,18 @@ fn session() -> OpenCae {
 fn node_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => node_add(&args[1..]),
+        Some("update") => node_update(&args[1..]),
         Some("remove") => node_remove(&args[1..]),
         Some("displacement") => node_displacement(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `node` does not exist; only `add`, `remove` or `displacement` is supported"),
+            format!(
+                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `remove` or `displacement` is supported"
+            ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`node` is missing a subcommand; only `add`, `remove` or `displacement` is supported",
+            "`node` is missing a subcommand; only `add`, `update`, `remove` or `displacement` is supported",
         )),
     }
 }
@@ -220,6 +225,26 @@ fn node_add(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn node_update(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--x", "--y", "--z"], &[])?;
+    let file = positional(&parsed, 0, "node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]")?;
+    let id = required(&parsed, "--id")?;
+    let x = number(&parsed, "--x")?;
+    let y = number(&parsed, "--y")?;
+    let z = number(&parsed, "--z")?;
+    if x.is_none() && y.is_none() && z.is_none() {
+        return Err(CaeError::new(
+            "node/invalid-coordinate",
+            "specify at least one of `--x`, `--y` or `--z`; an empty move request would silently succeed",
+        ));
+    }
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.update_node(id, x, y, z)?;
+    println!("node `{id}` moved (revision {})", summary.revision);
+    Ok(0)
+}
+
 fn node_remove(args: &[String]) -> Result<i32, CaeError> {
     let parsed = parse(args, &["--id"], &[])?;
     let file = positional(&parsed, 0, "node remove <file> --id <id>")?;
@@ -280,9 +305,29 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn element_update(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--from", "--to"], &[])?;
+    let file = positional(&parsed, 0, "element update <file> --id <id> [--from <node>] [--to <node>]")?;
+    let id = required(&parsed, "--id")?;
+    let from = parsed.options.get("--from").map(String::as_str);
+    let to = parsed.options.get("--to").map(String::as_str);
+    if from.is_none() && to.is_none() {
+        return Err(CaeError::new(
+            "element/degenerate",
+            "specify `--from` and/or `--to`; an empty reconnect request would silently succeed",
+        ));
+    }
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.update_element(id, from, to)?;
+    println!("element `{id}` reconnected (revision {})", summary.revision);
+    Ok(0)
+}
+
 fn element_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => element_add(&args[1..]),
+        Some("update") => element_update(&args[1..]),
         Some("remove") => element_remove(&args[1..]),
         Some("forces") => element_forces(&args[1..]),
         Some("release") => element_release(&args[1..]),
@@ -291,12 +336,12 @@ fn element_command(args: &[String]) -> Result<i32, CaeError> {
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `element` does not exist; only `add`, `remove`, `forces`, `release`, `gradient` or `span` is supported"
+                "subcommand `{other}` of `element` does not exist; only `add`, `update`, `remove`, `forces`, `release`, `gradient` or `span` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`element` is missing a subcommand; only `add`, `remove`, `forces`, `release`, `gradient` or `span` is supported",
+            "`element` is missing a subcommand; only `add`, `update`, `remove`, `forces`, `release`, `gradient` or `span` is supported",
         )),
     }
 }

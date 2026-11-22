@@ -26,6 +26,7 @@ import type {
     ElementAddRequest,
     ElementReleaseRequest,
     ElementResult,
+    ElementUpdateRequest,
     ExportFormat,
     ExportReport,
     FrequencyResponseOptions,
@@ -43,6 +44,7 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeUpdateRequest,
     NodalStressOptions,
     NodalStressSolution,
     NonlinearOptions,
@@ -135,9 +137,19 @@ export function nodeAdd(path: string, request: NodeAddRequest): DocumentSummary 
     return decode<DocumentSummary>(() => binding('node.add').node_add(path, JSON.stringify(request)));
 }
 
+/** Moves an existing node and returns the updated summary. */
+export function updateNode(path: string, request: NodeUpdateRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('node.update').node_update(path, JSON.stringify(request)));
+}
+
 /** Adds a truss or beam element and returns the updated summary. */
 export function elementAdd(path: string, request: ElementAddRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('element.add').element_add(path, JSON.stringify(request)));
+}
+
+/** Reconnects an existing element to new endpoints and returns the updated summary. */
+export function updateElement(path: string, request: ElementUpdateRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('element.update').element_update(path, JSON.stringify(request)));
 }
 
 /** Removes a node and returns the updated summary. */
