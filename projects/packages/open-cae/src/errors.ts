@@ -68,6 +68,8 @@ export const errorCodes = [
     'result/no-reaction',
     'export/mismatch',
     'export/invalid-model',
+    'export/no-solution',
+    'export/invalid-scale',
     'cli/unknown-command',
     'cli/missing-argument',
     'cli/missing-option',

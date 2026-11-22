@@ -15,8 +15,8 @@
 use std::path::Path;
 
 use cae_model::{
-    CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section,
-    SpectrumPoint, Units, library_json, section_report,
+    CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
+    Section, SpectrumPoint, Units, library_json, section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -973,15 +973,23 @@ fn tension_only(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
-/// Exports a solved document as `csv`, `vtk` or `md`.
+/// Exports a solved document as `csv`, `vtk`, `md`, `html` or `svg`.
+///
+/// The optional fourth argument is a JSON object with a `scale` number that
+/// multiplies the nodal displacements of the SVG deformed shape (default `1`).
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
     let format = text(&ctx, 1)?.parse::<ExportFormat>().map_err(fail)?;
     let target = text(&ctx, 2)?;
+    let options = optional_object(&ctx, 3)?;
+    let scale = match options.as_ref() {
+        Some(options) => number_field(options, "scale")?.unwrap_or(1.0),
+        None => 1.0,
+    };
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let report = session.export(format, Path::new(&target)).map_err(fail)?;
+    let report = session.export_with_options(format, Path::new(&target), ExportOptions { scale }).map_err(fail)?;
     respond(&ctx, &report)
 }
 

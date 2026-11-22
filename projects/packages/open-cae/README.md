@@ -12,6 +12,7 @@ This package is the typed entry point to the same document, solver and exporters
 | `CaeDocument` | Path-backed document with editing, solve, query, export and save methods |
 | `OpenCAEError`, `isOpenCAEError`, `errorCodes` | Stable error codes such as `model/mechanism` and `capability/not-implemented` |
 | `NotImplementedError` | Subclass thrown for unimplemented capabilities |
+| `ExportFormat` | `csv`, `vtk`, `md`, `html` and `svg` targets of `export()` |
 | types | Requests, options and reports for every method |
 
 ## Usage
@@ -38,6 +39,11 @@ const doc = await cae.open('bar.ocae');
 console.log(doc.solve().elements[0].axialForce); // 1000
 await cae.dispose();
 ```
+
+`doc.export()` writes `csv`, `vtk`, `md`, `html` and `svg`. The SVG drawing is
+deterministic and projects onto the global X–Y plane; `{ scale: 2 }` magnifies
+the deformed shape. From the CLI, use
+`open-cae export bar.ocae --format svg --scale 2 --out bar.svg`.
 
 ## Constraints
 

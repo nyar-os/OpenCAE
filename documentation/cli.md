@@ -123,7 +123,7 @@ command.
 | `open-cae load-cases <file>` | `[--out <file>]` | One summary row for `base` and each combination. |
 | `open-cae matrices <file>` | `[--out <file>]` | Assembled global stiffness and lumped mass matrices with row labels. |
 | `open-cae spectrum <file>` | `[--modes <N>] [--axis x\|y\|z] --spectrum <T:Sa,...> [--out <file>]` | Response spectrum from `period:acceleration` points, combined with SRSS; `--axis` defaults to `x`. |
-| `open-cae export <file>` | `--format csv\|vtk\|md --out <dir\|file>` | CSV writes `nodes.csv`, `elements.csv` and `reactions.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown. HTML export is available through the SDK/API, not this CLI. |
+| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N]` | CSV writes `nodes.csv`, `elements.csv` and `reactions.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. |
 
 ### Rejected commands
 

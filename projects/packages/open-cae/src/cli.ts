@@ -146,7 +146,7 @@ function dimensionOption(parsed: Parsed): Dimension | undefined {
 }
 
 function exportFormat(value: string): ExportFormat {
-    if (value === 'csv' || value === 'vtk' || value === 'md') {
+    if (value === 'csv' || value === 'vtk' || value === 'md' || value === 'svg') {
         return value;
     }
     if (value === 'inp' || value === 'abaqus' || value === 'step' || value === 'stp') {
@@ -1384,13 +1384,14 @@ async function report(args: readonly string[]): Promise<number> {
 }
 
 async function exportCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--format', '--out'], []);
-    const file = positional(parsed, 0, 'export <file> --format csv|vtk|md|html --out <dir|file>');
+    const parsed = parse(args, ['--format', '--out', '--scale'], []);
+    const file = positional(parsed, 0, 'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N]');
     const format = exportFormat(required(parsed, '--format'));
     const out = required(parsed, '--out');
+    const scale = number(parsed, '--scale');
     return withSession(async (session) => {
         const document = await openDocument(session, file);
-        const result = document.export(format, out);
+        const result = document.export(format, out, scale === undefined ? {} : { scale });
         console.log(message('exported', { format: result.format, path: result.path }));
         return 0;
     });

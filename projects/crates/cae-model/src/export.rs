@@ -19,8 +19,7 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CaeError> {
     }
     let target = if path.parent().is_some_and(|parent| !parent.as_os_str().is_empty()) {
         path.to_path_buf()
-    }
-    else {
+    } else {
         Path::new(".").join(path)
     };
     boost_session::save_atomic(&target, contents.as_bytes())
@@ -94,8 +93,7 @@ pub fn export_vtk(model: &Model, solution: &Solution, path: &Path) -> Result<(),
     check_alignment(model, solution)?;
     let target = if path.extension().and_then(|extension| extension.to_str()) == Some("vtk") {
         path.to_path_buf()
-    }
-    else {
+    } else {
         path.join("model.vtk")
     };
 
@@ -162,8 +160,7 @@ pub fn export_md(
     check_alignment(model, solution)?;
     let target = if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
         path.to_path_buf()
-    }
-    else {
+    } else {
         path.join("report.md")
     };
 
@@ -197,16 +194,14 @@ pub fn export_md(
             format_float(gravity[1]),
             format_float(gravity[2])
         );
-    }
-    else {
+    } else {
         text.push_str("| gravity | not set |\n");
     }
 
     text.push_str("\n## Validation\n\n");
     if issues.is_empty() {
         text.push_str("Passed, no issues found.\n");
-    }
-    else {
+    } else {
         text.push_str("| Severity | Code | Message |\n| --- | --- | --- |\n");
         for issue in issues {
             let severity = match issue.severity {
@@ -305,8 +300,7 @@ pub fn export_md(
             );
             if modal.modes.is_empty() {
                 text.push_str("No positive eigenvalues available.\n");
-            }
-            else {
+            } else {
                 text.push_str("| Mode | Frequency (Hz) | Eigenvalue | Max amplitude |\n| --- | --- | --- | --- |\n");
                 for (index, mode) in modal.modes.iter().enumerate() {
                     let _ = writeln!(
@@ -330,6 +324,220 @@ pub fn export_md(
 
 fn format_float(value: f64) -> String {
     format!("{value:.6e}")
+}
+
+/// Writes a deterministic, self-contained SVG drawing of the model and its
+/// deformed shape.
+///
+/// Every node is projected onto the global X–Y plane, so a three-dimensional
+/// model is drawn as its XY projection with Z ignored. The undeformed members
+/// are thin grey lines, the deformed shape after a static solve is a blue
+/// polyline scaled by `scale`, nodes are black dots, supported nodes are green
+/// triangles and nodal loads are red arrows. The `viewBox` is fixed at
+/// 960 × 720 and fitted to the projected model with padding; a title and a
+/// legend naming the scale frame the drawing. The file contains no timestamps,
+/// so repeated exports of the same model are byte-identical.
+///
+/// `scale` must be finite and positive. A model with no nodes, or a solution
+/// that does not match the model, is rejected with a stable error instead of
+/// writing a meaningless drawing.
+///
+/// When `path` ends in `.svg` it is used as the output file, otherwise `path`
+/// is treated as a directory and `model.svg` is created inside it.
+pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -> Result<(), CaeError> {
+    if model.nodes.is_empty() {
+        return Err(CaeError::new("export/no-solution", "the model has no nodes, so there is no shape to draw"));
+    }
+    check_alignment(model, solution)?;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(CaeError::new(
+            "export/invalid-scale",
+            format!("the deformed-shape scale must be a finite positive number, but is {scale}"),
+        ));
+    }
+    let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+        path.to_path_buf()
+    } else {
+        path.join("model.svg")
+    };
+
+    let undeformed: Vec<(f64, f64)> = model.nodes.iter().map(|node| (node.x, node.y)).collect();
+    let deformed: Vec<(f64, f64)> = model
+        .nodes
+        .iter()
+        .zip(&solution.nodes)
+        .map(|(node, result)| (node.x + scale * result.ux, node.y + scale * result.uy))
+        .collect();
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for &(x, y) in undeformed.iter().chain(&deformed) {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(CaeError::new("export/invalid-model", "node coordinates must be finite before an SVG can be drawn"));
+        }
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    let mut width = max_x - min_x;
+    let mut height = max_y - min_y;
+    if width <= 0.0 {
+        width = 1.0;
+        min_x -= 0.5;
+    }
+    if height <= 0.0 {
+        height = 1.0;
+        min_y -= 0.5;
+    }
+    let max_y = min_y + height;
+
+    const VIEW_WIDTH: f64 = 960.0;
+    const VIEW_HEIGHT: f64 = 720.0;
+    const SIDE_MARGIN: f64 = 40.0;
+    const TOP_MARGIN: f64 = 60.0;
+    const PLOT_BOTTOM: f64 = 630.0;
+    let available_width = VIEW_WIDTH - 2.0 * SIDE_MARGIN;
+    let available_height = PLOT_BOTTOM - TOP_MARGIN;
+    let factor = (available_width / width).min(available_height / height);
+    let origin_x = SIDE_MARGIN + (available_width - width * factor) / 2.0;
+    let origin_y = TOP_MARGIN + (available_height - height * factor) / 2.0;
+    let project = |x: f64, y: f64| (origin_x + (x - min_x) * factor, origin_y + (max_y - y) * factor);
+
+    let scale_label = format!("{scale:.2}");
+    let mut text = String::new();
+    text.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        text,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {VIEW_WIDTH} {VIEW_HEIGHT}\" width=\"960\" height=\"720\" \
+         role=\"img\" aria-labelledby=\"ocae-svg-title\">"
+    );
+    text.push_str("<title id=\"ocae-svg-title\">OpenCAE model and deformed shape</title>\n");
+    text.push_str("<rect x=\"0\" y=\"0\" width=\"960\" height=\"720\" fill=\"#ffffff\"/>\n");
+    text.push_str(
+        "<text x=\"480\" y=\"30\" text-anchor=\"middle\" font-family=\"system-ui, sans-serif\" font-size=\"20\" \
+         fill=\"#111827\">OpenCAE model and deformed shape</text>\n",
+    );
+    text.push_str(
+        "<defs>\n<marker id=\"ocae-load-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" \
+         markerHeight=\"6\" orient=\"auto\" markerUnits=\"strokeWidth\">\n<path d=\"M0,0 L10,5 L0,10 z\" \
+         fill=\"#dc2626\"/>\n</marker>\n</defs>\n",
+    );
+    text.push_str("<g stroke-linecap=\"round\">\n");
+
+    for element in &model.elements {
+        let from = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.from)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+        let to = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.to)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+        let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
+        let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
+        let _ = writeln!(
+            text,
+            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1\"/>"
+        );
+    }
+    for element in &model.elements {
+        let from = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.from)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+        let to = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.to)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+        let (x1, y1) = project(deformed[from].0, deformed[from].1);
+        let (x2, y2) = project(deformed[to].0, deformed[to].1);
+        let _ = writeln!(
+            text,
+            "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
+        );
+    }
+    for &(x, y) in &undeformed {
+        let (cx, cy) = project(x, y);
+        let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"#111827\"/>");
+    }
+    for support in &model.supports {
+        let constrained = support.dx
+            || support.dy
+            || support.dz
+            || support.rz
+            || support.spring.is_some()
+            || support.direction.is_some()
+            || support.prescribed.is_some();
+        if !constrained {
+            continue;
+        }
+        let Some(index) = model.nodes.iter().position(|node| node.id == support.node) else {
+            continue;
+        };
+        let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
+        let _ = writeln!(
+            text,
+            "<polygon points=\"{cx:.2},{cy:.2} {:.2},{:.2} {:.2},{:.2}\" fill=\"#16a34a\"/>",
+            cx - 7.0,
+            cy + 11.0,
+            cx + 7.0,
+            cy + 11.0
+        );
+    }
+    for load in &model.loads {
+        let magnitude = (load.fx * load.fx + load.fy * load.fy).sqrt();
+        if magnitude <= 0.0 || !magnitude.is_finite() {
+            continue;
+        }
+        let Some(index) = model.nodes.iter().position(|node| node.id == load.node) else {
+            continue;
+        };
+        let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
+        let direction_x = load.fx / magnitude;
+        let direction_y = -load.fy / magnitude;
+        let arrow_length = 34.0;
+        let x1 = cx - direction_x * arrow_length;
+        let y1 = cy - direction_y * arrow_length;
+        let _ = writeln!(
+            text,
+            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{cx:.2}\" y2=\"{cy:.2}\" stroke=\"#dc2626\" \
+             stroke-width=\"2\" marker-end=\"url(#ocae-load-arrow)\"/>"
+        );
+    }
+    text.push_str("</g>\n");
+
+    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"13\" fill=\"#111827\">\n");
+    text.push_str(
+        "<line x1=\"40\" y1=\"686\" x2=\"70\" y2=\"686\" stroke=\"#9ca3af\" stroke-width=\"1\"/>\n\
+         <text x=\"78\" y=\"690\">undeformed</text>\n",
+    );
+    let _ = writeln!(
+        text,
+        "<line x1=\"190\" y1=\"686\" x2=\"220\" y2=\"686\" stroke=\"#2563eb\" stroke-width=\"2\"/>\n\
+         <text x=\"228\" y=\"690\">deformed (scale {scale_label})</text>"
+    );
+    text.push_str(
+        "<polygon points=\"400,680 392,694 408,694\" fill=\"#16a34a\"/>\n\
+         <text x=\"416\" y=\"690\">support</text>\n",
+    );
+    text.push_str(
+        "<line x1=\"520\" y1=\"686\" x2=\"550\" y2=\"686\" stroke=\"#dc2626\" stroke-width=\"2\" \
+         marker-end=\"url(#ocae-load-arrow)\"/>\n<text x=\"558\" y=\"690\">load</text>\n",
+    );
+    text.push_str("<text x=\"920\" y=\"690\" text-anchor=\"end\">projection: XY (Z ignored)</text>\n</g>\n</svg>\n");
+
+    write_atomic(&target, &text)
+}
+
+fn missing_svg_node(element: &str, node: &str) -> CaeError {
+    CaeError::new("export/invalid-model", format!("SVG export cannot find node `{node}` for element `{element}`"))
 }
 
 /// Writes a self-contained, deterministic HTML analysis report.
@@ -409,8 +617,7 @@ pub fn export_html(
     text.push_str("<section>\n<h2>Validation</h2>\n");
     if issues.is_empty() {
         text.push_str("<p class=\"passed\">Passed, no issues found.</p>\n");
-    }
-    else {
+    } else {
         text.push_str("<table>\n<tr><th>Severity</th><th>Code</th><th>Message</th></tr>\n");
         for issue in issues {
             let severity = match issue.severity {
@@ -523,8 +730,7 @@ pub fn export_html(
             );
             if modal.modes.is_empty() {
                 text.push_str("<p>No positive eigenvalues available.</p>\n");
-            }
-            else {
+            } else {
                 text.push_str(
                     "<table>\n<tr><th>Mode</th><th>Frequency (Hz)</th><th>Eigenvalue</th><th>Max amplitude</th></tr>\n",
                 );
@@ -579,8 +785,7 @@ fn mesh_error(error: MeshError) -> CaeError {
 fn csv_field(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))
-    }
-    else {
+    } else {
         value.to_string()
     }
 }

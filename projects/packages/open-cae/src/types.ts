@@ -26,7 +26,16 @@ export type SupportLevel = 'supported' | 'unsupported';
 export type Severity = 'error' | 'warning' | 'notice';
 
 /** Export formats `export()` can write. */
-export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html';
+export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html' | 'svg';
+
+/** Options of `export()`. */
+export interface ExportOptions {
+    /**
+     * Scale factor applied to nodal displacements when drawing the deformed
+     * shape of an SVG export. Must be finite and positive; defaults to `1`.
+     */
+    readonly scale?: number;
+}
 
 /** Session options. Constructing a session opens no file. */
 export interface OpenCAEOptions {

@@ -41,7 +41,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
-| CSV / legacy VTK / Markdown / HTML report export | ✅ supported |
+| CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
@@ -65,8 +65,16 @@ remains unimplemented. `tensionOnly` is likewise limited to truss members: it
 deactivates compressed cables, records the active set and iterations, and
 reports a mechanism when the slack topology cannot carry the load.
 
-HTML report export exists in the Rust API and TypeScript SDK; the `open-cae`
-CLI writes `csv`, `vtk` and `md` (see [cli.md](cli.md)).
+HTML report and SVG shape export exist in the Rust API, the native addon and
+the TypeScript SDK; the `open-cae` CLI writes `csv`, `vtk`, `md` and `svg`
+(see [cli.md](cli.md)). The SVG drawing projects every node onto the global
+X–Y plane (Z is ignored, including in three-dimensional documents), fits a
+fixed 960 × 720 viewBox to the projected undeformed and deformed geometry,
+and draws grey undeformed lines, a blue deformed polyline at the requested
+`scale`, node dots, support triangles and load arrows. Like the reports it
+contains no timestamps, so repeated exports are byte-identical; the scale must
+be finite and positive and a model without nodes is rejected with
+`export/no-solution`.
 
 ## Numerical methods
 
@@ -339,6 +347,12 @@ plus:
   references) and `node/duplicate-coordinates` (two nodes at the same point);
   both warnings never block solving;
 - CSV/VTK/Markdown/HTML content and `.ocae` round trips.
+
+`tests/svg_export.rs`: a two-bar truss and a three-dimensional bar, checked for
+`<svg`, `<line`, `<polyline`, the title, the requested scale, support and load
+markers, the documented XY projection note, byte-identical repeated exports,
+and the stable `export/no-solution`, `export/invalid-scale` and
+`export/mismatch` errors.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load

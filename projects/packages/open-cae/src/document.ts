@@ -29,6 +29,7 @@ import type {
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
+    ExportOptions,
     ExportReport,
     FrequencyResponseOptions,
     FrequencyResponseSolution,
@@ -410,11 +411,15 @@ export class CaeDocument {
         return service.report(this.path);
     }
 
-    /** Exports the solved document as `csv`, `vtk` or `md`. */
-    export(format: ExportFormat, target: string): ExportReport {
+    /**
+     * Exports the solved document as `csv`, `vtk`, `md`, `html` or `svg`.
+     * `options.scale` multiplies the nodal displacements of an SVG deformed
+     * shape and defaults to `1`.
+     */
+    export(format: ExportFormat, target: string, options: ExportOptions = {}): ExportReport {
         this.assertOpen();
         assertTarget(target);
-        return service.exportDocument(this.path, format, target);
+        return service.exportDocument(this.path, format, target, options);
     }
 
     /** Writes the document back to its own path, or to `target`. */

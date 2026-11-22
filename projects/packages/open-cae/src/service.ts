@@ -29,6 +29,7 @@ import type {
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
+    ExportOptions,
     ExportReport,
     FrequencyResponseOptions,
     FrequencyResponseSolution,
@@ -488,8 +489,18 @@ export function matrices(path: string, options: MatrixOptions = {}): SystemMatri
 }
 
 /** Exports a solved document. */
-export function exportDocument(path: string, format: ExportFormat, target: string): ExportReport {
-    return decode<ExportReport>(() => binding('export').export(path, format, target));
+export function exportDocument(
+    path: string,
+    format: ExportFormat,
+    target: string,
+    options: ExportOptions = {},
+): ExportReport {
+    const request = options.scale === undefined ? undefined : JSON.stringify({ scale: options.scale });
+    return decode<ExportReport>(() =>
+        request === undefined
+            ? binding('export').export(path, format, target)
+            : binding('export').export(path, format, target, request),
+    );
 }
 
 /** Solves a document and returns the full report. */

@@ -47,7 +47,7 @@ mod validate;
 
 pub use crate::{
     error::CaeError,
-    export::{export_csv, export_html, export_md, export_vtk, write_atomic},
+    export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::{
         MATERIAL_PRESETS, MaterialPreset, SectionProperties, SectionReport, library_json, material_preset, section_report,
     },
@@ -56,7 +56,8 @@ pub use crate::{
         PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
     },
     session::{
-        DocumentSummary, ExportFormat, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport, not_implemented,
+        DocumentSummary, ExportFormat, ExportOptions, ExportReport, OpenCae, OpenCaeOptions, Report, ValidationReport,
+        not_implemented,
     },
     solver::{
         BUCKLING_COMBINATION_REPORT_FORMAT, BUCKLING_COMBINATION_REPORT_VERSION, BUCKLING_REPORT_FORMAT,
@@ -128,7 +129,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "vtk": "supported",
     "md": "supported",
     "html": "supported",
-    "svg": "unsupported",
+    "svg": "supported",
     "inp": "unsupported",
     "step": "unsupported"
   }

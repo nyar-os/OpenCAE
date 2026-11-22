@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::{
     CAPABILITIES_JSON, CaeError,
-    export::{export_csv, export_html, export_md, export_vtk, write_atomic},
+    export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::material_preset,
     model::{ElementKind, Material, Model, Section, Units},
     solver::{
@@ -102,6 +102,8 @@ pub enum ExportFormat {
     Md,
     /// One deterministic, self-contained HTML engineering report.
     Html,
+    /// One deterministic SVG drawing of the model and deformed shape.
+    Svg,
 }
 
 impl ExportFormat {
@@ -112,6 +114,7 @@ impl ExportFormat {
             Self::Vtk => "vtk",
             Self::Md => "md",
             Self::Html => "html",
+            Self::Svg => "svg",
         }
     }
 }
@@ -125,12 +128,27 @@ impl FromStr for ExportFormat {
             "vtk" => Ok(Self::Vtk),
             "md" => Ok(Self::Md),
             "html" | "htm" => Ok(Self::Html),
+            "svg" => Ok(Self::Svg),
             "inp" | "abaqus" | "step" | "stp" => Err(not_implemented(&format!("`{value}` format export"))),
             other => Err(CaeError::new(
                 "cli/unknown-format",
-                format!("unknown export format `{other}`; only csv, vtk, md or html is supported"),
+                format!("unknown export format `{other}`; only csv, vtk, md, html or svg is supported"),
             )),
         }
+    }
+}
+
+/// Options of [`OpenCae::export_with_options`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExportOptions {
+    /// Scale factor applied to nodal displacements when drawing the deformed
+    /// shape of an SVG export. Must be finite and positive; defaults to `1.0`.
+    pub scale: f64,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self { scale: 1.0 }
     }
 }
 
@@ -1079,6 +1097,19 @@ impl OpenCae {
 
     /// Solves the open document and exports the result.
     pub fn export(&self, format: ExportFormat, target: &Path) -> Result<ExportReport, CaeError> {
+        self.export_with_options(format, target, ExportOptions::default())
+    }
+
+    /// Solves the open document and exports the result with `options`.
+    ///
+    /// `options.scale` only affects the SVG format: it multiplies the nodal
+    /// displacements of the deformed shape. Other formats ignore it.
+    pub fn export_with_options(
+        &self,
+        format: ExportFormat,
+        target: &Path,
+        options: ExportOptions,
+    ) -> Result<ExportReport, CaeError> {
         let model = &self.current()?.model;
         let solution = solve(model)?;
         let files = match format {
@@ -1119,6 +1150,15 @@ impl OpenCae {
                     target.to_path_buf()
                 } else {
                     target.join("report.html")
+                };
+                vec![file.display().to_string()]
+            }
+            ExportFormat::Svg => {
+                export_svg(model, &solution, options.scale, target)?;
+                let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+                    target.to_path_buf()
+                } else {
+                    target.join("model.svg")
                 };
                 vec![file.display().to_string()]
             }
