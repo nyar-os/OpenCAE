@@ -110,6 +110,58 @@ fn tube_section_properties_match_closed_form() {
 }
 
 #[test]
+fn channel_section_properties_match_closed_form() {
+    let section = Section::channel(200.0, 80.0, 10.0, 6.0).expect("channel");
+    let properties = section.properties().expect("properties");
+
+    // h = 200, b = 80, tf = 10, tw = 6, web height = 180.
+    let expected_area = 2.0 * 80.0 * 10.0 + 180.0 * 6.0;
+    let centroid = (80.0 * 10.0 * 80.0 + 180.0 * 6.0f64.powi(2) / 2.0) / expected_area;
+    let expected_strong = 2.0 * (80.0 * 10.0f64.powi(3) / 12.0 + 80.0 * 10.0 * 95.0f64.powi(2)) + 6.0 * 180.0f64.powi(3) / 12.0;
+    let expected_weak = 2.0 * (10.0 * 80.0f64.powi(3) / 12.0 + 80.0 * 10.0 * (40.0 - centroid).powi(2))
+        + (180.0 * 6.0f64.powi(3) / 12.0 + 180.0 * 6.0 * (centroid - 3.0f64).powi(2));
+    let expected_torsion = (2.0 * 80.0 * 10.0f64.powi(3) + 180.0 * 6.0f64.powi(3)) / 3.0;
+
+    assert_close(properties.area, expected_area, 1e-12);
+    assert_close(properties.inertia_strong, expected_strong, 1e-12);
+    assert_close(properties.inertia_weak, expected_weak, 1e-12);
+    assert_close(properties.torsion_constant, expected_torsion, 1e-12);
+    assert_close(properties.extreme_fiber, 100.0, 1e-12);
+    assert_close(properties.section_modulus(), expected_strong / 100.0, 1e-12);
+
+    // Hand-evaluated values: A = 2680 mm², x̄ ≈ 25.0896 mm from the web face.
+    assert_close(properties.area, 2680.0, 1e-12);
+    assert_close(centroid, 1681.0 / 67.0, 1e-12);
+    assert_close(properties.inertia_strong, 17_369_333.333_333_334, 1e-12);
+}
+
+#[test]
+fn channel_section_round_trips_through_serde() {
+    let channel = Section::channel(200.0, 80.0, 10.0, 6.0).expect("channel");
+    let json = serde_json::to_string(&channel).expect("serialize channel");
+    assert!(json.contains("\"shape\":\"channel\""));
+    assert!(json.contains("\"flangeWidth\":80.0"));
+    assert!(json.contains("\"webThickness\":6.0"));
+    let parsed: Section = serde_json::from_str(&json).expect("deserialize channel");
+    assert_eq!(parsed, channel);
+}
+
+#[test]
+fn invalid_channel_geometry_is_rejected() {
+    for section in [
+        Section::channel(200.0, 80.0, 10.0, 0.0),
+        Section::channel(20.0, 80.0, 10.0, 6.0),
+        Section::channel(200.0, 6.0, 10.0, 6.0),
+        Section::channel(0.0, 80.0, 10.0, 6.0),
+        Section::channel(200.0, 80.0, f64::NAN, 6.0),
+        Section::channel(200.0, f64::INFINITY, 10.0, 6.0),
+    ] {
+        let error = section.expect_err("invalid section");
+        assert_eq!(error.code, "material/invalid-section");
+    }
+}
+
+#[test]
 fn box_and_tube_sections_round_trip_through_serde() {
     let box_section = Section::box_section(100.0, 200.0, 5.0).expect("box");
     let box_json = serde_json::to_string(&box_section).expect("serialize box");
@@ -171,6 +223,7 @@ fn library_json_reports_presets_and_shapes_in_the_requested_units() {
     assert!(millimetres.contains("\"shape\": \"i\""));
     assert!(millimetres.contains("\"shape\": \"box\""));
     assert!(millimetres.contains("\"shape\": \"tube\""));
+    assert!(millimetres.contains("\"shape\": \"channel\""));
 
     let metres = library_json(Units::Meter).expect("library");
     assert!(metres.contains("\"youngsModulus\": 210000000000.0"));

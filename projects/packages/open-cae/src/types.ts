@@ -65,6 +65,13 @@ export type Section =
           readonly shape: 'tube';
           readonly outerDiameter: number;
           readonly innerDiameter: number;
+      }
+    | {
+          readonly shape: 'channel';
+          readonly depth: number;
+          readonly flangeWidth: number;
+          readonly flangeThickness: number;
+          readonly webThickness: number;
       };
 
 /** Global isotropic linear elastic material and section data. */
@@ -97,7 +104,7 @@ export interface MaterialPreset {
 
 /** One supported parametric section shape. */
 export interface SectionShape {
-    readonly shape: 'rectangle' | 'circle' | 'i' | 'box' | 'tube';
+    readonly shape: 'rectangle' | 'circle' | 'i' | 'box' | 'tube' | 'channel';
     readonly parameters: readonly string[];
 }
 

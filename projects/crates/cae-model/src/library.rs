@@ -222,6 +222,40 @@ impl Section {
                     extreme_fiber: outer_diameter / 2.0,
                 })
             }
+            Self::Channel { depth, flange_width, flange_thickness, web_thickness } => {
+                validate_dimensions(
+                    "channel",
+                    &[
+                        ("depth", depth),
+                        ("flangeWidth", flange_width),
+                        ("flangeThickness", flange_thickness),
+                        ("webThickness", web_thickness),
+                    ],
+                )?;
+                let web_height = depth - 2.0 * flange_thickness;
+                if web_height <= 0.0 {
+                    return Err(invalid_section("channel section flange thickness must be smaller than half the depth"));
+                }
+                if web_thickness >= flange_width {
+                    return Err(invalid_section("channel section web thickness must be smaller than the flange width"));
+                }
+                let area = 2.0 * flange_width * flange_thickness + web_height * web_thickness;
+                let centroid_x =
+                    (flange_width * flange_thickness * flange_width + web_height * web_thickness.powi(2) / 2.0) / area;
+                let flange_offset = depth / 2.0 - flange_thickness / 2.0;
+                let inertia_strong = 2.0
+                    * (flange_width * flange_thickness.powi(3) / 12.0
+                        + flange_width * flange_thickness * flange_offset.powi(2))
+                    + web_thickness * web_height.powi(3) / 12.0;
+                let inertia_weak = 2.0
+                    * (flange_thickness * flange_width.powi(3) / 12.0
+                        + flange_width * flange_thickness * (flange_width / 2.0 - centroid_x).powi(2))
+                    + (web_height * web_thickness.powi(3) / 12.0
+                        + web_height * web_thickness * (centroid_x - web_thickness / 2.0).powi(2));
+                let torsion_constant =
+                    (2.0 * flange_width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+                Ok(SectionProperties { area, inertia_strong, inertia_weak, torsion_constant, extreme_fiber: depth / 2.0 })
+            }
         }
     }
 }
@@ -258,6 +292,13 @@ impl Section {
     /// Creates and validates a hollow circular tube.
     pub fn tube(outer_diameter: f64, inner_diameter: f64) -> Result<Self, CaeError> {
         let section = Self::Tube { outer_diameter, inner_diameter };
+        section.properties()?;
+        Ok(section)
+    }
+
+    /// Creates and validates an open channel (C-section).
+    pub fn channel(depth: f64, flange_width: f64, flange_thickness: f64, web_thickness: f64) -> Result<Self, CaeError> {
+        let section = Self::Channel { depth, flange_width, flange_thickness, web_thickness };
         section.properties()?;
         Ok(section)
     }
@@ -306,6 +347,7 @@ pub fn library_json(units: Units) -> Result<String, CaeError> {
             ShapeView { shape: "i", parameters: vec!["depth", "flangeWidth", "flangeThickness", "webThickness"] },
             ShapeView { shape: "box", parameters: vec!["width", "height", "wall"] },
             ShapeView { shape: "tube", parameters: vec!["outerDiameter", "innerDiameter"] },
+            ShapeView { shape: "channel", parameters: vec!["depth", "flangeWidth", "flangeThickness", "webThickness"] },
         ],
     };
     serde_json::to_string_pretty(&library)

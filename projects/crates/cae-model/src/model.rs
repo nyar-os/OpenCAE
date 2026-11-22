@@ -104,11 +104,29 @@ pub enum Section {
         /// Inner diameter.
         inner_diameter: f64,
     },
+    /// Open channel (C-section) with a web at the local `x` origin and two
+    /// flanges spanning the full width.
+    ///
+    /// The section is symmetric about mid-depth and open on the `+x` side. The
+    /// torsion constant uses the thin-walled open-section approximation, and
+    /// `inertia_weak` is taken about the centroidal axis even though the model
+    /// does not store the centroid offset.
+    #[serde(rename = "channel", rename_all = "camelCase")]
+    Channel {
+        /// Total depth.
+        depth: f64,
+        /// Flange width.
+        flange_width: f64,
+        /// Flange thickness.
+        flange_thickness: f64,
+        /// Web thickness.
+        web_thickness: f64,
+    },
 }
 
 impl Section {
-    /// Returns the short shape identifier (`rectangle`, `circle`, `i`, `box` or
-    /// `tube`).
+    /// Returns the short shape identifier (`rectangle`, `circle`, `i`, `box`,
+    /// `tube` or `channel`).
     pub fn shape_name(self) -> &'static str {
         match self {
             Self::Rectangle { .. } => "rectangle",
@@ -116,6 +134,7 @@ impl Section {
             Self::ISection { .. } => "i",
             Self::BoxSection { .. } => "box",
             Self::Tube { .. } => "tube",
+            Self::Channel { .. } => "channel",
         }
     }
 }

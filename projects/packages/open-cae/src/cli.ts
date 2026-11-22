@@ -490,7 +490,7 @@ async function materialPreset(args: readonly string[]): Promise<number> {
     const file = positional(
         parsed,
         0,
-        'material preset <file> --preset <name> [--section rectangle|circle|i|box|tube] [--area A] [--allowable S]',
+        'material preset <file> --preset <name> [--section rectangle|circle|i|box|tube|channel] [--area A] [--allowable S]',
     );
     const preset = required(parsed, '--preset');
     const area = number(parsed, '--area');
@@ -563,6 +563,15 @@ function sectionOption(parsed: Parsed): Section | undefined {
             shape: 'tube',
             outerDiameter: requiredNumber(parsed, '--outer-diameter'),
             innerDiameter: requiredNumber(parsed, '--inner-diameter'),
+        };
+    }
+    if (shape === 'channel') {
+        return {
+            shape: 'channel',
+            depth: requiredNumber(parsed, '--depth'),
+            flangeWidth: requiredNumber(parsed, '--flange-width'),
+            flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+            webThickness: requiredNumber(parsed, '--web-thickness'),
         };
     }
     throw failure('cli/invalid-option', 'unknownSection', { value: shape });
