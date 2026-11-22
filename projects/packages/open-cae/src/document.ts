@@ -44,6 +44,7 @@ import type {
     ModalSolution,
     NodeAddRequest,
     NodeDisplacement,
+    NodeMassRequest,
     NodeMergeRequest,
     NodeUpdateRequest,
     NodalStressOptions,
@@ -148,6 +149,16 @@ export class CaeDocument {
     updateNode(request: NodeUpdateRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.updateNode(this.path, request));
+    }
+
+    /**
+     * Sets or clears the concentrated mass of a node and saves the file. `0`
+     * clears it; the mass is added to the node's translational degrees of
+     * freedom by modal analysis.
+     */
+    setNodeMass(request: NodeMassRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.setNodeMass(this.path, request));
     }
 
     /**

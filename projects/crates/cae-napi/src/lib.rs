@@ -185,6 +185,21 @@ fn node_update(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Sets or clears the concentrated mass of a node and saves the document.
+///
+/// The request accepts `id` and a non-negative `mass`; `0` clears it.
+#[function]
+fn node_mass(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let mass = required_number_field(&request, "mass")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_node_mass(&id, mass).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
 /// Removes a node from a document and saves it.
 ///
 /// A node referenced by an element, a support or a load is rejected with
@@ -933,6 +948,7 @@ register_module![
     save,
     node_add,
     node_update,
+    node_mass,
     node_merge,
     node_remove,
     element_add,

@@ -23,6 +23,7 @@ Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
   ocae node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]
+  ocae node mass <file> --id <id> --mass <mass>
   ocae node remove <file> --id <id>
   ocae node merge <file> --from <id> --into <id>
   ocae node displacement <file> --id <id>
@@ -150,18 +151,19 @@ fn node_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => node_add(&args[1..]),
         Some("update") => node_update(&args[1..]),
+        Some("mass") => node_mass(&args[1..]),
         Some("remove") => node_remove(&args[1..]),
         Some("merge") => node_merge(&args[1..]),
         Some("displacement") => node_displacement(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `remove`, `merge` or `displacement` is supported"
+                "subcommand `{other}` of `node` does not exist; only `add`, `update`, `mass`, `remove`, `merge` or `displacement` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`node` is missing a subcommand; only `add`, `update`, `remove`, `merge` or `displacement` is supported",
+            "`node` is missing a subcommand; only `add`, `update`, `mass`, `remove`, `merge` or `displacement` is supported",
         )),
     }
 }
@@ -243,6 +245,18 @@ fn node_update(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.update_node(id, x, y, z)?;
     println!("node `{id}` moved (revision {})", summary.revision);
+    Ok(0)
+}
+
+fn node_mass(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id", "--mass"], &[])?;
+    let file = positional(&parsed, 0, "node mass <file> --id <id> --mass <mass>")?;
+    let id = required(&parsed, "--id")?;
+    let mass = required_number(&parsed, "--mass")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.set_node_mass(id, mass)?;
+    println!("node `{id}` mass set to {mass} (revision {})", summary.revision);
     Ok(0)
 }
 

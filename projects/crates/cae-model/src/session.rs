@@ -297,6 +297,15 @@ impl OpenCae {
         self.edit(|model| model.update_node(id, x, y, z))
     }
 
+    /// Sets or clears the concentrated mass of a node and saves the document.
+    ///
+    /// The mass must be finite and non-negative; `0` clears it. Unknown nodes
+    /// are rejected with `node/unknown-id` and invalid values with
+    /// `node/invalid-mass`.
+    pub fn set_node_mass(&mut self, id: &str, mass: f64) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.set_node_mass(id, mass))
+    }
+
     /// Appends a truss element and saves the document.
     ///
     /// `youngs_modulus` and `area` are optional per-element overrides of the

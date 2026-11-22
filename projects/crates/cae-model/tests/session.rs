@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ElementKind, ExportFormat, OpenCae, OpenCaeOptions, Severity, Units};
+use cae_model::{ElementKind, ExportFormat, Model, OpenCae, OpenCaeOptions, Severity, Units};
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock").as_nanos();
@@ -205,4 +205,28 @@ fn session_reports_stable_codes_for_invalid_operations() {
     // Unknown export formats keep the CLI contract.
     assert_eq!("obj".parse::<ExportFormat>().expect_err("unknown format").code, "cli/unknown-format");
     assert_eq!("step".parse::<ExportFormat>().expect_err("unsupported format").code, "capability/not-implemented");
+}
+
+#[test]
+fn session_sets_and_clears_a_node_mass() {
+    let directory = temporary_dir("mass");
+    let path = directory.join("bar.ocae");
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.create(&path, OpenCaeOptions::default()).expect("create");
+    session.add_node("n1", 0.0, 0.0, None).expect("n1");
+    session.add_node("n2", 1000.0, 0.0, None).expect("n2");
+    session.add_element("e1", "n1", "n2", None, None).expect("element");
+    session.add_support("n1", true, true, false).expect("fixed end");
+    session.add_support("n2", false, true, false).expect("lateral guide");
+
+    session.set_node_mass("n2", 0.25).expect("set mass");
+    let stored = Model::load(&path).expect("reload").node("n2").expect("n2").mass;
+    assert_close(stored, 0.25, 1e-12);
+
+    assert_eq!(session.set_node_mass("n2", -1.0).expect_err("negative").code, "node/invalid-mass");
+    assert_eq!(session.set_node_mass("missing", 1.0).expect_err("unknown").code, "node/unknown-id");
+
+    session.set_node_mass("n2", 0.0).expect("clear mass");
+    let stored = Model::load(&path).expect("reload").node("n2").expect("n2").mass;
+    assert_eq!(stored, 0.0);
 }

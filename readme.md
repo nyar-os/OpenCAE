@@ -72,7 +72,8 @@ const cases = document.loadCases();                          // one summary row 
 ```
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
-- Documents: `id/units/dimension/summary`, plus `addNode/updateNode/mergeNodes/addElement/updateElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/matrices/responseSpectrum/frequencyResponse/constructionStages/geometricNonlinear/export/report/save/close`; every edit operation writes atomically to the file.
+- Documents: `id/units/dimension/summary`, plus `addNode/updateNode/setNodeMass/mergeNodes/addElement/updateElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/matrices/responseSpectrum/frequencyResponse/constructionStages/geometricNonlinear/export/report/save/close`; every edit operation writes atomically to the file.
+- `setNodeMass({ id, mass })` adds a concentrated nodal mass to modal analysis. The value uses the mass unit consistent with `density` (tonnes in `mm`, kilograms in `m`); `mass: 0` clears it.
 - `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle`, `i`, `box`, `tube` or `channel`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
@@ -143,6 +144,7 @@ cargo run -p cae-model --bin ocae --offline -- create beam.ocae --units mm
 cargo run -p cae-model --bin ocae --offline -- material set beam.ocae --E 210000 --A 100 --density 7.85e-9
 cargo run -p cae-model --bin ocae --offline -- node add beam.ocae --id n1 --x 0 --y 0
 cargo run -p cae-model --bin ocae --offline -- node add beam.ocae --id n2 --x 1000 --y 0
+cargo run -p cae-model --bin ocae --offline -- node mass beam.ocae --id n2 --mass 0.001
 cargo run -p cae-model --bin ocae --offline -- element add beam.ocae --id b1 --from n1 --to n2 --kind beam --I 1000000
 cargo run -p cae-model --bin ocae --offline -- support add beam.ocae --node n1 --dx --dy --rz
 cargo run -p cae-model --bin ocae --offline -- load add beam.ocae --node n2 --fy -1000
@@ -180,13 +182,14 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae create <file.ocae> [--units mm\|m] [--dimension 2\|3]` | Create a document; the default dimension is 2 and consistent steel defaults are written (millimetre system E=210000 MPa, A=100 mm²; metre system E=2.1e11 Pa, A=1e-4 m²) |
 | `ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]` | Add a node; duplicate ids are rejected; `--z` defaults to 0 and may be non-zero only in 3D documents |
 | `ocae node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]` | Move an existing node in place, keeping its id and every reference; only the supplied coordinates change, so at least one is required and `--z` may be non-zero only in 3D documents. A move that would collapse an attached element is rejected with `element/zero-length` |
+| `ocae node mass <file> --id <id> --mass <mass>` | Set the concentrated nodal mass used by modal analysis (finite and non-negative; `0` clears it). Use tonnes with `units: "mm"` and kilograms with `units: "m"`, matching the density unit. Negative or non-finite values are rejected with `node/invalid-mass` |
 | `ocae node merge <file> --from <id> --into <id>` | Merge one node into another: element endpoints are re-pointed, loads add component-wise and supports merge flags/springs. The `into` node keeps its coordinates; an element that would collapse is rejected with `element/degenerate` and conflicting supports with `support/merge-conflict` |
 | `ocae element add <file> --id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]` | Add a truss/beam element; `beam` is 2D-only and requires a positive `--I`; `--w`/`--w2` are the local `+y` transverse intensities at the start/end node (uniform when `--w2` is omitted); `--dt` is a uniform temperature change and requires a material `alpha` |
 | `ocae element update <file> --id <id> [--from <n>] [--to <n>]` | Reconnect an existing element to new endpoint nodes; only the supplied endpoints change and material, loads, temperature and releases are preserved. Identical endpoints are rejected with `element/degenerate` and coincident coordinates with `element/zero-length` |
 | `ocae element release <file> --id <id> [--start] [--end]` | Release the bending moment at the start and/or end of a beam (hinge); truss elements are rejected |
 | `ocae element gradient <file> --id <id> [--value <dT>]` | Set or clear the through-depth temperature gradient of a beam; a positive value heats the local `+y` face and requires material `alpha` plus a section depth |
 | `ocae element span <file> --id <id> [--start <s>] [--end <s>]` | Limit a beam distributed load to the fractions `--start..--end` of the member length; omit both options to load the whole member again |
-| `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--section ...]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`); `--alpha` is the coefficient of thermal expansion in `1/K` |
+| `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--section ...]` | Set the global material, section and density (modal analysis needs a positive density **or** at least one positive nodal mass; self-weight requires a positive density); `--alpha` is the coefficient of thermal expansion in `1/K` |
 | `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i\|box\|tube\|channel] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
 | `ocae library [--units mm\|m]` | Print the built-in material presets and supported section shapes as JSON |
 | `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]` | Add/merge support constraints, an inclined constraint or spring stiffness; `--rz`/`--kr` are available only on beam nodes and `--dz`/`--kz` only in 3D documents. `--direction` constrains displacement along `[nx, ny]` in 2D and cannot be combined with the other constraint options. A supplied displacement clamps that degree of freedom to the given value and implies its flag; a supplied spring leaves it free |
@@ -241,7 +244,7 @@ The file is UTF-8 JSON with camelCase fields:
   },
   "nodes": [
     { "id": "n1", "x": 0.0, "y": 0.0, "z": 0.0 },
-    { "id": "n2", "x": 1000.0, "y": 0.0, "z": 0.0 }
+    { "id": "n2", "x": 1000.0, "y": 0.0, "z": 0.0, "mass": 0.001 }
   ],
   "elements": [
     { "id": "e1", "from": "n1", "to": "n2", "kind": "truss" },
@@ -268,7 +271,7 @@ The file is UTF-8 JSON with camelCase fields:
 | `units` | `"mm"` or `"m"`. When missing, `mm` is assumed and a `document/assumed-units` notice is produced |
 | `dimension` | Spatial dimension, `2` or `3`. When missing, `2` is assumed so old documents load without changes; other values raise `document/dimension` |
 | `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name`, `allowableStress` (for utilisation), `alpha` (coefficient of thermal expansion in `1/K`, required by temperature loads) and `section` (parametric geometry). A section is `{ "shape": "rectangle", "width", "height" }`, `{ "shape": "circle", "diameter" }`, `{ "shape": "i", "depth", "flangeWidth", "flangeThickness", "webThickness" }`, `{ "shape": "box", "width", "height", "wall" }`, `{ "shape": "tube", "outerDiameter", "innerDiameter" }` or `{ "shape": "channel", "depth", "flangeWidth", "flangeThickness", "webThickness" }`; when present it supplies the strong-axis inertia for beams that omit `inertia` |
-| `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
+| `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0. Optional `mass` defaults to 0 and adds a concentrated nodal mass to every translational degree of freedom in modal analysis (no rotational inertia); negative or non-finite values raise `node/invalid-mass` |
 | `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` or a material `section` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying), an optional uniform `temperature` change and an optional moment `release: { "start": bool, "end": bool }` (beams only) |
 | `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged. Optional `spring: { kx, ky, kz, kr }` adds linear elastic stiffness (force/length, moment/radian) and leaves the matching degree of freedom free; `kz` is 3D-only and `kr` is 2D beam-node-only. Optional `direction: [nx, ny]` constrains displacement along that unit vector in 2D and cannot be combined with `dx`, `dy`, a prescribed displacement or a spring |
 | `loads` | Nodal concentrated forces `fx`/`fy`/`fz` and moment `mz`, defaulting to 0; `mz` applies only at beam nodes |
@@ -280,7 +283,7 @@ The file is UTF-8 JSON with camelCase fields:
 
 **Degree-of-freedom activation**: a 2D document that contains any beam element uses 3 degrees of freedom per node (`ux, uy, rz`); however, `rz` is active only at beam ends that are **not released**, so purely truss parts and hinged ends never produce zero-stiffness rotation rows. Pure truss documents still use 2 degrees of freedom per node. 3D trusses keep 3 translational degrees of freedom per node.
 
-**Unit convention**: the solver performs no unit conversion and only requires numerically consistent input. With `units: "mm"`, use N, mm, mm² and MPa, with density in t/mm³ (steel is about `7.85e-9`); with `units: "m"`, use N, m, m² and Pa, with density in kg/m³. Mixing units is not an error, but the results have no physical meaning. Modal frequencies are in Hz.
+**Unit convention**: the solver performs no unit conversion and only requires numerically consistent input. With `units: "mm"`, use N, mm, mm² and MPa, with density in t/mm³ (steel is about `7.85e-9`) and nodal masses in t; with `units: "m"`, use N, m, m² and Pa, with density in kg/m³ and nodal masses in kg. Mixing units is not an error, but the results have no physical meaning. Modal frequencies are in Hz.
 
 ## Capability matrix
 
@@ -296,6 +299,7 @@ The file is UTF-8 JSON with camelCase fields:
 | through-depth temperature gradient (`thermalGradient`, linear ΔT across the section + equivalent end moments) | ✅ supported |
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi, signed participation factors and effective modal mass) | ✅ supported |
+| concentrated nodal masses (`node mass`, translational lumped mass on top of element mass) | ✅ supported |
 | linear buckling (`buckling`, 2D truss/beam and 3D truss geometric stiffness + Jacobi) | ✅ supported |
 | buckling under load combinations (`bucklingCombinations`, scaled cases + governing envelope) | ✅ supported |
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
@@ -393,6 +397,8 @@ pnpm --filter @wae/open-cae run typecheck
 - single free translational degree of freedom: effective mass equals the free nodal mass `ρAL/2`, its signed participation factor equals `√(ρAL/2)` and `totalMass` equals `ρAL` (`1e-12`);
 - every reported mode satisfies `participationFactor² = effectiveMass` in all directions, with the cumulative translational mass fraction staying below one (`1e-12`);
 - cantilever beam (40 elements): first bending frequency within `< 5%` of `1.875104²·√(EI/(ρAL⁴))/(2π)`;
+- the same cantilever with a concentrated tip mass: the first frequency drops below the distributed-mass result and `totalMass` grows by exactly the added mass (`1e-12`); setting the mass back to `0` restores the original frequency exactly;
+- nodal masses reject negative, NaN, infinite and unknown-node requests (`node/invalid-mass`, `node/unknown-id`), and `validate()` reports an invalid mass edited directly into the document;
 - pinned-pinned beam column (20 elements): first linear buckling factor within `0.1%` of the Euler load `P_cr = π²EI/L²`;
 - three-dimensional tetrahedron truss: the two lateral buckling factors match the closed-form geometric-stiffness eigenvalue `E·A·R²/(N·(R²+2H²))` (relative error `1e-8`);
 - vertical bar self-weight: sum of reactions equals total weight (relative error `1e-9`);

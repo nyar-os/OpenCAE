@@ -155,6 +155,12 @@ impl Model {
             if !node_ids.insert(node.id.as_str()) {
                 report.push(check_error("node/duplicate-id", format!("node id `{}` is duplicated", node.id)));
             }
+            if !node.mass.is_finite() || node.mass < 0.0 {
+                report.push(check_error(
+                    "node/invalid-mass",
+                    format!("mass of node `{}` must be finite and non-negative (currently {})", node.id, node.mass),
+                ));
+            }
             if self.dimension == 2 && node.z != 0.0 {
                 report.push(check_error(
                     "document/dimension-mismatch",

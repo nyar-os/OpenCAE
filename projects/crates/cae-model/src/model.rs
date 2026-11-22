@@ -243,6 +243,14 @@ pub struct Node {
     /// so two-dimensional documents omit it.
     #[serde(default)]
     pub z: f64,
+    /// Concentrated nodal mass contributed to the translational degrees of
+    /// freedom by modal analysis.
+    ///
+    /// The value uses the mass unit consistent with [`Material::density`]:
+    /// tonnes in the millimetre system (`t`) and kilograms in the metre system
+    /// (`kg`). It defaults to `0`, so older documents load unchanged.
+    #[serde(default)]
+    pub mass: f64,
 }
 
 /// Optional per-element material override.
@@ -647,7 +655,28 @@ impl Model {
                 "a two-dimensional document cannot add node `{id}` with z={z}; set dimension to 3 first"
             )));
         }
-        self.nodes.push(Node { id, x, y, z });
+        self.nodes.push(Node { id, x, y, z, mass: 0.0 });
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Sets or clears the concentrated mass of an existing node.
+    ///
+    /// The mass must be finite and non-negative; `0` clears it. Unknown
+    /// identifiers are rejected with `node/unknown-id` and an invalid value
+    /// with `node/invalid-mass` before the document is modified.
+    pub fn set_node_mass(&mut self, id: &str, mass: f64) -> Result<(), CaeError> {
+        if self.node(id).is_none() {
+            return Err(CaeError::new("node/unknown-id", format!("unknown node `{id}`")));
+        }
+        if !mass.is_finite() || mass < 0.0 {
+            return Err(CaeError::new(
+                "node/invalid-mass",
+                format!("mass of node `{id}` must be finite and non-negative (currently {mass})"),
+            ));
+        }
+        let node = self.nodes.iter_mut().find(|node| node.id == id).expect("node was looked up above");
+        node.mass = mass;
         self.bump_revision();
         Ok(())
     }
@@ -1611,6 +1640,12 @@ impl Model {
         self.loads.retain(|load| load.node != from && load.node != into);
         if let Some(load) = merged_load {
             self.loads.push(load);
+        }
+        let merged_mass = self.node(from).map(|node| node.mass).unwrap_or(0.0);
+        if merged_mass != 0.0 {
+            if let Some(node) = self.nodes.iter_mut().find(|node| node.id == into) {
+                node.mass += merged_mass;
+            }
         }
         self.nodes.retain(|node| node.id != from);
         self.bump_revision();

@@ -977,6 +977,20 @@ export interface NodeUpdateRequest {
     readonly z?: number;
 }
 
+/**
+ * Request of `setNodeMass()`.
+ *
+ * The concentrated mass is added to every translational degree of freedom of
+ * the node by modal analysis and uses the mass unit consistent with `density`:
+ * tonnes (`t`) in the millimetre system and kilograms (`kg`) in the metre
+ * system. A value of `0` clears it.
+ */
+export interface NodeMassRequest {
+    readonly id: string;
+    /** Concentrated nodal mass; finite and non-negative. */
+    readonly mass: number;
+}
+
 /** Request of `mergeNodes()`; the `into` node survives with its coordinates. */
 export interface NodeMergeRequest {
     /** Node that is removed after its references move to `into`. */

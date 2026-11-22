@@ -503,6 +503,69 @@ fn modal_requires_positive_density() {
 }
 
 #[test]
+fn tip_point_mass_lowers_the_first_cantilever_frequency() {
+    let mut model = beam_model(40);
+    model.set_material_full(Some("steel".to_string()), E, A, RHO);
+    let baseline = solve_modal(&model, 1).expect("baseline modal");
+    let baseline_frequency = baseline.modes.first().expect("baseline mode").frequency_hz;
+
+    let tip_mass = 1.0e-3;
+    model.set_node_mass("n41", tip_mass).expect("tip mass");
+    assert_eq!(model.node("n41").expect("tip node").mass, tip_mass);
+
+    let loaded = solve_modal(&model, 1).expect("modal with tip mass");
+    let loaded_frequency = loaded.modes.first().expect("loaded mode").frequency_hz;
+    assert!(
+        loaded_frequency < baseline_frequency,
+        "a tip mass must lower the first frequency: baseline {baseline_frequency}, loaded {loaded_frequency}"
+    );
+    assert_close(loaded.total_mass[0], baseline.total_mass[0] + tip_mass, 1e-12);
+}
+
+#[test]
+fn clearing_a_node_mass_restores_the_unloaded_frequency() {
+    let mut model = beam_model(40);
+    model.set_material_full(Some("steel".to_string()), E, A, RHO);
+    let baseline = solve_modal(&model, 1).expect("baseline modal");
+
+    model.set_node_mass("n41", 1.0e-3).expect("tip mass");
+    model.set_node_mass("n41", 0.0).expect("clear tip mass");
+    assert_eq!(model.node("n41").expect("tip node").mass, 0.0);
+
+    let reloaded = solve_modal(&model, 1).expect("modal after clearing the mass");
+    assert_close(reloaded.modes[0].frequency_hz, baseline.modes[0].frequency_hz, 1e-12);
+}
+
+#[test]
+fn node_mass_rejects_invalid_values_and_unknown_nodes() {
+    let mut model = beam_model(2);
+
+    let error = model.set_node_mass("n2", -1.0).expect_err("negative mass must be rejected");
+    assert_eq!(error.code, "node/invalid-mass");
+    let error = model.set_node_mass("n2", f64::NAN).expect_err("NaN mass must be rejected");
+    assert_eq!(error.code, "node/invalid-mass");
+    let error = model.set_node_mass("n2", f64::INFINITY).expect_err("infinite mass must be rejected");
+    assert_eq!(error.code, "node/invalid-mass");
+    assert_eq!(model.node("n2").expect("n2").mass, 0.0);
+
+    let error = model.set_node_mass("missing", 1.0).expect_err("unknown node must be rejected");
+    assert_eq!(error.code, "node/unknown-id");
+}
+
+#[test]
+fn validation_reports_negative_and_non_finite_node_masses() {
+    let mut model = beam_model(2);
+
+    model.nodes[1].mass = -0.5;
+    let issues = model.validate();
+    assert!(issues.iter().any(|issue| issue.code == "node/invalid-mass"), "missing negative-mass error: {issues:?}");
+
+    model.nodes[1].mass = f64::NAN;
+    let issues = model.validate();
+    assert!(issues.iter().any(|issue| issue.code == "node/invalid-mass"), "missing NaN-mass error: {issues:?}");
+}
+
+#[test]
 fn html_report_is_deterministic_and_contains_all_sections() {
     let directory = temporary_dir("html");
     let path = directory.join("model.ocae");

@@ -1496,8 +1496,9 @@ pub fn solve(model: &Model) -> Result<Solution, CaeError> {
 /// the solver uses, and each row records whether a support constrains it. The
 /// matrices are dense and expressed in the global coordinate system, so their
 /// rows and columns can be checked against hand-assembled values. The mass
-/// matrix follows the lumped model of [`solve_modal`] and is diagonal; a
-/// density of zero therefore yields a zero mass matrix rather than an error.
+/// matrix follows the lumped model of [`solve_modal`], includes nodal point
+/// masses and is diagonal; a density of zero without nodal masses therefore
+/// yields a zero mass matrix rather than an error.
 pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
     if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
         return Err(CaeError::new(issue.code, issue.message));
@@ -1553,8 +1554,9 @@ fn component_name(model: &Model, layout: &Layout, component: usize) -> &'static 
 /// Solves the generalized eigenproblem `K·φ = ω²·M·φ` with a diagonal mass
 /// matrix and returns the lowest `modes` frequencies in hertz.
 ///
-/// The material density must be strictly positive. A zero or negative density
-/// is reported as `material/invalid-density` instead of being approximated.
+/// Mass must come from a strictly positive material density or from at least
+/// one positive nodal `Node::mass`. When neither is available the analysis is
+/// rejected with `material/invalid-density` instead of being approximated.
 pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeError> {
     if modes == 0 {
         return Err(CaeError::new("analysis/invalid-modes", "the number of modes must be at least 1"));
@@ -1562,10 +1564,14 @@ pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeErro
     if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
         return Err(CaeError::new(issue.code, issue.message));
     }
-    if !positive_finite(model.material.density) {
+    let has_node_mass = model.nodes.iter().any(|node| node.mass.is_finite() && node.mass > 0.0);
+    if !positive_finite(model.material.density) && !has_node_mass {
         return Err(CaeError::new(
             "material/invalid-density",
-            format!("modal analysis requires a positive mass density (currently {})", model.material.density),
+            format!(
+                "modal analysis requires a positive mass density or at least one positive nodal mass (density is {})",
+                model.material.density
+            ),
         ));
     }
 
@@ -4133,6 +4139,13 @@ fn partial_deflection_integrals(partial: &PartialLoad, length: f64, position: f6
     (cubic, quadratic)
 }
 
+/// Assembles the diagonal lumped mass matrix of the active degrees of freedom.
+///
+/// Every element contributes half of its mass `ρ·A·L` to the translations of
+/// its two nodes (and `ρ·I·L/2` to the rotations of a beam). Each node's
+/// concentrated `Node::mass` is then added to all of its translational
+/// degrees of freedom; it contributes no rotational inertia. Constrained
+/// degrees of freedom have no entry in the layout and are naturally ignored.
 fn mass_matrix(model: &Model, layout: &Layout) -> Result<Vec<f64>, CaeError> {
     let mut mass = vec![0.0; layout.size];
     let density = model.material.density;
@@ -4174,6 +4187,16 @@ fn mass_matrix(model: &Model, layout: &Layout) -> Result<Vec<f64>, CaeError> {
                 if let Some(dof) = layout.index.get(node * layout.slots + 2).copied().flatten() {
                     mass[dof] += rotary;
                 }
+            }
+        }
+    }
+    for (node, entry) in model.nodes.iter().enumerate() {
+        if !entry.mass.is_finite() || entry.mass <= 0.0 {
+            continue;
+        }
+        for component in 0..translations {
+            if let Some(dof) = layout.index.get(node * layout.slots + component).copied().flatten() {
+                mass[dof] += entry.mass;
             }
         }
     }

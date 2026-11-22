@@ -264,6 +264,9 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === 'update') {
         return nodeUpdate(args.slice(1));
     }
+    if (action === 'mass') {
+        return nodeMass(args.slice(1));
+    }
     if (action === 'remove') {
         return nodeRemove(args.slice(1));
     }
@@ -276,13 +279,13 @@ async function nodeCommand(args: readonly string[]): Promise<number> {
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'node',
-            expected: 'add, update, remove or displacement',
+            expected: 'add, update, mass, remove, merge or displacement',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'node',
         action,
-        expected: 'add, update, remove or displacement',
+        expected: 'add, update, mass, remove, merge or displacement',
     });
 }
 
@@ -362,6 +365,19 @@ async function nodeUpdate(args: readonly string[]): Promise<number> {
         const document = await openDocument(session, file);
         const summary = document.updateNode({ id, x, y, z });
         console.log(message('nodeUpdated', { id, revision: String(summary.revision) }));
+        return 0;
+    });
+}
+
+async function nodeMass(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--id', '--mass'], []);
+    const file = positional(parsed, 0, 'node mass <file> --id <id> --mass <mass>');
+    const id = required(parsed, '--id');
+    const mass = requiredNumber(parsed, '--mass');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const summary = document.setNodeMass({ id, mass });
+        console.log(message('nodeMassSet', { id, mass: String(mass), revision: String(summary.revision) }));
         return 0;
     });
 }
