@@ -41,6 +41,8 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | `open-cae node add <file>` | `--id <id> --x <x> --y <y> [--z <z>]` | `--z` must be 0 in 2D documents. |
 | `open-cae node update <file>` | `--id <id> [--x <x>] [--y <y>] [--z <z>]` | Moves a node in place and keeps every reference; at least one coordinate is required. |
 | `open-cae node mass <file>` | `--id <id> --mass <mass>` | Concentrated mass for modal analysis; `0` clears it. Tonnes in `mm`, kilograms in `m`, matching `density`. |
+| `open-cae node temperature <file>` | `--id <id> [--temperature <t>] [--clear]` | Fixed temperature for steady heat conduction; `--clear` removes the Dirichlet boundary. Ignored by structural analysis. |
+| `open-cae node heat <file>` | `--id <id> --heat <w>` | Concentrated nodal heat flow in watts, positive into the node; `0` clears it. Ignored by structural analysis. |
 | `open-cae node remove <file>` | `--id <id>` | Rejected while an element references the node. |
 | `open-cae node merge <file>` | `--from <id> --into <id>` | Re-points element endpoints, adds loads and merges supports; `into` keeps its coordinates. |
 | `open-cae node displacement <file>` | `--id <id>` | Prints one node's solved displacement. |
@@ -60,7 +62,7 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae material set <file>` | `--E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--section <shape> ...geometry]` | Sets the global material; `--alpha` is the thermal expansion coefficient in `1/K`. |
+| `open-cae material set <file>` | `--E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--conductivity <k>] [--section <shape> ...geometry]` | Sets the global material; `--alpha` is the thermal expansion coefficient in `1/K`, `--conductivity` the heat-conduction `k` in `W/(m·K)` (required only by `heat`). |
 | `open-cae material preset <file>` | `--preset <name> [--section <shape> ...geometry] [--area <A>] [--allowable <s>]` | Presets: `steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`. |
 | `open-cae library` | `[--units mm\|m]` | Prints presets and supported section shapes. |
 | `open-cae section properties` | `--section <shape> [...geometry] [--units mm\|m]` | Prints area, inertias, torsion constant, extreme fibre and section modulus. |
@@ -104,11 +106,21 @@ Section shapes and their geometry flags:
 | `open-cae modal <file>` | `[--modes <N>] [--out <file>]` | Modal solve. Needs a positive density or at least one positive nodal mass. |
 | `open-cae buckling <file>` | `[--modes <N>] [--out <file>]` | Linear buckling solve. |
 | `open-cae tension-only <file>` | `[--iterations <N>] [--tolerance <t>] [--out <file>]` | Cable active-set iteration; defaults are 20 and `1e-9`. |
+| `open-cae heat <file>` | `[--out <file>]` | Steady-state axial heat conduction. Requires at least one fixed node temperature and a positive material `conductivity`; prints temperatures, element fluxes and fixed-temperature reactions. `thermal` is an alias. Conduction only: no convection, radiation or transient stepping. |
 
 Use the dedicated `tension-only` command for cables. The `solve` parser also
 accepts `--analysis tension-only`, but currently resolves it to a static
 solve, and it rejects `--iterations`/`--tolerance` outside the dedicated
-command.
+command. Heat conduction has its own `heat` command rather than an
+`--analysis` value.
+
+A heat document has one scalar temperature per node. Fixed temperatures are
+Dirichlet boundaries, other nodes are free; a missing fixed temperature fails
+with `heat/no-fixed-temperature` and a missing or non-positive conductivity
+with `material/invalid-conductivity`. Element flux is
+`q = k·A·(T_from − T_to)/L`, positive from the `from` node to the `to` node.
+Units are never converted, so a `mm` document must supply a length-consistent
+conductivity.
 
 ### Results
 
@@ -127,7 +139,7 @@ command.
 
 ### Rejected commands
 
-`open-cae import`, `nonlinear`, `frame`, `frame3d`, `thermal` and `contact`
+`open-cae import`, `nonlinear`, `frame`, `frame3d` and `contact`
 return `capability/not-implemented` with exit code `2`. `beam` and `beam2d`
 are unknown commands (exit code `1`).
 
@@ -167,6 +179,23 @@ open-cae modal beam.ocae --modes 5
 open-cae buckling beam.ocae --modes 2
 open-cae export beam.ocae --format md --out report.md
 ```
+
+Steady heat conduction through one bar in the metre system:
+
+```shell
+open-cae create heat.ocae --units m
+open-cae material set heat.ocae --E 210e9 --A 1e-4 --conductivity 50
+open-cae node add heat.ocae --id n1 --x 0 --y 0
+open-cae node add heat.ocae --id n2 --x 1 --y 0
+open-cae element add heat.ocae --id e1 --from n1 --to n2
+open-cae node temperature heat.ocae --id n1 --temperature 100
+open-cae node temperature heat.ocae --id n2 --temperature 0
+open-cae heat heat.ocae --out temperature.json
+```
+
+The bar carries `q = kAΔT/L = 50 × 1e-4 × 100 = 0.5 W`; the fixed nodes
+report `+0.5 W` and `−0.5 W`. Clear a boundary with
+`open-cae node temperature heat.ocae --id n2 --clear`.
 
 An elastic support leaves the degree of freedom free and adds stiffness
 instead of constraining it:

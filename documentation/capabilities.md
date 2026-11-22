@@ -19,6 +19,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | uniform member temperature change (`thermalExpansion`, `α·ΔT` thermal strain + equivalent nodal loads) | ✅ supported |
 | through-depth temperature gradient (`thermalGradient`, linear ΔT across the section + equivalent end moments) | ✅ supported |
+| steady-state heat conduction (`heat`, truss axial `kA/L` conduction, fixed temperatures + nodal heat flows) | ✅ supported |
 | prescribed displacements (`prescribedDisplacement`, support settlements) | ✅ supported |
 | modal analysis (`modal`, lumped mass + Jacobi, signed participation factors and effective modal mass) | ✅ supported |
 | concentrated nodal masses (`node mass`, translational lumped mass on top of element mass) | ✅ supported |
@@ -45,25 +46,27 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
-| heat transfer (`thermal`) | ❌ not implemented |
 | Abaqus `.inp` import, STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-`beam3d`/`frame3d`/`thermal`/`nonlinear` are rejected at every entry point,
-while `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`,
-`thermalGradient`, `partialSpanLoad`, `elasticSupports`, `inclinedSupports`,
-`matrixExport`, `responseSpectrum`, `frequencyResponse`,
+`beam3d`/`frame3d`/`nonlinear` are rejected at every entry point, while
+`buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`,
+`thermalGradient`, `heat`, `partialSpanLoad`, `elasticSupports`,
+`inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
 `nodalStress` and `loadCases` are available through the Rust API, the native
 addon and the TypeScript SDK.
 
-`thermalExpansion` and `thermalGradient` cover member temperature actions
-only; they do not enable the `thermal` heat-transfer analysis, which remains
-unimplemented. `geometricNonlinear` is limited to truss models; the generic
-`nonlinear` entry (material nonlinearity, beam/frame large displacement)
-remains unimplemented. `tensionOnly` is likewise limited to truss members: it
-deactivates compressed cables, records the active set and iterations, and
-reports a mechanism when the slack topology cannot carry the load.
+`thermalExpansion` and `thermalGradient` cover member temperature actions and
+feed the structural solver only. `heat` is a separate, uncoupled steady-state
+conduction analysis: it reports temperatures and heat flows, never uses
+displacements, and supports **conduction along truss/beam axes only** (no
+convection, radiation or time stepping). `geometricNonlinear` is limited to
+truss models; the generic `nonlinear` entry (material nonlinearity,
+beam/frame large displacement) remains unimplemented. `tensionOnly` is
+likewise limited to truss members: it deactivates compressed cables, records
+the active set and iterations, and reports a mechanism when the slack topology
+cannot carry the load.
 
 HTML report and SVG shape export exist in the Rust API, the native addon and
 the TypeScript SDK; the `open-cae` CLI writes `csv`, `vtk`, `md` and `svg`
@@ -331,6 +334,23 @@ be finite and positive and a model without nodes is rejected with
     spent. The report contains `iterations`, `converged`, each cable's `active`
     state and axial force, and the final `solution`. A slack set that leaves a
     mechanism fails with `model/mechanism`.
+28. **Steady-state heat conduction**: `solve_heat(model)` (CLI `open-cae heat`,
+    SDK `document.heat()`) assembles one scalar temperature degree of freedom
+    per node with the 1D member matrix `k·A/L·[[1, −1], [−1, 1]]`, where `k` is
+    the material `conductivity` (`W/(m·K)`) and `A` is the element area
+    override or global area. Nodes with a finite `temperature` are Dirichlet
+    boundaries, other nodes are free, and a node `heat` flow (W, positive into
+    the node) loads the right-hand side. The same reduced dense solve as the
+    structural path is used. Element flux is `q = k·A·(T_from − T_to)/L`,
+    positive from `from` to `to`; a fixed node reports the boundary reaction
+    `K·T − Q`, so `Σreaction + Σapplied heat = 0`. The report is
+    `{format, version, analysis: "heat", units, temperatures, elementFlux,
+    reactions, residual, ok}` in model node/element order, with no timestamp.
+    Missing conductivity, non-finite heat, no fixed temperature, or an
+    unconstrained component report `material/invalid-conductivity`,
+    `load/invalid-heat`, `heat/no-fixed-temperature` or the same code for the
+    singular component. Units are never converted, so a millimetre document
+    must supply a length-consistent conductivity.
 
 ## Validation and tests
 
@@ -565,6 +585,21 @@ combinations:
   reference, `1e-6`) with a small final residual; beam models, zero
   increments/iterations and a non-positive tolerance are rejected.
 
+`tests/heat.rs` asserts steady-state conduction:
+
+- a single bar with `k = 50 W/(m·K)`, `A = 1e-4 m²`, `L = 1 m` and
+  `ΔT = 100 K` reports `q = 0.5 W` and reactions `±0.5 W` (`1e-12`);
+- two equal series bars halve the end-to-end `ΔT` at the free interface and
+  report the same flux in both members;
+- a nodal heat load on an otherwise adiabatic free end produces
+  `T = T_fixed − Q·L/(kA)`, and its boundary reaction balances the load;
+- an adiabatic free node reaches the fixed temperature with zero flux; missing
+  conductivity, non-finite heat, no fixed temperature and empty models report
+  the stable codes;
+- adding node temperature/heat fields leaves the structural solution
+  bit-for-bit unchanged, zero heat/absent temperature are omitted from JSON,
+  and two heat solves serialize identically without timestamps.
+
 `tests/tension_only.rs` asserts the cable active set:
 
 - a tensioned cable stays active with `N = 500 N` in a two-bar collinear
@@ -590,10 +625,10 @@ threshold of `1e-9`.
 - Static analysis is **linear elastic, small deformation**, with one
   deliberate exception: `geometricNonlinear` runs a large-displacement Newton
   iteration for **truss models only**. Material nonlinearity, beam/frame large
-  displacement, plasticity, dynamic time history, heat transfer, contact and
-  prestress are not supported. Prescribed displacements are supported as a
-  single static kinematic boundary condition, not as a time-dependent or
-  multi-step loading history.
+  displacement, plasticity, dynamic time history, contact and prestress are not
+  supported. Prescribed displacements are supported as a single static
+  kinematic boundary condition, not as a time-dependent or multi-step loading
+  history.
 - Construction stages solve each active topology **independently**: loads and
   gravity are scaled per stage, but internal forces are not locked into
   members that carry them onwards, so a true staged stress-history/creep
@@ -610,10 +645,13 @@ threshold of `1e-9`.
 - Loads are limited to **nodal concentrated forces/moments**, **element
   transverse loads that are uniform or linear along the member in the local
   `+y` direction** (optionally limited to part of the span), **uniform member
-  temperature changes** (axial expansion only) and a **through-depth
-  temperature gradient** (thermal bending). Heat transfer, arbitrary curved
-  distributed loads and loads in a global direction are not supported; load
-  combinations do not scale temperature changes.
+  temperature changes** (axial expansion only), a **through-depth
+  temperature gradient** (thermal bending), **fixed nodal temperatures** and
+  **concentrated nodal heat flows** (steady conduction only). Heat transfer
+  beyond axial conduction — convection, radiation, transient/time stepping,
+  contact conductance and coupled thermo-mechanical fields — is not supported,
+  and arbitrary curved distributed loads and loads in a global direction are
+  also not supported; load combinations do not scale temperature changes.
 - Load combinations only scale the **single applied load set and self-weight**;
   independent named load patterns (separate live-load cases) are not modelled,
   so a combination cannot mix two different nodal load layouts.
