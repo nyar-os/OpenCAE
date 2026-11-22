@@ -61,6 +61,7 @@ import type {
     NonlinearOptions,
     NonlinearSolution,
     OpenCAECapabilities,
+    AngleSectionGeometry,
     ChannelSectionGeometry,
     ISectionGeometry,
     PolygonPoint,
@@ -81,6 +82,7 @@ import type {
     SupportAddRequest,
     SupportReaction,
     SystemMatrices,
+    TSectionGeometry,
     TensionOnlyOptions,
     TensionOnlySolution,
     ValidationReport,
@@ -270,6 +272,20 @@ export function sectionTube(geometry: RectangularTubeGeometry, units: 'mm' | 'm'
 export function sectionChannel(geometry: ChannelSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
     return decode<StandardSectionReport>(() =>
         binding('section.channel').section_channel(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of an equal-thickness L section. */
+export function sectionAngle(geometry: AngleSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.angle').section_angle(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of a T-section. */
+export function sectionT(geometry: TSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.t').section_t(JSON.stringify({ ...geometry, units })),
     );
 }
 

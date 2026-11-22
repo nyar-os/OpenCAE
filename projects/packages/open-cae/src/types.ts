@@ -192,8 +192,8 @@ export interface PolygonSectionReport {
 }
 
 /**
- * Derived properties of a parametric standard section (I, rectangular tube or
- * channel).
+ * Derived properties of a parametric standard section (I, rectangular tube,
+ * channel, equal-thickness L or T).
  *
  * Coordinates use the lower-left corner of the bounding rectangle: `x` runs
  * across the width and `y` along the depth, and the second moments are taken
@@ -202,8 +202,8 @@ export interface PolygonSectionReport {
  * circular section.
  */
 export interface StandardSectionReport {
-    /** Shape identifier: `"i"`, `"tube"` or `"channel"`. */
-    readonly shape: 'i' | 'tube' | 'channel';
+    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"` or `"t"`. */
+    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't';
     /** Unit system the dimensions were interpreted in. */
     readonly units: Units;
     /** Cross-sectional area. */
@@ -258,6 +258,30 @@ export interface RectangularTubeGeometry {
  * thickness `tf`; `0 < tf < h/2` and `0 < tw < b` are required.
  */
 export interface ChannelSectionGeometry {
+    readonly height: number;
+    readonly width: number;
+    readonly webThickness: number;
+    readonly flangeThickness: number;
+}
+
+/**
+ * Geometry of an equal-thickness L (angle) section: total `height` `h`,
+ * horizontal leg `width` `w` and leg `thickness` `t`, with
+ * `0 < t < min(h, w)`. The `t × t` corner belongs to both legs and is counted
+ * once.
+ */
+export interface AngleSectionGeometry {
+    readonly height: number;
+    readonly width: number;
+    readonly thickness: number;
+}
+
+/**
+ * Geometry of a T-section whose flange is at the top: total `height` `h`,
+ * flange `width` `b`, `webThickness` `tw` and `flangeThickness` `tf`, with
+ * `0 < tf < h` and `0 < tw < b`.
+ */
+export interface TSectionGeometry {
     readonly height: number;
     readonly width: number;
     readonly webThickness: number;

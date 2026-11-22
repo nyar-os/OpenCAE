@@ -14,6 +14,7 @@ import { CaeDocument } from './document.js';
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
+    AngleSectionGeometry,
     ChannelSectionGeometry,
     CreateOptions,
     Dimension,
@@ -27,6 +28,7 @@ import type {
     Section,
     SectionReport,
     StandardSectionReport,
+    TSectionGeometry,
     Units,
 } from './types.js';
 
@@ -139,6 +141,34 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionChannel(geometry, units);
+    }
+
+    /**
+     * Derived properties of an equal-thickness L (angle) section. The `t × t`
+     * corner is counted once, so `area = t(width + height − t)`. Requires
+     * `0 < thickness < min(height, width)`.
+     */
+    async sectionAngle(
+        geometry: AngleSectionGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionAngle(geometry, units);
+    }
+
+    /**
+     * Derived properties of a T-section whose flange is at the top. The
+     * centroid `y` is measured from the bottom edge. Requires
+     * `0 < flangeThickness < height` and `0 < webThickness < width`.
+     */
+    async sectionT(
+        geometry: TSectionGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionT(geometry, units);
     }
 
     /** Creates an empty document at `path` and returns it. */

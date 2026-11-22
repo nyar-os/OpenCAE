@@ -506,8 +506,9 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
     })
 }
 
-/// Derived properties of a parametric standard section (I, rectangular tube or
-/// channel), reported with the same fields as [`PolygonSectionReport`].
+/// Derived properties of a parametric standard section (I, rectangular tube,
+/// channel, equal-thickness L or T), reported with the same fields as
+/// [`PolygonSectionReport`].
 ///
 /// Coordinates use the millimetre-style layout of the section: `x` runs across
 /// the width and `y` along the depth, with the origin at the lower-left corner
@@ -519,7 +520,7 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StandardSectionReport {
-    /// Shape identifier: `"i"`, `"tube"` or `"channel"`.
+    /// Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"` or `"t"`.
     pub shape: String,
     /// Unit system label (`mm` or `m`) the dimensions were interpreted in.
     pub units: String,
@@ -670,6 +671,100 @@ pub fn channel_standard_section_report(
         + (web_height * web_thickness.powi(3) / 12.0 + web_height * web_thickness * (centroid_x - web_thickness / 2.0).powi(2));
     let torsion = (2.0 * flange_width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
     Ok(standard_section_report("channel", units, area, centroid_x, height / 2.0, ix, iy, 0.0, torsion))
+}
+
+/// Computes the properties of an equal-thickness L (angle) section.
+///
+/// `height` is the total leg height `h`, `width` the horizontal leg length `w`
+/// and `thickness` the equal leg thickness `t`. The horizontal leg is `w × t`,
+/// the vertical leg is `t × h`, and their `t × t` corner is counted once, so
+/// `A = t(w + h − t)`. The origin is the outer corner at the lower left, which
+/// matches the I and channel reports.
+///
+/// The centroid follows from the first moments of the two legs about the
+/// origin; `Ix`, `Iy` and `Ixy` add the origin second moments and transfer them
+/// to the centroid with the parallel-axis theorem. The product of inertia is
+/// generally non-zero and follows the polygon sign convention `∫ x·y dA` about
+/// the centroid. `J` uses the thin-walled open approximation
+/// `(w·t³ + (h − t)·t³)/3`. The geometry requires `0 < t < min(h, w)`; invalid
+/// dimensions report `section/invalid-dimensions`.
+pub fn angle_section_report(height: f64, width: f64, thickness: f64, units: Units) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions("angle", &[("height", height), ("width", width), ("thickness", thickness)])?;
+    if thickness >= height.min(width) {
+        return Err(invalid_dimensions(format!(
+            "angle section thickness must be smaller than the height and the width (t={thickness}, h={height}, w={width})"
+        )));
+    }
+    let vertical_height = height - thickness;
+    let horizontal_area = width * thickness;
+    let vertical_area = thickness * vertical_height;
+    let area = horizontal_area + vertical_area;
+    let horizontal_x = width / 2.0;
+    let horizontal_y = thickness / 2.0;
+    let vertical_x = thickness / 2.0;
+    let vertical_y = thickness + vertical_height / 2.0;
+    let centroid_x = (horizontal_area * horizontal_x + vertical_area * vertical_x) / area;
+    let centroid_y = (horizontal_area * horizontal_y + vertical_area * vertical_y) / area;
+    let ix_origin = horizontal_area * thickness.powi(2) / 12.0
+        + horizontal_area * horizontal_y.powi(2)
+        + thickness * vertical_height.powi(3) / 12.0
+        + vertical_area * vertical_y.powi(2);
+    let iy_origin = thickness * width.powi(3) / 12.0
+        + horizontal_area * horizontal_x.powi(2)
+        + vertical_height * thickness.powi(3) / 12.0
+        + vertical_area * vertical_x.powi(2);
+    let ixy_origin = horizontal_area * horizontal_x * horizontal_y + vertical_area * vertical_x * vertical_y;
+    let ix = ix_origin - area * centroid_y.powi(2);
+    let iy = iy_origin - area * centroid_x.powi(2);
+    let ixy = ixy_origin - area * centroid_x * centroid_y;
+    let torsion = (width * thickness.powi(3) + vertical_height * thickness.powi(3)) / 3.0;
+    Ok(standard_section_report("angle", units, area, centroid_x, centroid_y, ix, iy, ixy, torsion))
+}
+
+/// Computes the properties of a T-section with the flange at the top.
+///
+/// `height` is the total depth `h`, `width` the flange width `b`, `web_thickness`
+/// the web thickness `tw` and `flange_thickness` the flange thickness `tf`.
+/// `A = b·tf + tw(h − tf)` and the centroid `y` is measured from the bottom
+/// edge; the section is symmetric about `x = b/2`.
+///
+/// `Ix` subtracts the two bottom corner rectangles from the bounding rectangle
+/// about the base, then transfers to the centroid; `Iy = tf·b³/12 +
+/// (h − tf)·tw³/12`; `Ixy = 0`. `J` uses the thin-walled open approximation
+/// `(b·tf³ + (h − tf)·tw³)/3`. The geometry requires `0 < tf < h` and
+/// `0 < tw < b`; invalid dimensions report `section/invalid-dimensions`.
+pub fn t_section_report(
+    height: f64,
+    width: f64,
+    web_thickness: f64,
+    flange_thickness: f64,
+    units: Units,
+) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions(
+        "t",
+        &[("height", height), ("width", width), ("webThickness", web_thickness), ("flangeThickness", flange_thickness)],
+    )?;
+    if flange_thickness >= height {
+        return Err(invalid_dimensions(format!(
+            "t section flange thickness must be smaller than the height (tf={flange_thickness}, h={height})"
+        )));
+    }
+    if web_thickness >= width {
+        return Err(invalid_dimensions(format!(
+            "t section web thickness must be smaller than the flange width (tw={web_thickness}, b={width})"
+        )));
+    }
+    let web_height = height - flange_thickness;
+    let flange_area = width * flange_thickness;
+    let web_area = web_thickness * web_height;
+    let area = flange_area + web_area;
+    let centroid_x = width / 2.0;
+    let centroid_y = (web_area * web_height / 2.0 + flange_area * (height - flange_thickness / 2.0)) / area;
+    let ix_base = (width * height.powi(3) - (width - web_thickness) * web_height.powi(3)) / 3.0;
+    let ix = ix_base - area * centroid_y.powi(2);
+    let iy = (flange_thickness * width.powi(3) + web_height * web_thickness.powi(3)) / 12.0;
+    let torsion = (width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+    Ok(standard_section_report("t", units, area, centroid_x, centroid_y, ix, iy, 0.0, torsion))
 }
 
 #[allow(clippy::too_many_arguments)]

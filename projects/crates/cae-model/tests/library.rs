@@ -5,9 +5,9 @@ use std::{
 };
 
 use cae_model::{
-    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, channel_standard_section_report,
-    i_standard_section_report, library_json, material_preset, polygon_section_report, section_report, solve,
-    tube_standard_section_report,
+    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, angle_section_report,
+    channel_standard_section_report, i_standard_section_report, library_json, material_preset, polygon_section_report,
+    section_report, solve, t_section_report, tube_standard_section_report,
 };
 
 const E: f64 = 210_000.0;
@@ -612,5 +612,181 @@ fn standard_sections_reject_invalid_dimensions() {
     ] {
         let error = result.expect_err("invalid channel dimensions");
         assert_eq!(error.code, "section/invalid-dimensions");
+    }
+}
+
+#[test]
+fn angle_section_matches_parallel_axis_formula_and_polygon() {
+    let height: f64 = 150.0;
+    let width: f64 = 100.0;
+    let thickness: f64 = 10.0;
+    let report = angle_section_report(height, width, thickness, Units::Millimeter).expect("angle section");
+
+    // Horizontal leg w × t and vertical leg t × (h − t); the t × t corner is
+    // counted once. Hand-evaluated: A = 2400, x̄ = 23.75, ȳ = 48.75.
+    let area = thickness * (width + height - thickness);
+    let centroid_x = (width * thickness * (width / 2.0) + thickness * (height - thickness) * (thickness / 2.0)) / area;
+    let centroid_y = (width * thickness * (thickness / 2.0)
+        + thickness * (height - thickness) * (thickness + (height - thickness) / 2.0))
+        / area;
+    let expected_ix = width * thickness.powi(3) / 12.0
+        + width * thickness * (thickness / 2.0).powi(2)
+        + thickness * (height - thickness).powi(3) / 12.0
+        + thickness * (height - thickness) * (height + thickness).powi(2) / 4.0
+        - area * centroid_y.powi(2);
+    let expected_iy = thickness * width.powi(3) / 12.0
+        + width * thickness * (width / 2.0).powi(2)
+        + (height - thickness) * thickness.powi(3) / 12.0
+        + thickness * (height - thickness) * (thickness / 2.0).powi(2)
+        - area * centroid_x.powi(2);
+    let expected_ixy = width * thickness * (width / 2.0) * (thickness / 2.0)
+        + thickness * (height - thickness) * (thickness / 2.0) * ((height + thickness) / 2.0)
+        - area * centroid_x * centroid_y;
+    let expected_torsion = (width * thickness.powi(3) + (height - thickness) * thickness.powi(3)) / 3.0;
+
+    assert_eq!(report.shape, "angle");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, 2400.0, 1e-12);
+    assert_close(report.centroid_x, 23.75, 1e-12);
+    assert_close(report.centroid_y, 48.75, 1e-12);
+    assert_close(report.ix, 5_576_250.0, 1e-12);
+    assert_close(report.iy, 2_026_250.0, 1e-12);
+    assert_close(report.ixy, -1_968_750.0, 1e-12);
+    assert_close(report.polar_moment, 80_000.0, 1e-12);
+    assert_close(report.radius_of_gyration_x, (report.ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (report.iy / area).sqrt(), 1e-12);
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, centroid_x, 1e-12);
+    assert_close(report.centroid_y, centroid_y, 1e-12);
+    assert_close(report.ix, expected_ix, 1e-12);
+    assert_close(report.iy, expected_iy, 1e-12);
+    assert_close(report.ixy, expected_ixy, 1e-12);
+    assert_close(report.polar_moment, expected_torsion, 1e-12);
+    assert!(report.ix > report.iy);
+    assert!(report.ixy < 0.0);
+
+    // The closed polygon of the same outline must agree to round-off.
+    let vertices = [(0.0, 0.0), (width, 0.0), (width, thickness), (thickness, thickness), (thickness, height), (0.0, height)];
+    let polygon = polygon_section_report(&vertices, Units::Millimeter).expect("angle polygon");
+    assert_close(polygon.area, report.area, 1e-12);
+    assert_close(polygon.centroid_x, report.centroid_x, 1e-12);
+    assert_close(polygon.centroid_y, report.centroid_y, 1e-12);
+    assert_close(polygon.ix, report.ix, 1e-12);
+    assert_close(polygon.iy, report.iy, 1e-12);
+    assert_close(polygon.ixy, report.ixy, 1e-12);
+}
+
+#[test]
+fn t_section_matches_rectangle_decomposition_and_polygon() {
+    let height: f64 = 100.0;
+    let width: f64 = 80.0;
+    let web_thickness: f64 = 6.0;
+    let flange_thickness: f64 = 10.0;
+    let report = t_section_report(height, width, web_thickness, flange_thickness, Units::Millimeter).expect("t section");
+
+    let web_height = height - flange_thickness;
+    let area = width * flange_thickness + web_thickness * web_height;
+    let centroid_y =
+        (web_thickness * web_height * (web_height / 2.0) + width * flange_thickness * (height - flange_thickness / 2.0)) / area;
+    let expected_ix = web_thickness * web_height.powi(3) / 12.0
+        + web_thickness * web_height * (web_height / 2.0 - centroid_y).powi(2)
+        + width * flange_thickness.powi(3) / 12.0
+        + width * flange_thickness * (height - flange_thickness / 2.0 - centroid_y).powi(2);
+    let expected_iy = flange_thickness * width.powi(3) / 12.0 + web_height * web_thickness.powi(3) / 12.0;
+    let expected_torsion = (width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
+
+    assert_eq!(report.shape, "t");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, 1340.0, 1e-12);
+    assert_close(report.centroid_x, width / 2.0, 1e-12);
+    assert_close(report.centroid_y, 5015.0 / 67.0, 1e-12);
+    assert_close(report.ix, expected_ix, 1e-12);
+    assert_close(report.iy, expected_iy, 1e-12);
+    assert_close(report.ixy, 0.0, 1e-12);
+    assert_close(report.polar_moment, expected_torsion, 1e-12);
+    assert_close(report.radius_of_gyration_x, (report.ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (report.iy / area).sqrt(), 1e-12);
+    assert_close(report.area, area, 1e-12);
+
+    // The closed polygon of the same outline must agree to round-off.
+    let half_web = web_thickness / 2.0;
+    let vertices = [
+        (0.0, web_height),
+        (0.0, height),
+        (width, height),
+        (width, web_height),
+        (width / 2.0 + half_web, web_height),
+        (width / 2.0 + half_web, 0.0),
+        (width / 2.0 - half_web, 0.0),
+        (width / 2.0 - half_web, web_height),
+    ];
+    let polygon = polygon_section_report(&vertices, Units::Millimeter).expect("t polygon");
+    assert_close(polygon.area, report.area, 1e-12);
+    assert_close(polygon.centroid_x, report.centroid_x, 1e-12);
+    assert_close(polygon.centroid_y, report.centroid_y, 1e-12);
+    assert_close(polygon.ix, report.ix, 1e-12);
+    assert_close(polygon.iy, report.iy, 1e-12);
+    assert!(polygon.ixy.abs() < 1e-9 * polygon.ix, "symmetric T-section product of inertia should vanish");
+}
+
+#[test]
+fn angle_and_t_sections_reject_invalid_dimensions() {
+    for result in [
+        angle_section_report(150.0, 100.0, 0.0, Units::Millimeter),
+        angle_section_report(150.0, 100.0, 100.0, Units::Millimeter),
+        angle_section_report(150.0, 100.0, 150.0, Units::Millimeter),
+        angle_section_report(0.0, 100.0, 10.0, Units::Millimeter),
+        angle_section_report(f64::NAN, 100.0, 10.0, Units::Millimeter),
+        angle_section_report(150.0, f64::INFINITY, 10.0, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid angle dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+
+    for result in [
+        t_section_report(100.0, 80.0, 0.0, 10.0, Units::Millimeter),
+        t_section_report(100.0, 80.0, 6.0, 0.0, Units::Millimeter),
+        t_section_report(100.0, 80.0, 80.0, 10.0, Units::Millimeter),
+        t_section_report(100.0, 80.0, 6.0, 100.0, Units::Millimeter),
+        t_section_report(0.0, 80.0, 6.0, 10.0, Units::Millimeter),
+        t_section_report(100.0, 80.0, f64::NAN, 10.0, Units::Millimeter),
+        t_section_report(100.0, f64::INFINITY, 6.0, 10.0, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid t-section dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+}
+
+#[test]
+fn angle_and_t_section_reports_are_deterministic_with_cli_field_names() {
+    let angle = angle_section_report(150.0, 100.0, 10.0, Units::Meter).expect("angle");
+    assert_eq!(angle, angle_section_report(150.0, 100.0, 10.0, Units::Meter).expect("angle"));
+    let tee = t_section_report(100.0, 80.0, 6.0, 10.0, Units::Meter).expect("t");
+    assert_eq!(tee, t_section_report(100.0, 80.0, 6.0, 10.0, Units::Meter).expect("t"));
+
+    for (report, shape) in [(&angle, "angle"), (&tee, "t")] {
+        let json = serde_json::to_value(report).expect("json");
+        let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "area",
+                "centroidX",
+                "centroidY",
+                "ix",
+                "ixy",
+                "iy",
+                "polarMoment",
+                "radiusOfGyrationX",
+                "radiusOfGyrationY",
+                "shape",
+                "units",
+            ]
+        );
+        assert_eq!(json["shape"], shape);
+        assert_eq!(json["units"], "m");
+        assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
+        assert!(json.get("centroid_x").is_none());
     }
 }

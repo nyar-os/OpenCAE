@@ -903,16 +903,22 @@ async function sectionCommand(args: readonly string[]): Promise<number> {
     if (action === 'channel') {
         return sectionChannelCommand(args.slice(1));
     }
+    if (action === 'angle') {
+        return sectionAngleCommand(args.slice(1));
+    }
+    if (action === 't') {
+        return sectionTCommand(args.slice(1));
+    }
     if (action === undefined) {
         throw failure('cli/missing-argument', 'missingSubcommand', {
             group: 'section',
-            expected: 'properties, polygon, i, tube or channel',
+            expected: 'properties, polygon, i, tube, channel, angle or t',
         });
     }
     throw failure('cli/unknown-command', 'unknownSubcommand', {
         group: 'section',
         action,
-        expected: 'properties, polygon, i, tube or channel',
+        expected: 'properties, polygon, i, tube, channel, angle or t',
     });
 }
 
@@ -1000,6 +1006,37 @@ async function sectionChannelCommand(args: readonly string[]): Promise<number> {
     };
     return withSession(async (session) => {
         const report = await session.sectionChannel(geometry, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionAngleCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--height', '--width', '--thickness'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const geometry = {
+        height: requiredNumber(parsed, '--height'),
+        width: requiredNumber(parsed, '--width'),
+        thickness: requiredNumber(parsed, '--thickness'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionAngle(geometry, units);
+        console.log(JSON.stringify(report, null, 2));
+        return 0;
+    });
+}
+
+async function sectionTCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(args, ['--units', '--height', '--width', '--web-thickness', '--flange-thickness'], []);
+    const units = unitsOption(parsed) ?? 'mm';
+    const geometry = {
+        height: requiredNumber(parsed, '--height'),
+        width: requiredNumber(parsed, '--width'),
+        webThickness: requiredNumber(parsed, '--web-thickness'),
+        flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+    };
+    return withSession(async (session) => {
+        const report = await session.sectionT(geometry, units);
         console.log(JSON.stringify(report, null, 2));
         return 0;
     });

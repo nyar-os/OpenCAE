@@ -43,7 +43,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
-| parametric standard sections (`standardSection`, I / rectangular tube / channel; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
+| parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -62,11 +62,13 @@ addon and the TypeScript SDK. Custom polygon section properties
 (`polygonSection`) are exposed as `polygon_section_report()` in Rust,
 `section_polygon` in the addon and `sectionPolygon()` in the SDK/CLI.
 Parametric standard sections (`standardSection`) are exposed as
-`i_standard_section_report()`, `tube_standard_section_report()` and
-`channel_standard_section_report()` in Rust, `section_i`, `section_tube` and
-`section_channel` in the addon and `sectionI()`, `sectionTube()` and
-`sectionChannel()` in the SDK, with CLI subcommands `section i`,
-`section tube` and `section channel`.
+`i_standard_section_report()`, `tube_standard_section_report()`,
+`channel_standard_section_report()`, `angle_section_report()` and
+`t_section_report()` in Rust, `section_i`, `section_tube`, `section_channel`,
+`section_angle` and `section_t` in the addon and `sectionI()`, `sectionTube()`,
+`sectionChannel()`, `sectionAngle()` and `sectionT()` in the SDK, with CLI
+subcommands `section i`, `section tube`, `section channel`, `section angle` and
+`section t`.
 Parametric element splitting is the `edits`
 entry `elementSplit` of the capability matrix and is available at the same
 three entry points plus the CLI (`open-cae element split`).
@@ -430,11 +432,13 @@ be finite and positive and a model without nodes is rejected with
     properties are not stored in documents and are not consumed by the beam
     solver (which still uses the global parametric `Section`).
 31. **Standard section properties**: `i_standard_section_report(h, b, tw, tf)`,
-    `tube_standard_section_report(h, b, t)` and
-    `channel_standard_section_report(h, b, tw, tf)` (CLI `open-cae section i`,
-    `section tube` and `section channel`, SDK `sectionI()`, `sectionTube()` and
-    `sectionChannel()`) compute area, centroid, centroidal second moments,
-    torsion constant and radii of gyration directly from the dimensions. The
+    `tube_standard_section_report(h, b, t)`,
+    `channel_standard_section_report(h, b, tw, tf)`, `angle_section_report(h,
+    w, t)` and `t_section_report(h, b, tw, tf)` (CLI `open-cae section i`,
+    `section tube`, `section channel`, `section angle` and `section t`, SDK
+    `sectionI()`, `sectionTube()`, `sectionChannel()`, `sectionAngle()` and
+    `sectionT()`) compute area, centroid, centroidal second moments, torsion
+    constant and radii of gyration directly from the dimensions. The
     coordinates put the origin at the lower-left corner of the bounding
     rectangle, so `x` runs across the width and `y` along the depth.
     - I-section: `A = 2btf + (h − 2tf)tw`,
@@ -450,11 +454,25 @@ be finite and positive and a model without nodes is rejected with
       the I-section, `Ix` and `Iy` from the parallel-axis theorem about the
       centroid `x̄ = (2b·tf·(b/2) + (h − 2tf)tw·(tw/2))/A` (so `x̄ ≠ b/2`), and
       the same open-section `J`.
+    - Equal-thickness L (angle) with the outer corner at the origin: a `w × t`
+      horizontal leg plus a `t × (h − t)` vertical leg, so
+      `A = t(w + h − t)` counts the `t × t` corner once. The centroid follows
+      from the first moments about the origin, `Ix`, `Iy` and `Ixy` add the
+      origin second moments and transfer them to the centroid, and
+      `J = (w·t³ + (h − t)·t³)/3`. `Ixy` is generally non-zero and follows the
+      polygon sign convention `∫ x·y dA` about the centroid.
+    - T-section with the flange at the top and the web centred: `A = b·tf +
+      tw(h − tf)`, the centroid `y` is measured from the bottom edge,
+      `Ix = (b·h³ − (b − tw)(h − tf)³)/3 − A·ȳ²` (bounding rectangle minus the
+      two bottom corner rectangles about the base, then transferred to the
+      centroid), `Iy = tf·b³/12 + (h − tf)·tw³/12`, `Ixy = 0` and
+      `J = (b·tf³ + (h − tf)·tw³)/3`.
     The report uses the field names of the polygon report (`centroidX`,
     `centroidY`, `ix`, `iy`, `ixy`, `polarMoment`, `radiusOfGyrationX`,
     `radiusOfGyrationY`); `polarMoment` holds `J`, which is not `Ix + Iy` for
     these sections. Dimensions must satisfy `0 < tf < h/2` and `0 < tw < b`
-    (I and channel) or `0 < t < min(b, h)/2` (tube); violations report
+    (I and channel), `0 < t < min(b, h)/2` (tube), `0 < t < min(h, w)` (angle)
+    or `0 < tf < h` and `0 < tw < b` (T); violations report
     `section/invalid-dimensions`. Results are deterministic and, like the
     polygon calculator, are not stored in documents or consumed by the beam
     solver.
@@ -611,14 +629,22 @@ stable codes.
   identical polygon reports, while fewer than three vertices, collinear
   (zero-area) lists, self-intersecting outlines and non-finite coordinates
   report the stable `section/polygon-*` codes;
-- the standard I, rectangular-tube and channel calculators reproduce
-  `Ix = (b·h³ − (b − tw)(h − 2tf)³)/12`, the tube hollow-subtraction formulas,
-  the parallel-axis channel `Iy`, the centroid positions (including the
-  non-zero channel `x̄ = 1681/67 mm` for `200 × 80 × 10 × 6`) and the
-  open-section torsion constants (`1e-12`), and agree with the parametric
-  channel section;
-- invalid flange, web and wall thicknesses report
-  `section/invalid-dimensions`, and repeated calls return identical reports;
+- the standard I, rectangular-tube, channel, L (angle) and T calculators
+  reproduce `Ix = (b·h³ − (b − tw)(h − 2tf)³)/12`, the tube
+  hollow-subtraction formulas, the parallel-axis channel `Iy`, the
+  centroid positions (including the non-zero channel `x̄ = 1681/67 mm` for
+  `200 × 80 × 10 × 6`) and the open-section torsion constants (`1e-12`), and
+  agree with the parametric channel section;
+- the L section reproduces `A = t(w + h − t)`, `A = 2400`, `x̄ = 23.75`,
+  `ȳ = 48.75`, `Ix = 5 576 250`, `Iy = 2 026 250`, `Ixy = −1 968 750` and
+  `J = 80 000` for `h = 150, w = 100, t = 10`, and its closed polygon agrees
+  with all four second moments (`1e-12`);
+- the T section reproduces `A = b·tf + tw(h − tf)`, `ȳ = 5015/67 mm` from the
+  bottom for `100 × 80 × 6 × 10`, a rectangle-decomposed `Ix`, the symmetric
+  `Iy`, `Ixy = 0` and `J`, and its closed polygon agrees within `1e-12`;
+- invalid flange, web, leg and wall thicknesses report
+  `section/invalid-dimensions`, and repeated calls return identical reports
+  with the documented CLI/SDK field names;
 - presets convert between `mm` (`210000 MPa`, `7.85e-9 t/mm³`) and `m`
   (`2.1e11 Pa`, `7850 kg/m³`);
 - a cantilever beam that omits `inertia` uses the stored section and
