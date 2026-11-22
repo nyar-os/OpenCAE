@@ -13,8 +13,9 @@ use std::{
 
 use cae_model::{
     CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination,
-    SpectrumPoint, Units, angle_section_report, channel_standard_section_report, i_standard_section_report, not_implemented,
-    polygon_section_report, section_report, t_section_report, tube_standard_section_report,
+    SpectrumPoint, Units, angle_section_report, channel_standard_section_report, ellipse_section_report,
+    i_standard_section_report, not_implemented, polygon_section_report, section_report, t_section_report,
+    tube_standard_section_report,
 };
 
 const USAGE: &str = "\
@@ -55,6 +56,7 @@ Usage:
   ocae section channel --height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm|m]
   ocae section angle --height <h> --width <w> --thickness <t> [--units mm|m]
   ocae section t --height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm|m]
+  ocae section ellipse --width <w> --height <h> [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
@@ -681,15 +683,16 @@ fn section_command(args: &[String]) -> Result<i32, CaeError> {
         Some("channel") => section_channel(&args[1..]),
         Some("angle") => section_angle(&args[1..]),
         Some("t") => section_t(&args[1..]),
+        Some("ellipse") => section_ellipse(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `section` does not exist; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle` or `t` is supported"
+                "subcommand `{other}` of `section` does not exist; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle`, `t` or `ellipse` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`section` is missing a subcommand; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle` or `t` is supported",
+            "`section` is missing a subcommand; only `properties`, `polygon`, `i`, `tube`, `channel`, `angle`, `t` or `ellipse` is supported",
         )),
     }
 }
@@ -819,6 +822,17 @@ fn section_t(args: &[String]) -> Result<i32, CaeError> {
         required_number(&parsed, "--flange-thickness")?,
         units,
     )?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+    Ok(0)
+}
+
+fn section_ellipse(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--units", "--width", "--height"], &[])?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let report = ellipse_section_report(required_number(&parsed, "--width")?, required_number(&parsed, "--height")?, units)?;
     println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
     Ok(0)
 }
@@ -1512,10 +1526,12 @@ fn parse(args: &[String], value_options: &[&str], flag_options: &[&str]) -> Resu
                 }
                 parsed.options.insert(argument.clone(), value.clone());
                 index += 2;
-            } else {
+            }
+            else {
                 return Err(CaeError::new("cli/unknown-option", format!("unknown option `{argument}`")));
             }
-        } else {
+        }
+        else {
             parsed.positionals.push(argument.clone());
             index += 1;
         }

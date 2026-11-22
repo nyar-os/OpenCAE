@@ -42,6 +42,7 @@ export interface NativeBinding {
     section_channel(requestJson: string): string;
     section_angle(requestJson: string): string;
     section_t(requestJson: string): string;
+    section_ellipse(requestJson: string): string;
     support_add(path: string, requestJson: string): string;
     support_remove(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;

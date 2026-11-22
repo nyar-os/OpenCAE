@@ -17,7 +17,7 @@ use std::path::Path;
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, ExportOptions, Material, OpenCae, OpenCaeOptions,
     Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
-    i_standard_section_report, library_json, polygon_section_report, section_report, t_section_report,
+    ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, section_report, t_section_report,
     tube_standard_section_report,
 };
 use serde::Serialize;
@@ -647,6 +647,25 @@ fn section_t(ctx: CallContext) -> Result<JsValue> {
         units,
     )
     .map_err(fail)?;
+    respond(&ctx, &report)
+}
+
+/// Reports area, centroid, second moments and torsion constant of a solid
+/// ellipse.
+///
+/// The request accepts `width` (`w`), `height` (`h`) and an optional `units`
+/// value (`mm` or `m`, default `mm`). The semi-axes are `w/2` and `h/2`, so
+/// `A = πwh/4`, `Ix = πwh³/64`, `Iy = πw³h/64` and the centroid is
+/// `(w/2, h/2)`. `polarMoment` holds the Saint-Venant torsion constant
+/// `πa³b³/(a² + b²)`, not `Ix + Iy`. Both dimensions must be positive and
+/// finite.
+#[function]
+fn section_ellipse(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let units = request_units(&request)?;
+    let report =
+        ellipse_section_report(required_number_field(&request, "width")?, required_number_field(&request, "height")?, units)
+            .map_err(fail)?;
     respond(&ctx, &report)
 }
 
@@ -1289,6 +1308,7 @@ register_module![
     section_channel,
     section_angle,
     section_t,
+    section_ellipse,
     support_add,
     support_remove,
     load_add,

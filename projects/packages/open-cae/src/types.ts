@@ -193,7 +193,7 @@ export interface PolygonSectionReport {
 
 /**
  * Derived properties of a parametric standard section (I, rectangular tube,
- * channel, equal-thickness L or T).
+ * channel, equal-thickness L, T or solid ellipse).
  *
  * Coordinates use the lower-left corner of the bounding rectangle: `x` runs
  * across the width and `y` along the depth, and the second moments are taken
@@ -202,8 +202,8 @@ export interface PolygonSectionReport {
  * circular section.
  */
 export interface StandardSectionReport {
-    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"` or `"t"`. */
-    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't';
+    /** Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"` or `"ellipse"`. */
+    readonly shape: 'i' | 'tube' | 'channel' | 'angle' | 't' | 'ellipse';
     /** Unit system the dimensions were interpreted in. */
     readonly units: Units;
     /** Cross-sectional area. */
@@ -286,6 +286,17 @@ export interface TSectionGeometry {
     readonly width: number;
     readonly webThickness: number;
     readonly flangeThickness: number;
+}
+
+/**
+ * Geometry of a solid ellipse: full extent `width` `w` along `x` and full
+ * extent `height` `h` along `y`, with `w > 0` and `h > 0`. The semi-axes are
+ * `a = w/2` and `b = h/2`, and the centroid is `(a, b)` from the lower-left
+ * corner of the bounding rectangle.
+ */
+export interface EllipseSectionGeometry {
+    readonly width: number;
+    readonly height: number;
 }
 
 /** Request of `applyMaterialPreset()`. */

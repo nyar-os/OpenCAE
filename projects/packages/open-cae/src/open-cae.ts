@@ -18,6 +18,7 @@ import type {
     ChannelSectionGeometry,
     CreateOptions,
     Dimension,
+    EllipseSectionGeometry,
     ISectionGeometry,
     MaterialLibrary,
     OpenCAECapabilities,
@@ -169,6 +170,21 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.sectionT(geometry, units);
+    }
+
+    /**
+     * Derived properties of a solid ellipse. The semi-axes are `width/2` and
+     * `height/2`, the centroid is `(width/2, height/2)` and `Ixy = 0`.
+     * `polarMoment` carries the torsion constant `πa³b³/(a² + b²)`, not
+     * `Ix + Iy`. Requires positive, finite `width` and `height`.
+     */
+    async sectionEllipse(
+        geometry: EllipseSectionGeometry,
+        units: Units = this.units,
+    ): Promise<StandardSectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionEllipse(geometry, units);
     }
 
     /** Creates an empty document at `path` and returns it. */

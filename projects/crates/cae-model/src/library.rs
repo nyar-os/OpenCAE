@@ -507,8 +507,8 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 }
 
 /// Derived properties of a parametric standard section (I, rectangular tube,
-/// channel, equal-thickness L or T), reported with the same fields as
-/// [`PolygonSectionReport`].
+/// channel, equal-thickness L, T or solid ellipse), reported with the same
+/// fields as [`PolygonSectionReport`].
 ///
 /// Coordinates use the millimetre-style layout of the section: `x` runs across
 /// the width and `y` along the depth, with the origin at the lower-left corner
@@ -520,7 +520,8 @@ pub fn polygon_section_report(vertices: &[(f64, f64)], units: Units) -> Result<P
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StandardSectionReport {
-    /// Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"` or `"t"`.
+    /// Shape identifier: `"i"`, `"tube"`, `"channel"`, `"angle"`, `"t"` or
+    /// `"ellipse"`.
     pub shape: String,
     /// Unit system label (`mm` or `m`) the dimensions were interpreted in.
     pub units: String,
@@ -536,7 +537,8 @@ pub struct StandardSectionReport {
     pub iy: f64,
     /// Product of inertia about the centroidal axes.
     pub ixy: f64,
-    /// Saint-Venant torsion constant `J` (thin-walled approximation).
+    /// Saint-Venant torsion constant `J`; the open sections use the thin-walled
+    /// approximation while the solid ellipse is exact.
     pub polar_moment: f64,
     /// Radius of gyration about the centroidal `x` axis, `sqrt(Ix / A)`.
     pub radius_of_gyration_x: f64,
@@ -765,6 +767,31 @@ pub fn t_section_report(
     let iy = (flange_thickness * width.powi(3) + web_height * web_thickness.powi(3)) / 12.0;
     let torsion = (width * flange_thickness.powi(3) + web_height * web_thickness.powi(3)) / 3.0;
     Ok(standard_section_report("t", units, area, centroid_x, centroid_y, ix, iy, 0.0, torsion))
+}
+
+/// Computes the properties of a solid ellipse.
+///
+/// `width` is the full extent along `x` and `height` the full extent along `y`,
+/// so the semi-axes are `a = width/2` and `b = height/2`. The centroid is
+/// `(a, b)` from the lower-left corner of the bounding rectangle, matching the
+/// other standard section reports.
+///
+/// `A = π·a·b`, `Ix = π·a·b³/4`, `Iy = π·a³·b/4`, `Ixy = 0` and the radii of
+/// gyration are `sqrt(I/A)`. As for the other standard sections, `polar_moment`
+/// holds the Saint-Venant torsion constant **not** the polar second moment:
+/// `J = π·a³·b³/(a² + b²)`, which equals `Ix + Iy` only when `a = b` (a
+/// circular section). The geometry requires positive finite `width` and
+/// `height`; invalid dimensions report `section/invalid-dimensions`.
+pub fn ellipse_section_report(width: f64, height: f64, units: Units) -> Result<StandardSectionReport, CaeError> {
+    validate_standard_dimensions("ellipse", &[("width", width), ("height", height)])?;
+    let a = width / 2.0;
+    let b = height / 2.0;
+    let pi = std::f64::consts::PI;
+    let area = pi * a * b;
+    let ix = pi * a * b.powi(3) / 4.0;
+    let iy = pi * a.powi(3) * b / 4.0;
+    let torsion = pi * a.powi(3) * b.powi(3) / (a.powi(2) + b.powi(2));
+    Ok(standard_section_report("ellipse", units, area, a, b, ix, iy, 0.0, torsion))
 }
 
 #[allow(clippy::too_many_arguments)]

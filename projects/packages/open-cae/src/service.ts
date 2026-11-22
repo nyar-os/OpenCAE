@@ -63,6 +63,7 @@ import type {
     OpenCAECapabilities,
     AngleSectionGeometry,
     ChannelSectionGeometry,
+    EllipseSectionGeometry,
     ISectionGeometry,
     PolygonPoint,
     PolygonSectionReport,
@@ -286,6 +287,13 @@ export function sectionAngle(geometry: AngleSectionGeometry, units: 'mm' | 'm'):
 export function sectionT(geometry: TSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
     return decode<StandardSectionReport>(() =>
         binding('section.t').section_t(JSON.stringify({ ...geometry, units })),
+    );
+}
+
+/** Reports area, centroid, second moments and torsion constant of a solid ellipse. */
+export function sectionEllipse(geometry: EllipseSectionGeometry, units: 'mm' | 'm'): StandardSectionReport {
+    return decode<StandardSectionReport>(() =>
+        binding('section.ellipse').section_ellipse(JSON.stringify({ ...geometry, units })),
     );
 }
 

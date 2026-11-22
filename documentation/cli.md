@@ -73,15 +73,17 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | `open-cae section channel` | `--height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm\|m]` | Open channel with the opening facing right: area, centroid, `Ix`/`Iy`/`Ixy`, torsion constant `J` and radii of gyration. The centroid `x` is measured from the web face and is not `b/2`. |
 | `open-cae section angle` | `--height <h> --width <w> --thickness <t> [--units mm\|m]` | Equal-thickness L (angle): area, centroid, `Ix`/`Iy`/`Ixy`, torsion constant `J` and radii of gyration. The outer corner is the origin, the `t × t` corner is counted once, and `Ixy` is generally non-zero. Requires `0 < t < min(h, w)`. |
 | `open-cae section t` | `--height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm\|m]` | T-section with the flange at the top: area, centroid, `Ix`/`Iy`/`Ixy = 0`, torsion constant `J` and radii of gyration. The centroid `y` is measured from the bottom edge. Requires `0 < tf < h` and `0 < tw < b`. |
+| `open-cae section ellipse` | `--width <w> --height <h> [--units mm\|m]` | Solid ellipse with semi-axes `a = w/2` and `b = h/2`: area `πab`, centroid `(a, b)`, `Ix = πab³/4`, `Iy = πa³b/4`, `Ixy = 0`, exact torsion constant `J = πa³b³/(a² + b²)` and radii of gyration `b/2`, `a/2`. Requires positive, finite `w` and `h`; invalid dimensions report `section/invalid-dimensions`. |
 
-`section i`, `section tube`, `section channel`, `section angle` and `section t` print the same field names
+`section i`, `section tube`, `section channel`, `section angle`, `section t` and
+`section ellipse` print the same field names
 as `section polygon` (`area`, `centroidX`, `centroidY`, `ix`, `iy`, `ixy`,
 `polarMoment`, `radiusOfGyrationX`, `radiusOfGyrationY`), but `polarMoment`
 holds the Saint-Venant torsion constant `J`, not `Ix + Iy`. The coordinates
 place the origin at the lower-left corner of the bounding rectangle. Note that
 `section tube` is the rectangular tube, whereas `--section tube` in
 `section properties` and `material preset` remains the circular hollow section
-with `--outer-diameter`/`--inner-diameter`. The L and T calculators are
+with `--outer-diameter`/`--inner-diameter`. The L, T and ellipse calculators are
 standalone properties reports: they are not `Section` tags stored in documents.
 
 Section shapes and their geometry flags:

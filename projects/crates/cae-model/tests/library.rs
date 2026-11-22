@@ -6,8 +6,8 @@ use std::{
 
 use cae_model::{
     ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, angle_section_report,
-    channel_standard_section_report, i_standard_section_report, library_json, material_preset, polygon_section_report,
-    section_report, solve, t_section_report, tube_standard_section_report,
+    channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json, material_preset,
+    polygon_section_report, section_report, solve, t_section_report, tube_standard_section_report,
 };
 
 const E: f64 = 210_000.0;
@@ -755,6 +755,106 @@ fn angle_and_t_sections_reject_invalid_dimensions() {
         let error = result.expect_err("invalid t-section dimensions");
         assert_eq!(error.code, "section/invalid-dimensions");
     }
+}
+
+#[test]
+fn ellipse_section_matches_closed_form_and_inscribed_polygon() {
+    let width: f64 = 100.0;
+    let height: f64 = 50.0;
+    let report = ellipse_section_report(width, height, Units::Millimeter).expect("ellipse section");
+
+    let a = width / 2.0;
+    let b = height / 2.0;
+    let pi = std::f64::consts::PI;
+    let area = pi * a * b;
+    let ix = pi * a * b.powi(3) / 4.0;
+    let iy = pi * a.powi(3) * b / 4.0;
+    let torsion = pi * a.powi(3) * b.powi(3) / (a.powi(2) + b.powi(2));
+
+    assert_eq!(report.shape, "ellipse");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, area, 1e-12);
+    assert_close(report.centroid_x, a, 1e-12);
+    assert_close(report.centroid_y, b, 1e-12);
+    assert_close(report.ix, ix, 1e-12);
+    assert_close(report.iy, iy, 1e-12);
+    assert_close(report.ixy, 0.0, 1e-12);
+    // `polarMoment` carries the exact solid-ellipse torsion constant J, which
+    // is not Ix + Iy for a non-circular ellipse.
+    assert_close(report.polar_moment, torsion, 1e-12);
+    assert!((report.polar_moment - (ix + iy)).abs() > 1e-3 * torsion);
+    assert_close(report.radius_of_gyration_x, b / 2.0, 1e-12);
+    assert_close(report.radius_of_gyration_y, a / 2.0, 1e-12);
+    assert_close(report.radius_of_gyration_x, (ix / area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_y, (iy / area).sqrt(), 1e-12);
+
+    // A circular ellipse reduces to the circle, where J does equal Ix + Iy.
+    let circle = ellipse_section_report(20.0, 20.0, Units::Millimeter).expect("circular ellipse");
+    assert_close(circle.ix, circle.iy, 1e-12);
+    assert_close(circle.polar_moment, circle.ix + circle.iy, 1e-12);
+
+    // Cross-check against a 256-edge inscribed ellipse polygon. The area and
+    // inertias of an inscribed polygon converge from below with a relative
+    // error of order `1/n²`, so a 1e-3 tolerance absorbs the discretisation.
+    let edges = 256;
+    let vertices: Vec<(f64, f64)> = (0..edges)
+        .map(|index| {
+            let angle = 2.0 * pi * index as f64 / edges as f64;
+            (a * (1.0 + angle.cos()), b * (1.0 + angle.sin()))
+        })
+        .collect();
+    let polygon = polygon_section_report(&vertices, Units::Millimeter).expect("inscribed ellipse polygon");
+    assert_close(polygon.area, area, 1e-3);
+    assert_close(polygon.ix, ix, 1e-3);
+    assert_close(polygon.iy, iy, 1e-3);
+    assert_close(polygon.centroid_x, a, 1e-3);
+    assert_close(polygon.centroid_y, b, 1e-3);
+}
+
+#[test]
+fn ellipse_section_rejects_invalid_dimensions() {
+    for result in [
+        ellipse_section_report(0.0, 50.0, Units::Millimeter),
+        ellipse_section_report(100.0, 0.0, Units::Millimeter),
+        ellipse_section_report(-100.0, 50.0, Units::Millimeter),
+        ellipse_section_report(100.0, -50.0, Units::Millimeter),
+        ellipse_section_report(f64::NAN, 50.0, Units::Millimeter),
+        ellipse_section_report(100.0, f64::INFINITY, Units::Millimeter),
+    ] {
+        let error = result.expect_err("invalid ellipse dimensions");
+        assert_eq!(error.code, "section/invalid-dimensions");
+    }
+}
+
+#[test]
+fn ellipse_section_report_is_deterministic_with_cli_field_names() {
+    let first = ellipse_section_report(100.0, 50.0, Units::Meter).expect("ellipse");
+    let second = ellipse_section_report(100.0, 50.0, Units::Meter).expect("ellipse");
+    assert_eq!(first, second);
+
+    let json = serde_json::to_value(&first).expect("json");
+    let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "area",
+            "centroidX",
+            "centroidY",
+            "ix",
+            "ixy",
+            "iy",
+            "polarMoment",
+            "radiusOfGyrationX",
+            "radiusOfGyrationY",
+            "shape",
+            "units",
+        ]
+    );
+    assert_eq!(json["shape"], "ellipse");
+    assert_eq!(json["units"], "m");
+    assert!(json["polarMoment"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json.get("centroid_x").is_none());
 }
 
 #[test]

@@ -35,6 +35,7 @@
             "  ocae section channel --height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm|m]",
             "  ocae section angle --height <h> --width <w> --thickness <t> [--units mm|m]",
             "  ocae section t --height <h> --width <b> --web-thickness <tw> --flange-thickness <tf> [--units mm|m]",
+            "  ocae section ellipse --width <w> --height <h> [--units mm|m]",
             "  ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]",
             "                    [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]",
             "                    [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]",
