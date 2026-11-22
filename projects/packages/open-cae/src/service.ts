@@ -51,6 +51,8 @@ import type {
     Report,
     ReactionOptions,
     ReactionSummary,
+    Section,
+    SectionReport,
     ResponseSpectrumOptions,
     ResponseSpectrumSolution,
     Solution,
@@ -166,6 +168,13 @@ export function materialPreset(path: string, request: MaterialPresetRequest): Do
 /** Reads the built-in material and section library in the requested units. */
 export function library(units: 'mm' | 'm'): MaterialLibrary {
     return decode<MaterialLibrary>(() => binding('library').library(JSON.stringify({ units })));
+}
+
+/** Reports derived properties of a parametric section. */
+export function sectionProperties(section: Section, units: 'mm' | 'm'): SectionReport {
+    return decode<SectionReport>(() =>
+        binding('section.properties').section_properties(JSON.stringify({ section, units })),
+    );
 }
 
 /** Adds or merges a support entry and returns the updated summary. */

@@ -13,7 +13,16 @@
 import { CaeDocument } from './document.js';
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
-import type { CreateOptions, Dimension, MaterialLibrary, OpenCAECapabilities, OpenCAEOptions, Units } from './types.js';
+import type {
+    CreateOptions,
+    Dimension,
+    MaterialLibrary,
+    OpenCAECapabilities,
+    OpenCAEOptions,
+    Section,
+    SectionReport,
+    Units,
+} from './types.js';
 
 /** Analysis session. One instance owns the documents it opens. */
 export class OpenCAE {
@@ -64,6 +73,17 @@ export class OpenCAE {
         this.assertActive();
         assertUnits(units);
         return service.library(units);
+    }
+
+    /**
+     * Derived properties of one parametric section: area, inertias, torsion
+     * constant, extreme fibre, section modulus and radii of gyration.
+     * `units` labels the unit system the dimensions were supplied in.
+     */
+    async sectionProperties(section: Section, units: Units = this.units): Promise<SectionReport> {
+        this.assertActive();
+        assertUnits(units);
+        return service.sectionProperties(section, units);
     }
 
     /** Creates an empty document at `path` and returns it. */

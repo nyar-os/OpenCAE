@@ -191,6 +191,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return materialCommand(args.slice(1));
         case 'library':
             return libraryCommand(args.slice(1));
+        case 'section':
+            return sectionCommand(args.slice(1));
         case 'support':
             return supportCommand(args.slice(1));
         case 'load':
@@ -674,6 +676,48 @@ async function libraryCommand(args: readonly string[]): Promise<number> {
     return withSession(async (session) => {
         const library = await session.library(units);
         console.log(JSON.stringify(library, null, 2));
+        return 0;
+    });
+}
+
+async function sectionCommand(args: readonly string[]): Promise<number> {
+    const action = args[0];
+    if (action === 'properties') {
+        return sectionPropertiesCommand(args.slice(1));
+    }
+    if (action === undefined) {
+        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'section', expected: 'properties' });
+    }
+    throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'section', action, expected: 'properties' });
+}
+
+async function sectionPropertiesCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(
+        args,
+        [
+            '--units',
+            '--section',
+            '--width',
+            '--height',
+            '--diameter',
+            '--depth',
+            '--flange-width',
+            '--flange-thickness',
+            '--web-thickness',
+            '--wall',
+            '--outer-diameter',
+            '--inner-diameter',
+        ],
+        [],
+    );
+    const units = unitsOption(parsed) ?? 'mm';
+    const section = sectionOption(parsed);
+    if (section === undefined) {
+        throw failure('cli/missing-option', 'missingSection', {});
+    }
+    return withSession(async (session) => {
+        const report = await session.sectionProperties(section, units);
+        console.log(JSON.stringify(report, null, 2));
         return 0;
     });
 }

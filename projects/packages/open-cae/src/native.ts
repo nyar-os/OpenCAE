@@ -26,6 +26,7 @@ export interface NativeBinding {
     material_set(path: string, requestJson: string): string;
     material_preset(path: string, requestJson: string): string;
     library(requestJson?: string): string;
+    section_properties(requestJson: string): string;
     support_add(path: string, requestJson: string): string;
     support_remove(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;

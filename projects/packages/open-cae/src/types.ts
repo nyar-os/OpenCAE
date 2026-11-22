@@ -115,6 +115,30 @@ export interface MaterialLibrary {
     readonly sections: readonly SectionShape[];
 }
 
+/** Derived properties of one parametric section. */
+export interface SectionReport {
+    /** Shape identifier, matching the `shape` tag of the section. */
+    readonly shape: Section['shape'];
+    /** Unit system the dimensions were interpreted in. */
+    readonly units: Units;
+    /** Cross-sectional area. */
+    readonly area: number;
+    /** Second moment of area about the strong (bending) axis. */
+    readonly inertiaStrong: number;
+    /** Second moment of area about the weak axis. */
+    readonly inertiaWeak: number;
+    /** Saint-Venant torsion constant. */
+    readonly torsionConstant: number;
+    /** Distance from the neutral axis to the extreme fibre. */
+    readonly extremeFiber: number;
+    /** Elastic section modulus `I_strong / c`. */
+    readonly sectionModulus: number;
+    /** Radius of gyration about the strong axis, `sqrt(I_strong / A)`. */
+    readonly radiusOfGyrationStrong: number;
+    /** Radius of gyration about the weak axis, `sqrt(I_weak / A)`. */
+    readonly radiusOfGyrationWeak: number;
+}
+
 /** Request of `applyMaterialPreset()`. */
 export interface MaterialPresetRequest {
     /** Built-in preset name, for example `steel` or `aluminum`. */

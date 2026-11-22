@@ -16,7 +16,7 @@ use std::path::Path;
 
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section,
-    SpectrumPoint, Units, library_json,
+    SpectrumPoint, Units, library_json, section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -334,6 +334,24 @@ fn library(ctx: CallContext) -> Result<JsValue> {
     };
     let text = library_json(units).map_err(fail)?;
     ctx.env().string(&text)
+}
+
+/// Reports derived properties of a parametric section.
+///
+/// The request accepts a required `section` object and an optional `units`
+/// (`mm` or `m`, default `mm`). The reply includes the area, strong/weak
+/// inertias, torsion constant, extreme fibre, section modulus and both radii of
+/// gyration.
+#[function]
+fn section_properties(ctx: CallContext) -> Result<JsValue> {
+    let request = object(&ctx, 0)?;
+    let section = section_field(&request)?.ok_or_else(|| argument_error("`section` is required"))?;
+    let units = match request.get("units").and_then(Value::as_str) {
+        Some(raw) => raw.parse::<Units>().map_err(fail)?,
+        None => Units::Millimeter,
+    };
+    let report = section_report(section, units).map_err(fail)?;
+    respond(&ctx, &report)
 }
 
 fn section_field(request: &Value) -> Result<Option<Section>> {
@@ -874,6 +892,7 @@ register_module![
     material_set,
     material_preset,
     library,
+    section_properties,
     support_add,
     support_remove,
     load_add,

@@ -13,7 +13,7 @@ use std::{
 
 use cae_model::{
     CaeError, ElementKind, EndRelease, ExportFormat, Material, OpenCae, OpenCaeOptions, Section, SpectrumPoint, Units,
-    not_implemented,
+    not_implemented, section_report,
 };
 
 const USAGE: &str = "\
@@ -38,6 +38,7 @@ Usage:
                         [--wall <t>] [--outer-diameter <D>] [--inner-diameter <d>]
                         [--area <A>] [--allowable <s>]
   ocae library [--units mm|m]
+  ocae section properties --section rectangle|circle|i|box|tube|channel [geometry] [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
@@ -104,6 +105,7 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
         "element" => element_command(&args[1..]),
         "material" => material_command(&args[1..]),
         "library" => library_command(&args[1..]),
+        "section" => section_command(&args[1..]),
         "support" => support_command(&args[1..]),
         "load" => load_command(&args[1..]),
         "model" => model_command(&args[1..]),
@@ -507,6 +509,54 @@ fn library_command(args: &[String]) -> Result<i32, CaeError> {
         None => Units::Millimeter,
     };
     println!("{}", cae_model::library_json(units)?);
+    Ok(0)
+}
+
+fn section_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("properties") => section_properties(&args[1..]),
+        Some(other) => Err(CaeError::new(
+            "cli/unknown-command",
+            format!("subcommand `{other}` of `section` does not exist; only `properties` is supported"),
+        )),
+        None => Err(CaeError::new(
+            "cli/missing-argument",
+            "`section` is missing a subcommand; only `properties` is supported",
+        )),
+    }
+}
+
+fn section_properties(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(
+        args,
+        &[
+            "--units",
+            "--section",
+            "--width",
+            "--height",
+            "--diameter",
+            "--depth",
+            "--flange-width",
+            "--flange-thickness",
+            "--web-thickness",
+            "--wall",
+            "--outer-diameter",
+            "--inner-diameter",
+        ],
+        &[],
+    )?;
+    let units = match parsed.options.get("--units") {
+        Some(value) => value.parse::<Units>()?,
+        None => Units::Millimeter,
+    };
+    let section = optional_section(&parsed)?.ok_or_else(|| {
+        CaeError::new(
+            "cli/missing-option",
+            "`--section` is required; use `--section rectangle`, `--section circle`, `--section i`, `--section box`, `--section tube` or `--section channel`",
+        )
+    })?;
+    let report = section_report(section, units)?;
+    println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
     Ok(0)
 }
 

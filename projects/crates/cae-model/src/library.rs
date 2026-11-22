@@ -132,6 +132,67 @@ impl SectionProperties {
     pub fn section_modulus(&self) -> f64 {
         self.inertia_strong / self.extreme_fiber
     }
+
+    /// Radius of gyration about the strong (bending) axis, `sqrt(I_strong / A)`.
+    pub fn radius_of_gyration_strong(&self) -> f64 {
+        (self.inertia_strong / self.area).sqrt()
+    }
+
+    /// Radius of gyration about the weak axis, `sqrt(I_weak / A)`.
+    pub fn radius_of_gyration_weak(&self) -> f64 {
+        (self.inertia_weak / self.area).sqrt()
+    }
+}
+
+/// Derived properties of one parametric section, as reported by
+/// [`section_report`].
+///
+/// `units` labels the unit system the input dimensions were given in; the
+/// properties are `length²` (area), `length⁴` (inertias and torsion constant)
+/// and `length` (extreme fibre, section modulus and radii of gyration).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionReport {
+    /// Shape identifier, matching the `shape` tag of the section.
+    pub shape: String,
+    /// Unit system label (`mm` or `m`) the dimensions were interpreted in.
+    pub units: String,
+    /// Cross-sectional area.
+    pub area: f64,
+    /// Second moment of area about the strong (bending) axis.
+    pub inertia_strong: f64,
+    /// Second moment of area about the weak axis.
+    pub inertia_weak: f64,
+    /// Saint-Venant torsion constant.
+    pub torsion_constant: f64,
+    /// Distance from the neutral axis to the extreme fibre.
+    pub extreme_fiber: f64,
+    /// Elastic section modulus `I_strong / c`.
+    pub section_modulus: f64,
+    /// Radius of gyration about the strong axis.
+    pub radius_of_gyration_strong: f64,
+    /// Radius of gyration about the weak axis.
+    pub radius_of_gyration_weak: f64,
+}
+
+/// Computes the derived properties of a parametric section.
+///
+/// The geometry is validated exactly like [`Section::properties`], so invalid
+/// dimensions report `material/invalid-section` instead of non-finite values.
+pub fn section_report(section: Section, units: Units) -> Result<SectionReport, CaeError> {
+    let properties = section.properties()?;
+    Ok(SectionReport {
+        shape: section.shape_name().to_string(),
+        units: units.as_str().to_string(),
+        area: properties.area,
+        inertia_strong: properties.inertia_strong,
+        inertia_weak: properties.inertia_weak,
+        torsion_constant: properties.torsion_constant,
+        extreme_fiber: properties.extreme_fiber,
+        section_modulus: properties.section_modulus(),
+        radius_of_gyration_strong: properties.radius_of_gyration_strong(),
+        radius_of_gyration_weak: properties.radius_of_gyration_weak(),
+    })
 }
 
 impl Section {

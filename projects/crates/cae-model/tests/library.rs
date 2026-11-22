@@ -4,7 +4,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset, solve};
+use cae_model::{
+    ElementKind, Material, Model, OpenCae, OpenCaeOptions, Section, Units, library_json, material_preset,
+    section_report, solve,
+};
 
 const E: f64 = 210_000.0;
 const L: f64 = 1000.0;
@@ -228,6 +231,40 @@ fn library_json_reports_presets_and_shapes_in_the_requested_units() {
     let metres = library_json(Units::Meter).expect("library");
     assert!(metres.contains("\"youngsModulus\": 210000000000.0"));
     assert!(metres.contains("\"density\": 7850.0"));
+}
+
+#[test]
+fn section_report_reports_modulus_and_radii_of_gyration() {
+    let section = Section::rectangle(10.0, 20.0).expect("rectangle");
+    let report = section_report(section, Units::Millimeter).expect("report");
+
+    assert_eq!(report.shape, "rectangle");
+    assert_eq!(report.units, "mm");
+    assert_close(report.area, 200.0, 1e-12);
+    assert_close(report.inertia_strong, section.properties().expect("properties").inertia_strong, 1e-12);
+    assert_close(report.section_modulus, report.inertia_strong / report.extreme_fiber, 1e-12);
+    assert_close(report.radius_of_gyration_strong, (report.inertia_strong / report.area).sqrt(), 1e-12);
+    assert_close(report.radius_of_gyration_weak, (report.inertia_weak / report.area).sqrt(), 1e-12);
+    assert!(report.radius_of_gyration_strong > report.radius_of_gyration_weak);
+}
+
+#[test]
+fn section_report_serialises_camel_case_and_labels_the_units() {
+    let report = section_report(Section::circle(50.0).expect("circle"), Units::Meter).expect("report");
+    let json = serde_json::to_value(&report).expect("json");
+
+    assert_eq!(json["shape"], "circle");
+    assert_eq!(json["units"], "m");
+    assert!(json["sectionModulus"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json["radiusOfGyrationStrong"].as_f64().is_some_and(|value| value > 0.0));
+    assert!(json.get("radius_of_gyration_strong").is_none());
+}
+
+#[test]
+fn section_report_rejects_invalid_geometry() {
+    let error = section_report(Section::Rectangle { width: 0.0, height: 20.0 }, Units::Millimeter)
+        .expect_err("invalid width");
+    assert_eq!(error.code, "material/invalid-section");
 }
 
 fn cantilever_with_section() -> Model {

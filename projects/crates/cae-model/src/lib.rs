@@ -48,7 +48,9 @@ mod validate;
 pub use crate::{
     error::CaeError,
     export::{export_csv, export_html, export_md, export_vtk, write_atomic},
-    library::{MATERIAL_PRESETS, MaterialPreset, SectionProperties, library_json, material_preset},
+    library::{
+        MATERIAL_PRESETS, MaterialPreset, SectionProperties, SectionReport, library_json, material_preset, section_report,
+    },
     model::{
         Element, ElementKind, ElementMaterial, EndRelease, FORMAT, Load, LoadCombination, Material, Model, Node,
         PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
