@@ -73,7 +73,7 @@ const cases = document.loadCases();                          // one summary row 
 
 - Sessions: `capabilities()`, `library(units?)`, `create(path, options?)`, `open(path)`, `dispose()`.
 - Documents: `id/units/dimension/summary`, plus `addNode/addElement/setMaterial/applyMaterialPreset/addSupport/addLoad/setGravity/addCombination/removeCombination/validate/solve/solveCombinations/solveBucklingCombinations/reactions/internalForces/stresses/deflections/nodalStresses/loadCases/matrices/responseSpectrum/frequencyResponse/constructionStages/geometricNonlinear/export/report/save/close`; every edit operation writes atomically to the file.
-- `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle` or `i`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
+- `setMaterial()` and `applyMaterialPreset()` accept an optional parametric `section` (`rectangle`, `circle`, `i`, `box` or `tube`), so beams may omit `inertia` and stress recovery can use the extreme-fibre distance. `allowableStress` enables utilisation checks.
 - `addSupport()` also accepts `ux`, `uy`, `uz` and `rotation` to enforce a non-zero displacement (support settlement or driven displacement); supplying one constrains the matching degree of freedom.
 - `addSupport()` also accepts `kx`, `ky`, `kz` and `kr` for linear elastic spring stiffness. A spring leaves the matching degree of freedom free and adds its stiffness to the global matrix, so supports can be rigid, elastic or both on different components of the same node; the reaction summary reports the spring force `−k·u`. Spring and rigid constraint on the same component are rejected by validation (`support/spring-constrained`).
 - `addSupport({ direction: [nx, ny] })` defines an inclined or rotated roller in two-dimensional documents. The normalised vector is the constrained displacement direction, so a roller at 30° uses `[cos 30°, sin 30°]`; it is an independent constraint frame and cannot be combined with `dx`, `dy`, a prescribed displacement or a spring on the same entry (`support/invalid-direction`).
@@ -184,7 +184,7 @@ For a cantilever with a vertical tip spring `k` the tip deflection is `P/(3EI/L�
 | `ocae element gradient <file> --id <id> [--value <dT>]` | Set or clear the through-depth temperature gradient of a beam; a positive value heats the local `+y` face and requires material `alpha` plus a section depth |
 | `ocae element span <file> --id <id> [--start <s>] [--end <s>]` | Limit a beam distributed load to the fractions `--start..--end` of the member length; omit both options to load the whole member again |
 | `ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--section ...]` | Set the global material, section and density (modal/self-weight analysis requires `--density > 0`); `--alpha` is the coefficient of thermal expansion in `1/K` |
-| `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
+| `ocae material preset <file> --preset <name> [--section rectangle\|circle\|i\|box\|tube] [geometry] [--area <A>] [--allowable <s>]` | Apply a built-in material preset (`steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`); a section supplies the area and beam inertia when omitted |
 | `ocae library [--units mm\|m]` | Print the built-in material presets and supported section shapes as JSON |
 | `ocae support add <file> --node <n> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]` | Add/merge support constraints, an inclined constraint or spring stiffness; `--rz`/`--kr` are available only on beam nodes and `--dz`/`--kz` only in 3D documents. `--direction` constrains displacement along `[nx, ny]` in 2D and cannot be combined with the other constraint options. A supplied displacement clamps that degree of freedom to the given value and implies its flag; a supplied spring leaves it free |
 | `ocae load add <file> --node <n> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]` | Add/update a nodal concentrated force/moment; `--fz` is 3D-only and `--mz` is beam-node-only |
@@ -264,7 +264,7 @@ The file is UTF-8 JSON with camelCase fields:
 | `format` / `version` | Fixed to `open-cae-truss` / `1`; a mismatch fails validation |
 | `units` | `"mm"` or `"m"`. When missing, `mm` is assumed and a `document/assumed-units` notice is produced |
 | `dimension` | Spatial dimension, `2` or `3`. When missing, `2` is assumed so old documents load without changes; other values raise `document/dimension` |
-| `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name`, `allowableStress` (for utilisation), `alpha` (coefficient of thermal expansion in `1/K`, required by temperature loads) and `section` (parametric geometry). A section is `{ "shape": "rectangle", "width", "height" }`, `{ "shape": "circle", "diameter" }` or `{ "shape": "i", "depth", "flangeWidth", "flangeThickness", "webThickness" }`; when present it supplies the strong-axis inertia for beams that omit `inertia` |
+| `material` | Global material: `youngsModulus` (E), `area` (A), `density` (default 0), optional `name`, `allowableStress` (for utilisation), `alpha` (coefficient of thermal expansion in `1/K`, required by temperature loads) and `section` (parametric geometry). A section is `{ "shape": "rectangle", "width", "height" }`, `{ "shape": "circle", "diameter" }`, `{ "shape": "i", "depth", "flangeWidth", "flangeThickness", "webThickness" }`, `{ "shape": "box", "width", "height", "wall" }` or `{ "shape": "tube", "outerDiameter", "innerDiameter" }`; when present it supplies the strong-axis inertia for beams that omit `inertia` |
 | `nodes` | Node ids must be unique; coordinates are `x`, `y`, `z`, with `z` defaulting to 0 |
 | `elements` | `kind` is `truss` (default) or `beam`; `from`/`to` reference nodes; optional `material: { "youngsModulus": ..., "area": ... }` overrides E/A; `beam` requires a positive `inertia` or a material `section` and accepts optional `distributedLoad`/`distributedLoadEnd` intensities in the local `+y` direction (equal or omitted end value means uniform, otherwise linearly varying), an optional uniform `temperature` change and an optional moment `release: { "start": bool, "end": bool }` (beams only) |
 | `supports` | `dx`/`dy`/`dz` constrain X/Y/Z translation when `true`; `rz` constrains rotation about Z and applies only at beam nodes; all default to `false`. Optional `prescribed: { ux, uy, uz, rz }` enforces non-zero values of the constrained degrees of freedom (omitted components are `0`), so old documents load unchanged. Optional `spring: { kx, ky, kz, kr }` adds linear elastic stiffness (force/length, moment/radian) and leaves the matching degree of freedom free; `kz` is 3D-only and `kr` is 2D beam-node-only. Optional `direction: [nx, ny]` constrains displacement along that unit vector in 2D and cannot be combined with `dx`, `dy`, a prescribed displacement or a spring |
@@ -309,7 +309,7 @@ The file is UTF-8 JSON with camelCase fields:
 | construction stages / element birth–death summaries (`constructionStages`, active element subsets + stage factors) | ✅ supported |
 | geometric-nonlinear truss analysis (`geometricNonlinear`, corotational Newton iteration with load increments) | ✅ supported |
 | load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
-| material presets and section library (`materialLibrary`, rectangle/circle/I-section properties) | ✅ supported |
+| material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube properties) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
@@ -411,7 +411,7 @@ pnpm --filter @wae/open-cae run typecheck
 
 `projects/crates/cae-model/tests/library.rs` asserts the material and section library:
 
-- rectangular, circular and I-section area, strong/weak inertia, torsion constant, extreme fibre and section modulus match the closed-form formulas (`1e-12`);
+- rectangular, circular, I-section, box and tube area, strong/weak inertia, torsion constant, extreme fibre and section modulus match the closed-form formulas (`1e-12`);
 - presets convert between `mm` (`210000 MPa`, `7.85e-9 t/mm³`) and `m` (`2.1e11 Pa`, `7850 kg/m³`);
 - a cantilever beam that omits `inertia` uses the stored section and reproduces `PL³/(3EI)` (`1e-9`);
 - a preset plus section round-trips through the document, validation accepts the model and the session solves it;

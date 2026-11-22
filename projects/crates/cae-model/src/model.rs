@@ -86,15 +86,36 @@ pub enum Section {
         /// Web thickness.
         web_thickness: f64,
     },
+    /// Hollow rectangular box with a uniform wall thickness.
+    #[serde(rename = "box", rename_all = "camelCase")]
+    BoxSection {
+        /// Outer width.
+        width: f64,
+        /// Outer height (bending depth).
+        height: f64,
+        /// Uniform wall thickness.
+        wall: f64,
+    },
+    /// Hollow circular tube.
+    #[serde(rename = "tube", rename_all = "camelCase")]
+    Tube {
+        /// Outer diameter.
+        outer_diameter: f64,
+        /// Inner diameter.
+        inner_diameter: f64,
+    },
 }
 
 impl Section {
-    /// Returns the short shape identifier (`rectangle`, `circle` or `i`).
+    /// Returns the short shape identifier (`rectangle`, `circle`, `i`, `box` or
+    /// `tube`).
     pub fn shape_name(self) -> &'static str {
         match self {
             Self::Rectangle { .. } => "rectangle",
             Self::Circle { .. } => "circle",
             Self::ISection { .. } => "i",
+            Self::BoxSection { .. } => "box",
+            Self::Tube { .. } => "tube",
         }
     }
 }

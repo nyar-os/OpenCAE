@@ -190,6 +190,38 @@ impl Section {
                     extreme_fiber: depth / 2.0,
                 })
             }
+            Self::BoxSection { width, height, wall } => {
+                validate_dimensions("box", &[("width", width), ("height", height), ("wall", wall)])?;
+                let inner_width = width - 2.0 * wall;
+                let inner_height = height - 2.0 * wall;
+                if width <= 2.0 * wall || height <= 2.0 * wall || wall >= width.min(height) / 2.0 {
+                    return Err(invalid_section(
+                        "box section wall thickness must be smaller than half of the width and half of the height",
+                    ));
+                }
+                Ok(SectionProperties {
+                    area: width * height - inner_width * inner_height,
+                    inertia_strong: (width * height.powi(3) - inner_width * inner_height.powi(3)) / 12.0,
+                    inertia_weak: (height * width.powi(3) - inner_height * inner_width.powi(3)) / 12.0,
+                    torsion_constant: 2.0 * wall * (width - wall).powi(2) * (height - wall).powi(2)
+                        / (width + height - 2.0 * wall),
+                    extreme_fiber: height / 2.0,
+                })
+            }
+            Self::Tube { outer_diameter, inner_diameter } => {
+                validate_dimensions("tube", &[("outerDiameter", outer_diameter), ("innerDiameter", inner_diameter)])?;
+                if outer_diameter <= inner_diameter {
+                    return Err(invalid_section("tube outer diameter must be greater than its inner diameter"));
+                }
+                let difference = outer_diameter.powi(4) - inner_diameter.powi(4);
+                Ok(SectionProperties {
+                    area: std::f64::consts::PI / 4.0 * (outer_diameter.powi(2) - inner_diameter.powi(2)),
+                    inertia_strong: std::f64::consts::PI / 64.0 * difference,
+                    inertia_weak: std::f64::consts::PI / 64.0 * difference,
+                    torsion_constant: std::f64::consts::PI / 32.0 * difference,
+                    extreme_fiber: outer_diameter / 2.0,
+                })
+            }
         }
     }
 }
@@ -212,6 +244,20 @@ impl Section {
     /// Creates and validates a doubly symmetric I-section.
     pub fn i_section(depth: f64, flange_width: f64, flange_thickness: f64, web_thickness: f64) -> Result<Self, CaeError> {
         let section = Self::ISection { depth, flange_width, flange_thickness, web_thickness };
+        section.properties()?;
+        Ok(section)
+    }
+
+    /// Creates and validates a hollow rectangular box section.
+    pub fn box_section(width: f64, height: f64, wall: f64) -> Result<Self, CaeError> {
+        let section = Self::BoxSection { width, height, wall };
+        section.properties()?;
+        Ok(section)
+    }
+
+    /// Creates and validates a hollow circular tube.
+    pub fn tube(outer_diameter: f64, inner_diameter: f64) -> Result<Self, CaeError> {
+        let section = Self::Tube { outer_diameter, inner_diameter };
         section.properties()?;
         Ok(section)
     }
@@ -258,6 +304,8 @@ pub fn library_json(units: Units) -> Result<String, CaeError> {
             ShapeView { shape: "rectangle", parameters: vec!["width", "height"] },
             ShapeView { shape: "circle", parameters: vec!["diameter"] },
             ShapeView { shape: "i", parameters: vec!["depth", "flangeWidth", "flangeThickness", "webThickness"] },
+            ShapeView { shape: "box", parameters: vec!["width", "height", "wall"] },
+            ShapeView { shape: "tube", parameters: vec!["outerDiameter", "innerDiameter"] },
         ],
     };
     serde_json::to_string_pretty(&library)

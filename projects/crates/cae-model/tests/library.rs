@@ -71,6 +71,81 @@ fn i_section_properties_match_parallel_axis_formula() {
 }
 
 #[test]
+fn box_section_properties_match_closed_form() {
+    let width = 100.0;
+    let height = 200.0;
+    let wall = 5.0;
+    let section = Section::box_section(width, height, wall).expect("box");
+    let properties = section.properties().expect("properties");
+    let inner_width = width - 2.0 * wall;
+    let inner_height = height - 2.0 * wall;
+
+    assert_close(properties.area, width * height - inner_width * inner_height, 1e-12);
+    assert_close(properties.inertia_strong, (width * height.powi(3) - inner_width * inner_height.powi(3)) / 12.0, 1e-12);
+    assert_close(properties.inertia_weak, (height * width.powi(3) - inner_height * inner_width.powi(3)) / 12.0, 1e-12);
+    assert_close(
+        properties.torsion_constant,
+        2.0 * wall * (width - wall).powi(2) * (height - wall).powi(2) / (width + height - 2.0 * wall),
+        1e-12,
+    );
+    assert_close(properties.extreme_fiber, height / 2.0, 1e-12);
+    assert_close(properties.section_modulus(), properties.inertia_strong / (height / 2.0), 1e-12);
+}
+
+#[test]
+fn tube_section_properties_match_closed_form() {
+    let outer_diameter = 100.0;
+    let inner_diameter = 80.0;
+    let section = Section::tube(outer_diameter, inner_diameter).expect("tube");
+    let properties = section.properties().expect("properties");
+    let pi = std::f64::consts::PI;
+    let difference = outer_diameter.powi(4) - inner_diameter.powi(4);
+
+    assert_close(properties.area, pi / 4.0 * (outer_diameter.powi(2) - inner_diameter.powi(2)), 1e-12);
+    assert_close(properties.inertia_strong, pi / 64.0 * difference, 1e-12);
+    assert_close(properties.inertia_weak, pi / 64.0 * difference, 1e-12);
+    assert_close(properties.torsion_constant, pi / 32.0 * difference, 1e-12);
+    assert_close(properties.extreme_fiber, outer_diameter / 2.0, 1e-12);
+    assert_close(properties.section_modulus(), properties.inertia_strong / (outer_diameter / 2.0), 1e-12);
+}
+
+#[test]
+fn box_and_tube_sections_round_trip_through_serde() {
+    let box_section = Section::box_section(100.0, 200.0, 5.0).expect("box");
+    let box_json = serde_json::to_string(&box_section).expect("serialize box");
+    assert!(box_json.contains("\"shape\":\"box\""));
+    assert!(box_json.contains("\"wall\":5.0"));
+    let parsed_box: Section = serde_json::from_str(&box_json).expect("deserialize box");
+    assert_eq!(parsed_box, box_section);
+
+    let tube = Section::tube(100.0, 80.0).expect("tube");
+    let tube_json = serde_json::to_string(&tube).expect("serialize tube");
+    assert!(tube_json.contains("\"shape\":\"tube\""));
+    assert!(tube_json.contains("\"outerDiameter\":100.0"));
+    assert!(tube_json.contains("\"innerDiameter\":80.0"));
+    let parsed_tube: Section = serde_json::from_str(&tube_json).expect("deserialize tube");
+    assert_eq!(parsed_tube, tube);
+}
+
+#[test]
+fn invalid_box_and_tube_geometry_is_rejected() {
+    for section in [
+        Section::box_section(100.0, 200.0, 0.0),
+        Section::box_section(100.0, 200.0, 50.0),
+        Section::box_section(100.0, 200.0, 101.0),
+        Section::box_section(0.0, 200.0, 5.0),
+        Section::box_section(100.0, f64::NAN, 5.0),
+        Section::tube(100.0, 100.0),
+        Section::tube(100.0, 120.0),
+        Section::tube(f64::INFINITY, 80.0),
+        Section::tube(100.0, 0.0),
+    ] {
+        let error = section.expect_err("invalid section");
+        assert_eq!(error.code, "material/invalid-section");
+    }
+}
+
+#[test]
 fn material_presets_convert_between_unit_systems() {
     let steel_mm = material_preset("steel").expect("steel");
     let steel_m = material_preset("steel").expect("steel");
@@ -94,6 +169,8 @@ fn library_json_reports_presets_and_shapes_in_the_requested_units() {
     assert!(millimetres.contains("\"youngsModulus\": 210000.0"));
     assert!(millimetres.contains("\"shape\": \"rectangle\""));
     assert!(millimetres.contains("\"shape\": \"i\""));
+    assert!(millimetres.contains("\"shape\": \"box\""));
+    assert!(millimetres.contains("\"shape\": \"tube\""));
 
     let metres = library_json(Units::Meter).expect("library");
     assert!(metres.contains("\"youngsModulus\": 210000000000.0"));

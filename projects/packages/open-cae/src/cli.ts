@@ -437,6 +437,9 @@ async function materialSet(args: readonly string[]): Promise<number> {
             '--flange-width',
             '--flange-thickness',
             '--web-thickness',
+            '--wall',
+            '--outer-diameter',
+            '--inner-diameter',
         ],
         [],
     );
@@ -478,13 +481,16 @@ async function materialPreset(args: readonly string[]): Promise<number> {
             '--flange-width',
             '--flange-thickness',
             '--web-thickness',
+            '--wall',
+            '--outer-diameter',
+            '--inner-diameter',
         ],
         [],
     );
     const file = positional(
         parsed,
         0,
-        'material preset <file> --preset <name> [--section rectangle|circle|i] [--area A] [--allowable S]',
+        'material preset <file> --preset <name> [--section rectangle|circle|i|box|tube] [--area A] [--allowable S]',
     );
     const preset = required(parsed, '--preset');
     const area = number(parsed, '--area');
@@ -516,6 +522,9 @@ function sectionOption(parsed: Parsed): Section | undefined {
             '--flange-width',
             '--flange-thickness',
             '--web-thickness',
+            '--wall',
+            '--outer-diameter',
+            '--inner-diameter',
         ];
         if (geometry.some((option) => parsed.options.has(option))) {
             throw failure('cli/missing-option', 'sectionShape');
@@ -539,6 +548,21 @@ function sectionOption(parsed: Parsed): Section | undefined {
             flangeWidth: requiredNumber(parsed, '--flange-width'),
             flangeThickness: requiredNumber(parsed, '--flange-thickness'),
             webThickness: requiredNumber(parsed, '--web-thickness'),
+        };
+    }
+    if (shape === 'box') {
+        return {
+            shape: 'box',
+            width: requiredNumber(parsed, '--width'),
+            height: requiredNumber(parsed, '--height'),
+            wall: requiredNumber(parsed, '--wall'),
+        };
+    }
+    if (shape === 'tube') {
+        return {
+            shape: 'tube',
+            outerDiameter: requiredNumber(parsed, '--outer-diameter'),
+            innerDiameter: requiredNumber(parsed, '--inner-diameter'),
         };
     }
     throw failure('cli/invalid-option', 'unknownSection', { value: shape });

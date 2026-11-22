@@ -28,9 +28,10 @@ Usage:
   ocae element gradient <file> --id <id> [--value <dT>]
   ocae element span <file> --id <id> [--start <s>] [--end <s>]
   ocae material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--alpha <a>]
-  ocae material preset <file> --preset <name> [--section rectangle|circle|i]
+  ocae material preset <file> --preset <name> [--section rectangle|circle|i|box|tube]
                         [--width <w>] [--height <h>] [--diameter <d>] [--depth <d>]
                         [--flange-width <b>] [--flange-thickness <t>] [--web-thickness <t>]
+                        [--wall <t>] [--outer-diameter <D>] [--inner-diameter <d>]
                         [--area <A>] [--allowable <s>]
   ocae library [--units mm|m]
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
@@ -334,13 +335,16 @@ fn material_preset(args: &[String]) -> Result<i32, CaeError> {
             "--flange-width",
             "--flange-thickness",
             "--web-thickness",
+            "--wall",
+            "--outer-diameter",
+            "--inner-diameter",
         ],
         &[],
     )?;
     let file = positional(
         &parsed,
         0,
-        "material preset <file> --preset <name> [--section rectangle|circle|i] [--area A] [--allowable S]",
+        "material preset <file> --preset <name> [--section rectangle|circle|i|box|tube] [--area A] [--allowable S]",
     )?;
     let preset = required(&parsed, "--preset")?;
     let area = number(&parsed, "--area")?;
@@ -364,12 +368,22 @@ fn material_preset(args: &[String]) -> Result<i32, CaeError> {
 fn optional_section(parsed: &Parsed) -> Result<Option<Section>, CaeError> {
     let Some(shape) = parsed.options.get("--section")
     else {
-        let geometry =
-            ["--width", "--height", "--diameter", "--depth", "--flange-width", "--flange-thickness", "--web-thickness"];
+        let geometry = [
+            "--width",
+            "--height",
+            "--diameter",
+            "--depth",
+            "--flange-width",
+            "--flange-thickness",
+            "--web-thickness",
+            "--wall",
+            "--outer-diameter",
+            "--inner-diameter",
+        ];
         if geometry.iter().any(|option| parsed.options.contains_key(*option)) {
             return Err(CaeError::new(
                 "cli/missing-option",
-                "section dimensions require `--section rectangle`, `--section circle` or `--section i`",
+                "section dimensions require `--section rectangle`, `--section circle`, `--section i`, `--section box` or `--section tube`",
             ));
         }
         return Ok(None);
@@ -383,10 +397,16 @@ fn optional_section(parsed: &Parsed) -> Result<Option<Section>, CaeError> {
             required_number(parsed, "--flange-thickness")?,
             required_number(parsed, "--web-thickness")?,
         )?,
+        "box" => Section::box_section(
+            required_number(parsed, "--width")?,
+            required_number(parsed, "--height")?,
+            required_number(parsed, "--wall")?,
+        )?,
+        "tube" => Section::tube(required_number(parsed, "--outer-diameter")?, required_number(parsed, "--inner-diameter")?)?,
         other => {
             return Err(CaeError::new(
                 "cli/invalid-option",
-                format!("unknown section shape `{other}`; valid values are `rectangle`, `circle` or `i`"),
+                format!("unknown section shape `{other}`; valid values are `rectangle`, `circle`, `i`, `box` or `tube`"),
             ));
         }
     };
@@ -421,6 +441,9 @@ fn material_set(args: &[String]) -> Result<i32, CaeError> {
             "--flange-width",
             "--flange-thickness",
             "--web-thickness",
+            "--wall",
+            "--outer-diameter",
+            "--inner-diameter",
         ],
         &[],
     )?;
