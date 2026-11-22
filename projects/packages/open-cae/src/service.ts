@@ -135,6 +135,16 @@ export function elementAdd(path: string, request: ElementAddRequest): DocumentSu
     return decode<DocumentSummary>(() => binding('element.add').element_add(path, JSON.stringify(request)));
 }
 
+/** Removes a node and returns the updated summary. */
+export function nodeRemove(path: string, id: string): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('node.remove').node_remove(path, JSON.stringify({ id })));
+}
+
+/** Removes an element and returns the updated summary. */
+export function elementRemove(path: string, id: string): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('element.remove').element_remove(path, JSON.stringify({ id })));
+}
+
 /** Sets or clears the bending-moment releases of a beam element. */
 export function elementRelease(path: string, request: ElementReleaseRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('element.release').element_release(path, JSON.stringify(request)));
@@ -160,9 +170,19 @@ export function supportAdd(path: string, request: SupportAddRequest): DocumentSu
     return decode<DocumentSummary>(() => binding('support.add').support_add(path, JSON.stringify(request)));
 }
 
+/** Removes the support entry of a node and returns the updated summary. */
+export function supportRemove(path: string, node: string): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('support.remove').support_remove(path, JSON.stringify({ node })));
+}
+
 /** Adds or updates a concentrated load and returns the updated summary. */
 export function loadAdd(path: string, request: LoadAddRequest): DocumentSummary {
     return decode<DocumentSummary>(() => binding('load.add').load_add(path, JSON.stringify(request)));
+}
+
+/** Removes the concentrated load entry of a node and returns the updated summary. */
+export function loadRemove(path: string, node: string): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('load.remove').load_remove(path, JSON.stringify({ node })));
 }
 
 /** Sets the gravity acceleration vector and returns the updated summary. */

@@ -645,6 +645,48 @@ impl OpenCae {
         self.edit(|model| model.add_load_full(node, fx, fy, fz, mz))
     }
 
+    /// Removes a node and saves the document.
+    ///
+    /// The node must not be referenced by an element, a support or a load;
+    /// removing a referenced node is rejected with `node/referenced-by-*`.
+    pub fn remove_node(&mut self, id: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.remove_node(id))
+    }
+
+    /// Removes an element and saves the document.
+    pub fn remove_element(&mut self, id: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.remove_element(id))
+    }
+
+    /// Removes the support entry of a node and saves the document.
+    ///
+    /// A node without a support entry is rejected with
+    /// `support/unknown-support`.
+    pub fn remove_support(&mut self, node: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| {
+            if model.remove_support(node) {
+                Ok(())
+            }
+            else {
+                Err(CaeError::new("support/unknown-support", format!("node `{node}` has no support entry to remove")))
+            }
+        })
+    }
+
+    /// Removes the concentrated load entry of a node and saves the document.
+    ///
+    /// A node without a load entry is rejected with `load/unknown-load`.
+    pub fn remove_load(&mut self, node: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| {
+            if model.remove_load(node) {
+                Ok(())
+            }
+            else {
+                Err(CaeError::new("load/unknown-load", format!("node `{node}` has no load entry to remove")))
+            }
+        })
+    }
+
     /// Validates the open document without solving it.
     pub fn validate(&self) -> Result<ValidationReport, CaeError> {
         let issues = self.current()?.model.validate();

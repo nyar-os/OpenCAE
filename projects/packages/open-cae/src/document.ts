@@ -135,10 +135,25 @@ export class CaeDocument {
         return this.adopt(service.nodeAdd(this.path, request));
     }
 
+    /**
+     * Removes a node and saves the file. A node referenced by an element, a
+     * support or a load is rejected with `node/referenced-by-*`.
+     */
+    removeNode(id: string): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.nodeRemove(this.path, id));
+    }
+
     /** Adds a truss or beam element and saves the file. */
     addElement(request: ElementAddRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.elementAdd(this.path, request));
+    }
+
+    /** Removes an element and saves the file. */
+    removeElement(id: string): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.elementRemove(this.path, id));
     }
 
     /**
@@ -168,10 +183,22 @@ export class CaeDocument {
         return this.adopt(service.supportAdd(this.path, request));
     }
 
+    /** Removes the support entry of a node and saves the file. */
+    removeSupport(node: string): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.supportRemove(this.path, node));
+    }
+
     /** Adds or updates a concentrated load and saves the file. */
     addLoad(request: LoadAddRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.loadAdd(this.path, request));
+    }
+
+    /** Removes the concentrated load entry of a node and saves the file. */
+    removeLoad(node: string): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.loadRemove(this.path, node));
     }
 
     /** Sets the gravity acceleration vector and saves the file. */

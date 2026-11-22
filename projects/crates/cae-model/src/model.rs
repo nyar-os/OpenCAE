@@ -1394,6 +1394,84 @@ impl Model {
         Ok(())
     }
 
+    /// Removes a node after checking that nothing still references it.
+    ///
+    /// A node that is used by an element, carries a support entry or carries a
+    /// load entry cannot be removed: the matching `node/referenced-by-*` error
+    /// names the referring entity, so the caller deletes the dependent data
+    /// first instead of leaving a dangling reference in the document. An
+    /// unknown identifier is rejected with `node/unknown-id`.
+    pub fn remove_node(&mut self, id: &str) -> Result<(), CaeError> {
+        if self.node(id).is_none() {
+            return Err(CaeError::new("node/unknown-id", format!("unknown node `{id}`")));
+        }
+        if let Some(element) = self.elements.iter().find(|element| element.from == id || element.to == id) {
+            return Err(CaeError::new(
+                "node/referenced-by-element",
+                format!("node `{id}` is used by element `{}`; remove the element first", element.id),
+            ));
+        }
+        if self.supports.iter().any(|support| support.node == id) {
+            return Err(CaeError::new(
+                "node/referenced-by-support",
+                format!("node `{id}` still has a support entry; remove the support first"),
+            ));
+        }
+        if self.loads.iter().any(|load| load.node == id) {
+            return Err(CaeError::new(
+                "node/referenced-by-load",
+                format!("node `{id}` still has a load entry; remove the load first"),
+            ));
+        }
+        self.nodes.retain(|node| node.id != id);
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Removes an element by identifier.
+    ///
+    /// Supports and loads attach to nodes, so removing an element never leaves
+    /// a dangling reference. An unknown identifier is rejected with
+    /// `element/unknown-id`.
+    pub fn remove_element(&mut self, id: &str) -> Result<(), CaeError> {
+        let before = self.elements.len();
+        self.elements.retain(|element| element.id != id);
+        if self.elements.len() == before {
+            return Err(CaeError::new("element/unknown-id", format!("unknown element `{id}`")));
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Removes the support entry of a node, returning whether one existed.
+    ///
+    /// The whole entry is removed, including a prescribed displacement, spring
+    /// stiffness or inclined direction stored on it. Nodes, elements and loads
+    /// are left untouched.
+    pub fn remove_support(&mut self, node: &str) -> bool {
+        let before = self.supports.len();
+        self.supports.retain(|support| support.node != node);
+        let removed = self.supports.len() != before;
+        if removed {
+            self.bump_revision();
+        }
+        removed
+    }
+
+    /// Removes the concentrated load entry of a node, returning whether one
+    /// existed.
+    ///
+    /// The node, its elements and its support entry are left untouched.
+    pub fn remove_load(&mut self, node: &str) -> bool {
+        let before = self.loads.len();
+        self.loads.retain(|load| load.node != node);
+        let removed = self.loads.len() != before;
+        if removed {
+            self.bump_revision();
+        }
+        removed
+    }
+
     fn bump_revision(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }

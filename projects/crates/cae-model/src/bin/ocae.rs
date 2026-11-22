@@ -22,8 +22,10 @@ ocae - OpenCAE truss/beam linear-static, modal and buckling solver (2D/3D)
 Usage:
   ocae create <file.ocae> [--units mm|m] [--dimension 2|3]
   ocae node add <file> --id <id> --x <x> --y <y> [--z <z>]
+  ocae node remove <file> --id <id>
   ocae element add <file> --id <id> --from <node> --to <node> [--E <E>] [--A <A>]
                     [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>]
+  ocae element remove <file> --id <id>
   ocae element release <file> --id <id> [--start] [--end]
   ocae element gradient <file> --id <id> [--value <dT>]
   ocae element span <file> --id <id> [--start <s>] [--end <s>]
@@ -37,7 +39,9 @@ Usage:
   ocae support add <file> --node <node> [--dx] [--dy] [--dz] [--rz]
                     [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>]
                     [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]
+  ocae support remove <file> --node <node>
   ocae load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]
+  ocae load remove <file> --node <node>
   ocae model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]
   ocae self-weight <file> --g <g> [--axis x|y|z]
   ocae combination add <file> --name <name> [--loads <f>] [--gravity <f>]
@@ -93,12 +97,12 @@ fn dispatch(args: &[String]) -> Result<i32, CaeError> {
             Ok(0)
         }
         "create" => create(&args[1..]),
-        "node" => subcommand(args, "add", "node"),
+        "node" => node_command(&args[1..]),
         "element" => element_command(&args[1..]),
         "material" => material_command(&args[1..]),
         "library" => library_command(&args[1..]),
-        "support" => subcommand(args, "add", "support"),
-        "load" => subcommand(args, "add", "load"),
+        "support" => support_command(&args[1..]),
+        "load" => load_command(&args[1..]),
         "model" => model_command(&args[1..]),
         "self-weight" => self_weight(&args[1..]),
         "combination" => combination_command(&args[1..]),
@@ -134,23 +138,46 @@ fn session() -> OpenCae {
     OpenCae::new(OpenCaeOptions::default())
 }
 
-fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CaeError> {
-    match args.get(1).map(String::as_str) {
-        Some(action) if action == expected => match (group, action) {
-            ("node", "add") => node_add(&args[2..]),
-            ("element", "add") => element_add(&args[2..]),
-            ("support", "add") => support_add(&args[2..]),
-            ("load", "add") => load_add(&args[2..]),
-            _ => Err(CaeError::new("cli/unknown-command", format!("unknown command `{group} {action}`"))),
-        },
+fn node_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("add") => node_add(&args[1..]),
+        Some("remove") => node_remove(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
-            format!("subcommand `{other}` of `{group}` does not exist; only `{expected}` is supported"),
+            format!("subcommand `{other}` of `node` does not exist; only `add` or `remove` is supported"),
+        )),
+        None => {
+            Err(CaeError::new("cli/missing-argument", "`node` is missing a subcommand; only `add` or `remove` is supported"))
+        }
+    }
+}
+
+fn support_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("add") => support_add(&args[1..]),
+        Some("remove") => support_remove(&args[1..]),
+        Some(other) => Err(CaeError::new(
+            "cli/unknown-command",
+            format!("subcommand `{other}` of `support` does not exist; only `add` or `remove` is supported"),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            format!("`{group}` is missing a subcommand; only `{expected}` is supported"),
+            "`support` is missing a subcommand; only `add` or `remove` is supported",
         )),
+    }
+}
+
+fn load_command(args: &[String]) -> Result<i32, CaeError> {
+    match args.first().map(String::as_str) {
+        Some("add") => load_add(&args[1..]),
+        Some("remove") => load_remove(&args[1..]),
+        Some(other) => Err(CaeError::new(
+            "cli/unknown-command",
+            format!("subcommand `{other}` of `load` does not exist; only `add` or `remove` is supported"),
+        )),
+        None => {
+            Err(CaeError::new("cli/missing-argument", "`load` is missing a subcommand; only `add` or `remove` is supported"))
+        }
     }
 }
 
@@ -183,6 +210,17 @@ fn node_add(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.add_node(id, x, y, Some(z))?;
     println!("node `{id}` added (z={z}, revision {})", summary.revision);
+    Ok(0)
+}
+
+fn node_remove(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "node remove <file> --id <id>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.remove_node(id)?;
+    println!("node `{id}` removed (revision {})", summary.revision);
     Ok(0)
 }
 
@@ -227,20 +265,32 @@ fn element_add(args: &[String]) -> Result<i32, CaeError> {
 fn element_command(args: &[String]) -> Result<i32, CaeError> {
     match args.first().map(String::as_str) {
         Some("add") => element_add(&args[1..]),
+        Some("remove") => element_remove(&args[1..]),
         Some("release") => element_release(&args[1..]),
         Some("gradient") => element_gradient(&args[1..]),
         Some("span") => element_span(&args[1..]),
         Some(other) => Err(CaeError::new(
             "cli/unknown-command",
             format!(
-                "subcommand `{other}` of `element` does not exist; only `add`, `release`, `gradient` or `span` is supported"
+                "subcommand `{other}` of `element` does not exist; only `add`, `remove`, `release`, `gradient` or `span` is supported"
             ),
         )),
         None => Err(CaeError::new(
             "cli/missing-argument",
-            "`element` is missing a subcommand; only `add`, `release`, `gradient` or `span` is supported",
+            "`element` is missing a subcommand; only `add`, `remove`, `release`, `gradient` or `span` is supported",
         )),
     }
+}
+
+fn element_remove(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "element remove <file> --id <id>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.remove_element(id)?;
+    println!("element `{id}` removed (revision {})", summary.revision);
+    Ok(0)
 }
 
 fn element_release(args: &[String]) -> Result<i32, CaeError> {
@@ -564,6 +614,17 @@ fn support_add(args: &[String]) -> Result<i32, CaeError> {
     Ok(0)
 }
 
+fn support_remove(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--node"], &[])?;
+    let file = positional(&parsed, 0, "support remove <file> --node <node>")?;
+    let node = required(&parsed, "--node")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.remove_support(node)?;
+    println!("support `{node}` removed (revision {})", summary.revision);
+    Ok(0)
+}
+
 fn load_add(args: &[String]) -> Result<i32, CaeError> {
     let parsed = parse(args, &["--node", "--fx", "--fy", "--fz", "--mz"], &[])?;
     let file = positional(&parsed, 0, "load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]")?;
@@ -576,6 +637,17 @@ fn load_add(args: &[String]) -> Result<i32, CaeError> {
     session.open(Path::new(file))?;
     let summary = session.add_load_full(node, fx, fy, fz, mz)?;
     println!("load `{node}` added (revision {})", summary.revision);
+    Ok(0)
+}
+
+fn load_remove(args: &[String]) -> Result<i32, CaeError> {
+    let parsed = parse(args, &["--node"], &[])?;
+    let file = positional(&parsed, 0, "load remove <file> --node <node>")?;
+    let node = required(&parsed, "--node")?;
+    let mut session = session();
+    session.open(Path::new(file))?;
+    let summary = session.remove_load(node)?;
+    println!("load `{node}` removed (revision {})", summary.revision);
     Ok(0)
 }
 

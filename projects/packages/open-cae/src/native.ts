@@ -19,13 +19,17 @@ export interface NativeBinding {
     open(path: string): string;
     save(path: string, target?: string): string;
     node_add(path: string, requestJson: string): string;
+    node_remove(path: string, requestJson: string): string;
     element_add(path: string, requestJson: string): string;
+    element_remove(path: string, requestJson: string): string;
     element_release(path: string, requestJson: string): string;
     material_set(path: string, requestJson: string): string;
     material_preset(path: string, requestJson: string): string;
     library(requestJson?: string): string;
     support_add(path: string, requestJson: string): string;
+    support_remove(path: string, requestJson: string): string;
     load_add(path: string, requestJson: string): string;
+    load_remove(path: string, requestJson: string): string;
     gravity_set(path: string, requestJson: string): string;
     combination_add(path: string, requestJson: string): string;
     combination_remove(path: string, requestJson: string): string;

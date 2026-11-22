@@ -168,6 +168,21 @@ fn node_add(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Removes a node from a document and saves it.
+///
+/// A node referenced by an element, a support or a load is rejected with
+/// `node/referenced-by-*`.
+#[function]
+fn node_remove(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.remove_node(&id).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
 /// Adds a truss or beam element to a document and saves it.
 ///
 /// The request accepts `kind` (`"truss"` or `"beam"`, default `"truss"`),
@@ -242,6 +257,18 @@ fn element_release(ctx: CallContext) -> Result<JsValue> {
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session.set_element_release(&id, release).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Removes an element from a document and saves it.
+#[function]
+fn element_remove(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.remove_element(&id).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -374,6 +401,18 @@ fn support_add(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Removes the support entry of a node and saves the document.
+#[function]
+fn support_remove(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let node = text_field(&request, "node")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.remove_support(&node).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
 /// Adds or updates a concentrated load of a document and saves it.
 #[function]
 fn load_add(ctx: CallContext) -> Result<JsValue> {
@@ -387,6 +426,18 @@ fn load_add(ctx: CallContext) -> Result<JsValue> {
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     let summary = session.add_load_full(&node, fx, fy, fz, mz).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Removes the concentrated load entry of a node and saves the document.
+#[function]
+fn load_remove(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let node = text_field(&request, "node")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.remove_load(&node).map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -773,13 +824,17 @@ register_module![
     open,
     save,
     node_add,
+    node_remove,
     element_add,
+    element_remove,
     element_release,
     material_set,
     material_preset,
     library,
     support_add,
+    support_remove,
     load_add,
+    load_remove,
     gravity_set,
     combination_add,
     combination_remove,
