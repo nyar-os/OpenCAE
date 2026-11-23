@@ -926,9 +926,10 @@ fn element_kind_field(request: &Value) -> Result<ElementKind> {
 
 /// Adds or replaces a linear load combination and saves the document.
 ///
-/// The request accepts `name`, `loads` (default 1) and `gravity` (default 0),
-/// plus an optional `patterns` array of `{ pattern, factor }` entries that mix
-/// named load patterns into the combination.
+/// The request accepts `name`, `loads` (default 1), `gravity` (default 0) and
+/// `thermal` (default 1), plus an optional `patterns` array of
+/// `{ pattern, factor }` entries that mix named load patterns into the
+/// combination. `thermal` scales every element temperature change and gradient.
 #[function]
 fn combination_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -936,6 +937,7 @@ fn combination_add(ctx: CallContext) -> Result<JsValue> {
     let name = text_field(&request, "name")?;
     let loads = number_field(&request, "loads")?.unwrap_or(1.0);
     let gravity = number_field(&request, "gravity")?.unwrap_or(0.0);
+    let thermal = number_field(&request, "thermal")?.unwrap_or(1.0);
     let patterns = match request.get("patterns") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(entries)) => entries
@@ -948,7 +950,7 @@ fn combination_add(ctx: CallContext) -> Result<JsValue> {
     };
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary = session.add_combination_with_patterns(&name, loads, gravity, &patterns).map_err(fail)?;
+    let summary = session.add_combination_full(&name, loads, gravity, thermal, &patterns).map_err(fail)?;
     respond(&ctx, &summary)
 }
 

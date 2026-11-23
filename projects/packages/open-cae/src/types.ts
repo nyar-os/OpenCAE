@@ -1239,6 +1239,8 @@ export interface CombinationCase {
     readonly name: string;
     readonly loads: number;
     readonly gravity: number;
+    /** Factor applied to element temperature changes and gradients. */
+    readonly thermal: number;
     /** Named load patterns mixed into this combination. */
     readonly patterns?: readonly PatternFactorRequest[];
     readonly solution: Solution;
@@ -1293,6 +1295,8 @@ export interface CombinationAddRequest {
     readonly loads?: number;
     /** Factor applied to the gravity vector; defaults to 0. */
     readonly gravity?: number;
+    /** Factor applied to element temperature changes and gradients; defaults to 1. */
+    readonly thermal?: number;
     /** Named load patterns mixed into the combination. */
     readonly patterns?: readonly PatternFactorRequest[];
 }
