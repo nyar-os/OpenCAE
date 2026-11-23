@@ -65,6 +65,7 @@ export interface NativeBinding {
     node_reaction(path: string, requestJson: string): string;
     internal_forces(path: string, requestJson?: string): string;
     influence_line(path: string, requestJson: string): string;
+    influence_line_train(path: string, requestJson: string): string;
     stresses(path: string, requestJson?: string): string;
     deflections(path: string, requestJson?: string): string;
     nodal_stresses(path: string, requestJson?: string): string;

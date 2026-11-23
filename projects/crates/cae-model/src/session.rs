@@ -22,11 +22,12 @@ use crate::{
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InfluenceDirection, InfluenceLineSolution,
-        InfluenceQuantity, InternalForceSolution, LoadCaseSummary, ModalSolution, NodalStressSolution, NodeDisplacement,
-        NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution, Solution,
-        SpectrumCombination, SpectrumPoint, StressSolution, SupportReaction, SystemMatrices, TensionOnlySolution, solve,
-        solve_buckling, solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection,
-        solve_frequency_response, solve_heat, solve_influence_line, solve_internal_forces, solve_matrices, solve_modal,
+        InfluenceQuantity, InfluenceTrainRequest, InfluenceTrainSolution, InternalForceSolution, LoadCaseSummary,
+        ModalSolution, NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION,
+        ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint, StressSolution,
+        SupportReaction, SystemMatrices, TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations,
+        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_heat,
+        solve_influence_line, solve_influence_line_train, solve_internal_forces, solve_matrices, solve_modal,
         solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only, summarize_load_cases,
     },
     validate::{Issue, Severity},
@@ -1048,6 +1049,27 @@ impl OpenCae {
         if let Some(path) = out {
             let json = serde_json::to_string_pretty(&solution).map_err(|error| {
                 CaeError::new("document/serialize", format!("cannot serialize influence line result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(solution)
+    }
+
+    /// Envelopes a moving load train over the influence line of [`OpenCae::influence_line`].
+    ///
+    /// The influence line is sampled once and reused; the structure is never
+    /// re-solved per train position. The model must not carry any other load.
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn influence_line_train(
+        &self,
+        request: &InfluenceTrainRequest,
+        out: Option<&Path>,
+    ) -> Result<InfluenceTrainSolution, CaeError> {
+        let model = &self.current()?.model;
+        let solution = solve_influence_line_train(model, request)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&solution).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize influence line train result: {error}"))
             })?;
             write_atomic(path, &json)?;
         }

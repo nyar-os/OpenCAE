@@ -16,9 +16,9 @@ use std::path::Path;
 
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions, InfluenceDirection,
-    InfluenceQuantity, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint, Units,
-    angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json,
-    polygon_section_report, principal_section_report, section_report, t_section_report, triangle_section_report,
+    InfluenceQuantity, InfluenceTrainRequest, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint,
+    Units, angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report,
+    library_json, polygon_section_report, principal_section_report, section_report, t_section_report, triangle_section_report,
     tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
@@ -1289,6 +1289,24 @@ fn influence_line(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Builds the moving-load-train envelope of an influence line.
+///
+/// The request requires `track`, `quantity`, `axles` and `spacings` and
+/// accepts optional `direction` (`x` or `y`, default `y`), `points` (default
+/// 11), `step` (default 0.01, a fraction of the track length) and `out`.
+#[function]
+fn influence_line_train(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let out = request.get("out").and_then(Value::as_str).map(str::to_string);
+    let train: InfluenceTrainRequest =
+        serde_json::from_value(request).map_err(|error| argument_error(&format!("`request` is invalid: {error}")))?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.influence_line_train(&train, out.as_deref().map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Solves a geometric-nonlinear truss model with a large-displacement Newton
 /// iteration.
 ///
@@ -1422,6 +1440,7 @@ register_module![
     node_reaction,
     internal_forces,
     influence_line,
+    influence_line_train,
     stresses,
     deflections,
     nodal_stresses,

@@ -5480,3 +5480,246 @@ pub fn solve_influence_line(
         governing: InfluenceExtreme { position: governing.position, value: governing.value },
     })
 }
+
+/// Version of the JSON report produced by [`solve_influence_line_train`].
+pub const INFLUENCE_TRAIN_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the influence-line load-train JSON report.
+pub const INFLUENCE_TRAIN_REPORT_FORMAT: &str = "open-cae-influence-line-train-report";
+
+/// Value identifying a load-train envelope in [`InfluenceTrainSolution::analysis`].
+pub const INFLUENCE_TRAIN_ANALYSIS: &str = "influenceLineTrain";
+
+fn default_influence_direction() -> InfluenceDirection {
+    InfluenceDirection::Y
+}
+
+fn default_influence_points() -> usize {
+    11
+}
+
+fn default_influence_step() -> f64 {
+    0.01
+}
+
+/// Moving load train applied to the influence line built by [`solve_influence_line`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfluenceTrainRequest {
+    /// Identifier of the track element the train moves along.
+    pub track: String,
+    /// Reaction or section quantity to envelope.
+    pub quantity: InfluenceQuantity,
+    /// Direction of the axle loads; defaults to `"y"`.
+    #[serde(default = "default_influence_direction")]
+    pub direction: InfluenceDirection,
+    /// Axle loads in train order, the first entry leading the train.
+    pub axles: Vec<f64>,
+    /// Distances between consecutive axles along the train direction, `axles.len() - 1` entries.
+    pub spacings: Vec<f64>,
+    /// Number of influence-line samples including both track ends; defaults to 11.
+    #[serde(default = "default_influence_points")]
+    pub points: usize,
+    /// Train position sampling step as a fraction of the track length; defaults to 0.01.
+    #[serde(default = "default_influence_step")]
+    pub step: f64,
+}
+
+/// Extreme of a load-train envelope with the train position that produced it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfluenceTrainExtreme {
+    /// Leading-axle coordinate along the track in model length units.
+    pub position: f64,
+    /// Envelope value of the sampled quantity at that train position.
+    pub value: f64,
+    /// Number of axles standing on the track at that train position.
+    pub axles_on_track: usize,
+}
+
+/// Load-train envelope produced by [`solve_influence_line_train`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfluenceTrainSolution {
+    /// Report format tag, always `open-cae-influence-line-train-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Analysis identifier, always `influenceLineTrain`.
+    pub analysis: String,
+    /// Identifier of the track element the train moved along.
+    pub track: String,
+    /// Length of the (unsplit) track element.
+    pub length: f64,
+    /// Direction of the axle loads (`"x"` or `"y"`).
+    pub direction: String,
+    /// Enveloped quantity with the track element filled in as section default.
+    pub quantity: InfluenceQuantity,
+    /// Number of influence-line samples, including both track ends.
+    pub points: usize,
+    /// Train position sampling step as a fraction of the track length.
+    pub step: f64,
+    /// Axle loads in train order.
+    pub axles: Vec<f64>,
+    /// Distances between consecutive axles.
+    pub spacings: Vec<f64>,
+    /// Distance from the leading to the trailing axle.
+    pub train_length: f64,
+    /// Piecewise-linear influence ordinates reused from [`solve_influence_line`].
+    pub samples: Vec<InfluenceSample>,
+    /// Smallest envelope value.
+    pub min: InfluenceTrainExtreme,
+    /// Largest envelope value.
+    pub max: InfluenceTrainExtreme,
+    /// Envelope extreme with the largest absolute value.
+    pub governing: InfluenceTrainExtreme,
+}
+
+/// Evaluates the piecewise-linear influence line at one normalised load position.
+fn influence_ordinate(samples: &[InfluenceSample], position: f64) -> f64 {
+    let last = samples.len() - 1;
+    if position <= samples[0].position {
+        return samples[0].value;
+    }
+    if position >= samples[last].position {
+        return samples[last].value;
+    }
+    for index in 0..last {
+        let from = &samples[index];
+        let to = &samples[index + 1];
+        if position <= to.position {
+            let fraction = (position - from.position) / (to.position - from.position);
+            return from.value + (to.value - from.value) * fraction;
+        }
+    }
+    samples[last].value
+}
+
+/// Envelopes a moving load train over the influence line of [`solve_influence_line`].
+///
+/// The train is a sequence of axle loads kept at fixed distances, with the
+/// first entry leading. It moves along the track element and the response is
+/// the sum of every axle load times the influence ordinate below it. The
+/// influence line is sampled once as a piecewise-linear polyline and reused
+/// for every train position; the structure is never re-solved. Candidates for
+/// the envelope are a uniform grid of step [`InfluenceTrainRequest::step`]
+/// (a fraction of the track length) plus, for every axle, the exact positions
+/// where that axle crosses an influence-line vertex, which is where the
+/// envelope of a piecewise-linear ordinate attains its extremes. Axles outside
+/// the track do not load the structure and are excluded from the sum, so the
+/// train may enter and leave the track partially. The model must not carry any
+/// other load, exactly as for [`solve_influence_line`].
+pub fn solve_influence_line_train(model: &Model, request: &InfluenceTrainRequest) -> Result<InfluenceTrainSolution, CaeError> {
+    if request.axles.is_empty() {
+        return Err(CaeError::new("influence/empty-train", "a moving load train requires at least one axle"));
+    }
+    if request.spacings.len() + 1 != request.axles.len() {
+        return Err(CaeError::new(
+            "influence/spacing-mismatch",
+            format!(
+                "a train with {} axles requires exactly {} axle spacings, but {} were given",
+                request.axles.len(),
+                request.axles.len() - 1,
+                request.spacings.len()
+            ),
+        ));
+    }
+    if request.axles.iter().any(|axle| !axle.is_finite()) {
+        return Err(CaeError::new("influence/invalid-axle-load", "every axle load must be a finite force"));
+    }
+    if request.spacings.iter().any(|spacing| !spacing.is_finite() || *spacing < 0.0) {
+        return Err(CaeError::new("influence/negative-spacing", "every axle spacing must be finite and non-negative"));
+    }
+    if !request.step.is_finite() || request.step <= 0.0 || request.step > 1.0 {
+        return Err(CaeError::new(
+            "influence/invalid-step",
+            format!(
+                "the train sampling step must be finite and within (0, 1] as a fraction of the track length (currently {})",
+                request.step
+            ),
+        ));
+    }
+    let line = solve_influence_line(model, &request.track, &request.quantity, request.direction, request.points)?;
+
+    let mut offsets = vec![0.0; request.axles.len()];
+    for (index, spacing) in request.spacings.iter().enumerate() {
+        offsets[index + 1] = offsets[index] + spacing / line.length;
+    }
+    let last_offset = *offsets.last().expect("the train has at least one axle");
+    let maximum = 1.0 + last_offset;
+
+    let mut positions: Vec<f64> = Vec::new();
+    let mut position = 0.0;
+    while position < maximum {
+        positions.push(position);
+        position += request.step;
+    }
+    positions.push(maximum);
+    for sample in &line.samples {
+        for offset in &offsets {
+            let critical = sample.position + offset;
+            if critical >= -POSITION_TOLERANCE && critical <= maximum + POSITION_TOLERANCE {
+                positions.push(critical.clamp(0.0, maximum));
+            }
+        }
+    }
+    positions.sort_by(f64::total_cmp);
+    positions.dedup_by(|current, previous| (*current - *previous).abs() <= POSITION_TOLERANCE);
+
+    let extremes: Vec<InfluenceTrainExtreme> = positions
+        .iter()
+        .map(|position| {
+            let mut value = 0.0;
+            let mut axles_on_track = 0usize;
+            for (axle, offset) in request.axles.iter().zip(&offsets) {
+                let ordinate = position - offset;
+                if (-POSITION_TOLERANCE..=1.0 + POSITION_TOLERANCE).contains(&ordinate) {
+                    value += axle * influence_ordinate(&line.samples, ordinate.clamp(0.0, 1.0));
+                    axles_on_track += 1;
+                }
+            }
+            InfluenceTrainExtreme { position: position * line.length, value, axles_on_track }
+        })
+        .collect();
+
+    let min = extremes.iter().fold(
+        extremes[0].clone(),
+        |current: InfluenceTrainExtreme, extreme| {
+            if extreme.value < current.value { extreme.clone() } else { current }
+        },
+    );
+    let max = extremes.iter().fold(
+        extremes[0].clone(),
+        |current: InfluenceTrainExtreme, extreme| {
+            if extreme.value > current.value { extreme.clone() } else { current }
+        },
+    );
+    let governing = extremes.iter().fold(extremes[0].clone(), |current: InfluenceTrainExtreme, extreme| {
+        if extreme.value.abs() > current.value.abs() { extreme.clone() } else { current }
+    });
+
+    Ok(InfluenceTrainSolution {
+        format: INFLUENCE_TRAIN_REPORT_FORMAT.to_string(),
+        version: INFLUENCE_TRAIN_REPORT_VERSION,
+        units: line.units.clone(),
+        analysis: INFLUENCE_TRAIN_ANALYSIS.to_string(),
+        track: line.track.clone(),
+        length: line.length,
+        direction: line.direction.clone(),
+        quantity: line.quantity.clone(),
+        points: line.points,
+        step: request.step,
+        axles: request.axles.clone(),
+        spacings: request.spacings.clone(),
+        train_length: request.spacings.iter().sum(),
+        samples: line.samples,
+        min,
+        max,
+        governing,
+    })
+}
+
+/// Tolerance for treating normalised load positions as equal.
+const POSITION_TOLERANCE: f64 = 1e-12;

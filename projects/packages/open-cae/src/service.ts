@@ -43,6 +43,8 @@ import type {
     InfluenceLineOptions,
     InfluenceLineSolution,
     InfluenceQuantity,
+    InfluenceTrainOptions,
+    InfluenceTrainSolution,
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
@@ -505,6 +507,25 @@ export function influenceLine(path: string, options: InfluenceLineOptions): Infl
                 quantity: options.quantity,
                 direction: options.direction,
                 points: options.points,
+                out: options.out,
+            }),
+        ),
+    );
+}
+
+/** Builds the moving-load-train envelope of an influence line. */
+export function influenceLineTrain(path: string, options: InfluenceTrainOptions): InfluenceTrainSolution {
+    return decode<InfluenceTrainSolution>(() =>
+        binding('influence.line.train').influence_line_train(
+            path,
+            JSON.stringify({
+                track: options.track,
+                quantity: options.quantity,
+                direction: options.direction,
+                axles: options.axles,
+                spacings: options.spacings,
+                points: options.points,
+                step: options.step,
                 out: options.out,
             }),
         ),

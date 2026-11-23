@@ -101,6 +101,11 @@ export const errorCodes = [
     'influence/track-not-beam',
     'influence/invalid-position',
     'influence/invalid-component',
+    'influence/empty-train',
+    'influence/spacing-mismatch',
+    'influence/negative-spacing',
+    'influence/invalid-axle-load',
+    'influence/invalid-step',
     'capability/not-implemented',
 ] as const;
 

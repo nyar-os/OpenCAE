@@ -237,6 +237,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return forcesCommand(args.slice(1));
         case 'influence':
             return influenceCommand(args.slice(1));
+        case 'influence-train':
+            return influenceTrainCommand(args.slice(1));
         case 'reactions':
             return reactionsCommand(args.slice(1));
         case 'reaction':
@@ -1690,6 +1692,90 @@ function influenceComponentOption(quantityKind: string, parsed: Parsed): string 
         return raw;
     }
     throw failure('cli/invalid-option', 'unknownSectionComponent', { value: raw });
+}
+
+async function influenceTrainCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(
+        args,
+        [
+            '--track',
+            '--quantity',
+            '--node',
+            '--component',
+            '--element',
+            '--position',
+            '--direction',
+            '--axles',
+            '--spacings',
+            '--points',
+            '--step',
+            '--out',
+        ],
+        [],
+    );
+    const usage =
+        'influence-train <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] --axles <P,...> --spacings <d,...> [--points N] [--step f] [--out report.json]';
+    const file = positional(parsed, 0, usage);
+    const track = required(parsed, '--track');
+    const quantityKind = required(parsed, '--quantity');
+    if (quantityKind !== 'reaction' && quantityKind !== 'section') {
+        throw failure('cli/invalid-option', 'unknownInfluenceQuantity', { value: quantityKind });
+    }
+    const direction = influenceDirectionOption(parsed);
+    const points = pointsOption(parsed);
+    const step = number(parsed, '--step');
+    const component = influenceComponentOption(quantityKind, parsed);
+    const quantity: InfluenceQuantity =
+        quantityKind === 'reaction'
+            ? { kind: 'reaction', node: required(parsed, '--node'), component: component as ReactionComponent }
+            : {
+                  kind: 'section',
+                  element: parsed.options.get('--element'),
+                  position: requiredNumber(parsed, '--position'),
+                  component: component as SectionComponent,
+              };
+    const axles = numberListOption(parsed, '--axles');
+    const spacings = numberListOption(parsed, '--spacings');
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.influenceLineTrain({
+            track,
+            quantity,
+            direction,
+            axles,
+            spacings,
+            points,
+            step,
+            out: parsed.options.get('--out'),
+        });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+function pointsOption(parsed: Parsed): number | undefined {
+    const raw = parsed.options.get('--points');
+    if (raw === undefined) {
+        return undefined;
+    }
+    const points = Number(raw);
+    if (!Number.isInteger(points) || points < 2) {
+        throw failure('cli/invalid-number', 'invalidPoints', { value: raw });
+    }
+    return points;
+}
+
+function numberListOption(parsed: Parsed, name: string): number[] {
+    const raw = required(parsed, name);
+    const values = raw
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .map((entry) => Number(entry));
+    if (values.length === 0 || !values.every((value) => Number.isFinite(value))) {
+        throw failure('cli/invalid-number', 'invalidNumberList', { option: name, value: raw });
+    }
+    return values;
 }
 
 async function reactionsCommand(args: readonly string[]): Promise<number> {

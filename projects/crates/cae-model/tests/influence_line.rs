@@ -5,8 +5,9 @@
 //! can be checked against the analytic value.
 
 use cae_model::{
-    ElementKind, INFLUENCE_ANALYSIS, INFLUENCE_LINE_REPORT_FORMAT, INFLUENCE_LINE_REPORT_VERSION, InfluenceDirection,
-    InfluenceQuantity, Model, ReactionComponent, SectionComponent, Units, solve_influence_line,
+    ElementKind, INFLUENCE_ANALYSIS, INFLUENCE_LINE_REPORT_FORMAT, INFLUENCE_LINE_REPORT_VERSION, INFLUENCE_TRAIN_ANALYSIS,
+    INFLUENCE_TRAIN_REPORT_FORMAT, INFLUENCE_TRAIN_REPORT_VERSION, InfluenceDirection, InfluenceQuantity,
+    InfluenceTrainRequest, Model, ReactionComponent, SectionComponent, Units, solve_influence_line, solve_influence_line_train,
 };
 
 const E: f64 = 210_000.0;
@@ -190,4 +191,154 @@ fn influence_line_validation_reports_stable_codes() {
     three_d.dimension = 3;
     let error = solve_influence_line(&three_d, "b1", &right, InfluenceDirection::Y, 5).unwrap_err();
     assert_eq!(error.code, "capability/not-implemented");
+}
+
+fn train(axles: &[f64], spacings: &[f64], quantity: InfluenceQuantity) -> InfluenceTrainRequest {
+    InfluenceTrainRequest {
+        track: "b1".to_string(),
+        quantity,
+        direction: InfluenceDirection::Y,
+        axles: axles.to_vec(),
+        spacings: spacings.to_vec(),
+        points: 5,
+        step: 0.05,
+    }
+}
+
+#[test]
+fn single_axle_train_reproduces_the_influence_line_extremes() {
+    let model = simply_supported();
+    let solution = solve_influence_line_train(&model, &train(&[3.0], &[], reaction("n2", ReactionComponent::Fy)))
+        .expect("single axle train");
+    assert_eq!(solution.format, INFLUENCE_TRAIN_REPORT_FORMAT);
+    assert_eq!(solution.version, INFLUENCE_TRAIN_REPORT_VERSION);
+    assert_eq!(solution.analysis, INFLUENCE_TRAIN_ANALYSIS);
+    assert_eq!(solution.track, "b1");
+    assert_eq!(solution.direction, "y");
+    assert_eq!(solution.units, "mm");
+    assert_eq!(solution.points, 5);
+    assert_eq!(solution.axles, vec![3.0]);
+    assert!(solution.spacings.is_empty());
+    assert_close(solution.train_length, 0.0, 1e-12);
+    // The ordinates are reused from the plain influence line without re-solving.
+    let line =
+        solve_influence_line(&model, "b1", &reaction("n2", ReactionComponent::Fy), InfluenceDirection::Y, 5).expect("line");
+    assert_eq!(solution.samples, line.samples);
+    assert_close(solution.max.value, 0.0, 1e-9);
+    assert_close(solution.max.position, 0.0, 1e-9);
+    assert_close(solution.min.value, -3.0, 1e-9);
+    assert_close(solution.min.position, L, 1e-9);
+    assert_eq!(solution.min.axles_on_track, 1);
+    assert_close(solution.governing.value, -3.0, 1e-9);
+}
+
+#[test]
+fn symmetric_two_axle_train_envelopes_the_midspan_moment() {
+    let model = simply_supported();
+    let solution = solve_influence_line_train(&model, &train(&[10.0, 10.0], &[200.0], section(0.5, SectionComponent::Moment)))
+        .expect("two axle train");
+    assert_close(solution.train_length, 200.0, 1e-12);
+    // The worst case places the axles symmetrically about the midspan vertex:
+    // 10 * (-200) + 10 * (-200) = -4000.
+    assert_close(solution.min.value, -4000.0, 1e-6);
+    assert_eq!(solution.min.axles_on_track, 2);
+    assert_close(solution.max.value, 0.0, 1e-9);
+    assert_close(solution.governing.value, -4000.0, 1e-6);
+}
+
+#[test]
+fn train_extremes_land_on_exact_critical_positions() {
+    let model = simply_supported();
+    let mut request = train(&[1.0, 10.0], &[200.0], section(0.5, SectionComponent::Moment));
+    request.points = 3;
+    request.step = 0.25;
+    let solution = solve_influence_line_train(&model, &request).expect("critical position train");
+    // With only the vertices 0, 0.5 and 1 sampled and a coarse 0.25 grid, the
+    // true extreme sits at the critical position 0.7, where the heavy trailing
+    // axle reaches the vertex: 1 * (-150) + 10 * (-250) = -2650.
+    assert_close(solution.min.value, -2650.0, 1e-6);
+    assert_close(solution.min.position, 700.0, 1e-6);
+    assert_eq!(solution.min.axles_on_track, 2);
+}
+
+#[test]
+fn multi_axle_train_envelopes_the_reaction_line_with_partial_participation() {
+    let model = simply_supported();
+    let solution =
+        solve_influence_line_train(&model, &train(&[10.0, 10.0, 10.0], &[200.0, 200.0], reaction("n2", ReactionComponent::Fy)))
+            .expect("three axle train");
+    // The right reaction ordinate is `-t`, so the most negative sum has all
+    // three axles on the track at the far end: -10 * (1.0 + 0.8 + 0.6) = -24.
+    assert_close(solution.min.value, -24.0, 1e-6);
+    assert_close(solution.min.position, L, 1e-6);
+    assert_eq!(solution.min.axles_on_track, 3);
+    // At the leading end only the front axle stands on the track at zero.
+    assert_close(solution.max.value, 0.0, 1e-9);
+    assert_eq!(solution.max.axles_on_track, 1);
+}
+
+#[test]
+fn train_validation_reports_stable_codes() {
+    let model = simply_supported();
+    let right = reaction("n2", ReactionComponent::Fy);
+
+    let error = solve_influence_line_train(&model, &train(&[], &[], right.clone())).unwrap_err();
+    assert_eq!(error.code, "influence/empty-train");
+
+    let error = solve_influence_line_train(&model, &train(&[10.0, 10.0], &[200.0, 200.0], right.clone())).unwrap_err();
+    assert_eq!(error.code, "influence/spacing-mismatch");
+
+    let error = solve_influence_line_train(&model, &train(&[10.0, 10.0], &[-200.0], right.clone())).unwrap_err();
+    assert_eq!(error.code, "influence/negative-spacing");
+
+    let error = solve_influence_line_train(&model, &train(&[f64::NAN], &[], right.clone())).unwrap_err();
+    assert_eq!(error.code, "influence/invalid-axle-load");
+
+    let mut coarse = train(&[10.0], &[], right.clone());
+    coarse.step = 0.0;
+    let error = solve_influence_line_train(&model, &coarse).unwrap_err();
+    assert_eq!(error.code, "influence/invalid-step");
+
+    coarse.step = 2.0;
+    let error = solve_influence_line_train(&model, &coarse).unwrap_err();
+    assert_eq!(error.code, "influence/invalid-step");
+
+    let mut missing = train(&[10.0], &[], right.clone());
+    missing.track = "b9".to_string();
+    let error = solve_influence_line_train(&model, &missing).unwrap_err();
+    assert_eq!(error.code, "element/unknown-id");
+
+    let mut loaded = simply_supported();
+    loaded.add_load("n2", None, Some(-10.0)).expect("load");
+    let error = solve_influence_line_train(&loaded, &train(&[10.0], &[], right)).unwrap_err();
+    assert_eq!(error.code, "influence/loads-present");
+}
+
+#[test]
+fn train_requests_apply_defaults_and_reports_are_deterministic() {
+    let request: InfluenceTrainRequest = serde_json::from_str(
+        r#"{
+            "track": "b1",
+            "quantity": { "kind": "reaction", "node": "n2", "component": "fy" },
+            "axles": [10.0, 10.0],
+            "spacings": [200.0]
+        }"#,
+    )
+    .expect("request");
+    assert_eq!(request.direction, InfluenceDirection::Y);
+    assert_eq!(request.points, 11);
+    assert_close(request.step, 0.01, 1e-12);
+
+    let model = simply_supported();
+    let first = serde_json::to_string(
+        &solve_influence_line_train(&model, &train(&[10.0, 10.0], &[200.0], section(0.5, SectionComponent::Moment)))
+            .expect("first"),
+    )
+    .expect("json");
+    let second = serde_json::to_string(
+        &solve_influence_line_train(&model, &train(&[10.0, 10.0], &[200.0], section(0.5, SectionComponent::Moment)))
+            .expect("second"),
+    )
+    .expect("json");
+    assert_eq!(first, second);
 }

@@ -742,6 +742,57 @@ export interface InfluenceLineOptions {
     readonly out?: string;
 }
 
+/** Options of `influenceLineTrain()`. */
+export interface InfluenceTrainOptions {
+    /** Track element along which the train moves. */
+    readonly track: string;
+    /** Reaction or section quantity to envelope. */
+    readonly quantity: InfluenceQuantity;
+    /** Direction of the axle loads; defaults to `y`. */
+    readonly direction?: InfluenceDirection;
+    /** Axle loads in train order, the first entry leading the train. */
+    readonly axles: readonly number[];
+    /** Distances between consecutive axles; `axles.length - 1` entries. */
+    readonly spacings: readonly number[];
+    /** Number of influence-line samples including both ends; defaults to 11. */
+    readonly points?: number;
+    /** Train position sampling step as a fraction of the track length; defaults to 0.01. */
+    readonly step?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
+/** Extreme of a load-train envelope with the train position that produced it. */
+export interface InfluenceTrainExtreme {
+    /** Leading-axle coordinate along the track in model length units. */
+    readonly position: number;
+    /** Envelope value of the sampled quantity at that train position. */
+    readonly value: number;
+    /** Number of axles standing on the track at that train position. */
+    readonly axlesOnTrack: number;
+}
+
+/** Load-train envelope returned by `influenceLineTrain()`. */
+export interface InfluenceTrainSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly analysis: string;
+    readonly track: string;
+    readonly length: number;
+    readonly direction: string;
+    readonly quantity: InfluenceQuantity;
+    readonly points: number;
+    readonly step: number;
+    readonly axles: readonly number[];
+    readonly spacings: readonly number[];
+    readonly trainLength: number;
+    readonly samples: readonly InfluenceSample[];
+    readonly min: InfluenceTrainExtreme;
+    readonly max: InfluenceTrainExtreme;
+    readonly governing: InfluenceTrainExtreme;
+}
+
 /** Section stress recovered at one station. */
 export interface StationStress {
     readonly position: number;

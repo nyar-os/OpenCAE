@@ -41,6 +41,8 @@ import type {
     HeatSolution,
     InfluenceLineOptions,
     InfluenceLineSolution,
+    InfluenceTrainOptions,
+    InfluenceTrainSolution,
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
@@ -395,6 +397,12 @@ export class CaeDocument {
     influenceLine(options: InfluenceLineOptions): InfluenceLineSolution {
         this.assertOpen();
         return service.influenceLine(this.path, options);
+    }
+
+    /** Builds the moving-load-train envelope of an influence line. */
+    influenceLineTrain(options: InfluenceTrainOptions): InfluenceTrainSolution {
+        this.assertOpen();
+        return service.influenceLineTrain(this.path, options);
     }
 
     /** Returns support reactions and the global force equilibrium check. */

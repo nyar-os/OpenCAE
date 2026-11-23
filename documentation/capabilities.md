@@ -30,6 +30,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | beam stress recovery and utilisation (`stresses`) | ✅ supported |
 | deflected-shape sampling (`deflections`, local deflection/rotation and deformed coordinates) | ✅ supported |
 | influence lines (`influenceLine`, reaction/section ordinates as a unit load moves along a track beam; unloaded model required) | ✅ supported |
+| moving load train envelopes (`influenceLineTrain`, axle loads at fixed spacings over the influence line polyline; unloaded model required) | ✅ supported |
 | averaged nodal stress and extremes (`nodalStresses`) | ✅ supported |
 | load-case summary table (`loadCases`, `base` plus every combination) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
@@ -59,7 +60,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `thermalGradient`, `heat`, `partialSpanLoad`, `elasticSupports`,
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
-`nodalStress`, `loadCases` and `influenceLine` are available through the Rust API, the native
+`nodalStress`, `loadCases`, `influenceLine` and `influenceLineTrain` are available through the Rust API, the native
 addon and the TypeScript SDK. Custom polygon section properties
 (`polygonSection`) are exposed as `polygon_section_report()` in Rust,
 `section_polygon` in the addon and `sectionPolygon()` in the SDK/CLI.
@@ -572,6 +573,24 @@ be finite and positive and a model without nodes is rejected with
     supported and cantilever beams reproduce the closed-form ordinates, e.g.
     the midspan bending-moment line of a simply supported beam peaks at
     `−L/4`.
+34. **Moving load trains**: `solve_influence_line_train(model, request)`
+    (CLI `open-cae influence-train`, SDK `document.influenceLineTrain`)
+    envelopes an axle-load train — `axles` forces kept at fixed `spacings`,
+    first entry leading — over the influence line of item 33. The line is
+    sampled once as a piecewise-linear polyline and reused for every train
+    position; the structure is never re-solved. Candidate positions are a
+    uniform grid (`step`, a fraction of the track length, default `0.01`)
+    plus the exact positions where any axle crosses an influence-line
+    vertex, where the envelope of a piecewise-linear ordinate attains its
+    extremes. Axles outside the track are excluded from the sum, so the
+    train may enter and leave the track partially, and each extreme reports
+    the leading-axle coordinate and the number of axles on the track. Empty
+    `axles` report `influence/empty-train`, a wrong `spacings` count reports
+    `influence/spacing-mismatch`, negative or non-finite spacings report
+    `influence/negative-spacing`, non-finite axle loads report
+    `influence/invalid-axle-load` and an out-of-range `step` reports
+    `influence/invalid-step`; the underlying line keeps the validation of
+    item 33.
 
 ## Validation and tests
 ```shell
