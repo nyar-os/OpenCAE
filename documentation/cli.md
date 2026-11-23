@@ -120,10 +120,18 @@ Section shapes and their geometry flags:
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae combination add <file>` | `--name <name> [--loads <f>] [--gravity <f>]` | Adds or replaces a combination; defaults are `1` and `0`. |
+| `open-cae combination add <file>` | `--name <name> [--loads <f>] [--gravity <f>] [--patterns <list>]` | Adds or replaces a combination; `--loads` and `--gravity` default to `1` and `0`. `--patterns` replaces the whole pattern list with `name=factor` entries such as `live=1.0,wind=1.5`; an empty or malformed list reports `cli/invalid-option`, and a pattern missing from the document reports `combination/unknown-pattern` at solve time. |
 | `open-cae combination remove <file>` | `--name <name>` | Removes a combination. |
 | `open-cae combinations <file>` | `[--out <file>]` | Solves every combination and prints solutions plus the envelope. |
 | `open-cae buckling-combinations <file>` | `[--modes <N>] [--out <file>]` | Buckling factors per combination and the governing combination. |
+
+Named load patterns are stored in the document as a list of concentrated nodal
+loads and are never solved on their own: a combination adds each referenced
+pattern multiplied by its factor, on top of the `--loads`/`--gravity` scaled
+applied case. The CLI can mix existing patterns but does not create them; create
+pattern entries with `document.addPatternLoad()` in the SDK, then reference them
+here. Patterns only carry nodal forces and moments, not element loads,
+temperatures or gravity.
 
 ### Analysis
 
@@ -255,6 +263,14 @@ instead of constraining it:
 
 ```shell
 open-cae support add beam.ocae --node n2 --ky 5000
+```
+
+Mix two named load patterns into one combination (the document must already
+define `live` and `wind` through the SDK's `addPatternLoad()`):
+
+```shell
+open-cae combination add demo.ocae --name wind+live --loads 1 --patterns live=1.0,wind=1.5
+open-cae combinations demo.ocae --out combinations.json
 ```
 
 Tension-only cable: mark the member, then run the active-set solve.

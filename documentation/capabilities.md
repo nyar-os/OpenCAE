@@ -42,7 +42,8 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | construction stages / element birth–death summaries (`constructionStages`, active element subsets + stage factors) | ✅ supported |
 | geometric-nonlinear truss analysis (`geometricNonlinear`, corotational Newton iteration with load increments) | ✅ supported |
 | tension-only cable trusses (`tensionOnly`, active-set iteration with slack members removed) | ✅ supported |
-| load combinations (`loadCombinations`, linear factors + envelope) | ✅ supported |
+| load combinations (`loadCombinations`, linear factors + envelope; named load pattern factors mixed in) | ✅ supported |
+| named load patterns (`loadPatterns`, concentrated nodal load layouts referenced by combinations) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
 | parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse / equilateral triangle / equal-thickness Z; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
@@ -60,8 +61,14 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `thermalGradient`, `heat`, `partialSpanLoad`, `elasticSupports`,
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
-`nodalStress`, `loadCases`, `influenceLine` and `influenceLineTrain` are available through the Rust API, the native
-addon and the TypeScript SDK. Custom polygon section properties
+`nodalStress`, `loadCases`, `influenceLine`, `influenceLineTrain`,
+`loadPatterns` and `loadCombinations` are available through the Rust API, the
+native addon and the TypeScript SDK. Load patterns are `add_pattern_load()`
+nodal loads grouped by name in Rust, `pattern_add`/`pattern_remove` in the
+addon and `addPatternLoad()`/`removePattern()` in the SDK. A combination mixes
+them through `add_combination_with_patterns()` in Rust, `combination_add` with
+a `patterns` array in the addon and `document.addCombination({ patterns })` in
+the SDK and the CLI (`combination add --patterns`). Custom polygon section properties
 (`polygonSection`) are exposed as `polygon_section_report()` in Rust,
 `section_polygon` in the addon and `sectionPolygon()` in the SDK/CLI.
 Parametric standard sections (`standardSection`) are exposed as
@@ -196,8 +203,9 @@ be finite and positive and a model without nodes is rejected with
    as possible.
 10. **Load combinations**: each combination clones the model, multiplies every
     nodal load and element distributed load by `loads`, multiplies the gravity
-    vector by `gravity` (clearing it when the result is the zero vector),
-    solves the scaled model and keeps the full static solution. The envelope
+    vector by `gravity` (clearing it when the result is the zero vector), then
+    adds every referenced named pattern's nodal loads multiplied by its factor.
+    The scaled model is solved and the full static solution kept. The envelope
     reports the governing nodal displacement, signed axial force/moment maxima
     and per-node/per-element extremes with the combination names that produced
     them. Prescribed displacements and element temperature changes are not
@@ -731,6 +739,19 @@ stable codes.
   combinations round-trip through `.ocae`, and the session writes the JSON
   report.
 
+`tests/load_patterns.rs` asserts named load patterns:
+
+- two patterns mixed with `factor 1` and `factor 2` reproduce the equivalent
+  superposed nodal load case (`1e-9`), and pattern loads add to the applied
+  `--loads` case exactly like the reference model;
+- the solved combination and the `.ocae` round trip preserve the pattern list,
+  and `remove_pattern_load()` keeps an empty pattern while
+  `remove_pattern()` deletes it;
+- pattern edits reuse the plain-load codes (`load/unknown-node`,
+  `document/dimension-mismatch`, `pattern/invalid-name`), and validation
+  reports `pattern/duplicate-name`, `combination/duplicate-pattern` and
+  `combination/unknown-pattern`.
+
 `tests/library.rs` asserts the material and section library:
 
 - rectangular, circular, I-section, box, tube and channel area, strong/weak
@@ -968,9 +989,11 @@ threshold of `1e-9`.
   and coupled thermo-mechanical fields — is not supported,
   and arbitrary curved distributed loads and loads in a global direction are
   also not supported; load combinations do not scale temperature changes.
-- Load combinations only scale the **single applied load set and self-weight**;
-  independent named load patterns (separate live-load cases) are not modelled,
-  so a combination cannot mix two different nodal load layouts.
+- Named load patterns hold **concentrated nodal forces and moments only**. They
+  can be mixed into any combination by name and factor, but element distributed
+  loads, temperatures, gravity and supports are not pattern members, so two
+  different element-load or thermal layouts still cannot be mixed by a
+  combination.
 - In-place edits (`node update`, `element update`) move nodes and reconnect
   **existing truss/beam endpoints**, and `element update` can also replace the
   distributed load, uniform temperature change, gradient and convection data of
