@@ -1602,23 +1602,28 @@ combinationCommand
     .option('--name <name>', 'cli.opt.name')
     .option('--loads <f>', 'cli.opt.loads')
     .option('--gravity <f>', 'cli.opt.gravity')
+    .option('--thermal <f>', 'cli.opt.thermal')
     .option('--patterns <list>', 'cli.opt.patterns')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
-            const file = b.file('combination add <file> --name <name> [--loads <f>] [--gravity <f>] [--patterns <list>]');
+            const file = b.file(
+                'combination add <file> --name <name> [--loads <f>] [--gravity <f>] [--thermal <f>] [--patterns <list>]',
+            );
             const name = b.required('--name');
             const loads = b.number('--loads') ?? 1;
             const gravity = b.number('--gravity') ?? 0;
+            const thermal = b.number('--thermal') ?? 1;
             const patterns = b.raw('--patterns') === undefined ? undefined : parsePatternList(ctx, b.required('--patterns'));
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
-                const summary = document.addCombination({ name, loads, gravity, patterns });
+                const summary = document.addCombination({ name, loads, gravity, thermal, patterns });
                 ctx.stdout(
                     b.message('combinationSet', {
                         name,
                         loads: String(loads),
                         gravity: String(gravity),
+                        thermal: String(thermal),
                         revision: String(summary.revision),
                     }),
                 );
