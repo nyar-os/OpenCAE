@@ -74,6 +74,7 @@ export interface NativeBinding {
     deflections(path: string, requestJson?: string): string;
     nodal_stresses(path: string, requestJson?: string): string;
     load_cases(path: string, requestJson?: string): string;
+    model_summary(path: string, requestJson?: string): string;
     matrices(path: string, requestJson?: string): string;
     response_spectrum(path: string, requestJson: string): string;
     frequency_response(path: string, requestJson: string): string;

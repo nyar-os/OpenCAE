@@ -56,6 +56,8 @@ import type {
     MaterialSetRequest,
     MatrixOptions,
     ModalSolution,
+    ModelSummaryOptions,
+    ModelSummaryReport,
     NodeAddRequest,
     NodeDisplacement,
     NodeHeatRequest,
@@ -487,6 +489,15 @@ export class CaeDocument {
         return service.loadCases(this.path, options);
     }
 
+    /**
+     * Reports member length, volume, mass and degree-of-freedom statistics
+     * without solving the document.
+     */
+    modelSummary(options: ModelSummaryOptions = {}): ModelSummaryReport {
+        this.assertOpen();
+        return service.modelSummary(this.path, options);
+    }
+
     /** Exports the assembled global stiffness and lumped mass matrices. */
     matrices(options: MatrixOptions = {}): SystemMatrices {
         this.assertOpen();
@@ -526,7 +537,8 @@ export class CaeDocument {
     /**
      * Exports the solved document as `csv`, `vtk`, `md`, `html` or `svg`.
      * `options.scale` multiplies the nodal displacements of an SVG deformed
-     * shape and defaults to `1`.
+     * shape and defaults to `1`; `options.stations` sets the sampled rows of the
+     * CSV `forces.csv` table and defaults to `11`.
      */
     export(format: ExportFormat, target: string, options: ExportOptions = {}): ExportReport {
         this.assertOpen();

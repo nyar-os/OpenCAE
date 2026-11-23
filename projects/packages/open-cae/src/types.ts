@@ -35,6 +35,11 @@ export interface ExportOptions {
      * shape of an SVG export. Must be finite and positive; defaults to `1`.
      */
     readonly scale?: number;
+    /**
+     * Stations sampled per member in the `forces.csv` table of a CSV export.
+     * Counts both element ends and must be at least 2; defaults to `11`.
+     */
+    readonly stations?: number;
 }
 
 /** Session options. Constructing a session opens no file. */
@@ -991,6 +996,51 @@ export interface LoadCaseSummary {
 
 /** Options of `loadCases()`. */
 export interface LoadCaseOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
+/** Quantity and degree-of-freedom summary computed without solving. */
+export interface ModelSummaryReport {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly dimension: Dimension;
+    /** Monotonically increasing edit counter. */
+    readonly revision: number;
+    readonly nodes: number;
+    readonly elements: number;
+    readonly trussElements: number;
+    readonly beamElements: number;
+    readonly supports: number;
+    readonly loads: number;
+    readonly patterns: number;
+    readonly combinations: number;
+    /** Total member length. */
+    readonly totalLength: number;
+    readonly trussLength: number;
+    readonly beamLength: number;
+    /** Total member volume `Σ A·L`. */
+    readonly volume: number;
+    /** Member mass `Σ density·A·L`. */
+    readonly memberMass: number;
+    /** Sum of the concentrated nodal masses. */
+    readonly nodalMass: number;
+    /** `memberMass + nodalMass`. */
+    readonly totalMass: number;
+    /** Mass centroid, or `null` when the total mass is zero. */
+    readonly centerOfMass: readonly [number, number, number] | null;
+    readonly translationalDofs: number;
+    /** Rotational degrees of freedom; 2D beam nodes only. */
+    readonly rotationalDofs: number;
+    readonly totalDofs: number;
+    /** Degrees of freedom restrained by rigid or inclined supports. */
+    readonly constrainedDofs: number;
+    readonly freeDofs: number;
+}
+
+/** Options of `modelSummary()`. */
+export interface ModelSummaryOptions {
     /** When given, the JSON report is written atomically to this path. */
     readonly out?: string;
 }

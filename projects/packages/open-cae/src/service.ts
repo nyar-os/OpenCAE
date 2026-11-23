@@ -58,6 +58,8 @@ import type {
     MaterialSetRequest,
     MatrixOptions,
     ModalSolution,
+    ModelSummaryOptions,
+    ModelSummaryReport,
     NodeAddRequest,
     NodeDisplacement,
     NodeHeatRequest,
@@ -604,6 +606,16 @@ export function loadCases(path: string, options: LoadCaseOptions = {}): LoadCase
     );
 }
 
+/** Summarises member quantities, mass and degree-of-freedom statistics. */
+export function modelSummary(path: string, options: ModelSummaryOptions = {}): ModelSummaryReport {
+    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    return decode<ModelSummaryReport>(() =>
+        request === undefined
+            ? binding('model.summary').model_summary(path)
+            : binding('model.summary').model_summary(path, request),
+    );
+}
+
 /** Solves a response-spectrum analysis by modal superposition (SRSS or CQC). */
 export function responseSpectrum(path: string, options: ResponseSpectrumOptions): ResponseSpectrumSolution {
     if (!Array.isArray(options.spectrum) || options.spectrum.length === 0) {
@@ -695,7 +707,9 @@ export function exportDocument(
     target: string,
     options: ExportOptions = {},
 ): ExportReport {
-    const request = options.scale === undefined ? undefined : JSON.stringify({ scale: options.scale });
+    const request = options.scale === undefined && options.stations === undefined
+        ? undefined
+        : JSON.stringify({ scale: options.scale, stations: options.stations });
     return decode<ExportReport>(() =>
         request === undefined
             ? binding('export').export(path, format, target)

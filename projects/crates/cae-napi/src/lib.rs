@@ -67,6 +67,16 @@ fn required_number_field(request: &Value, name: &str) -> Result<f64> {
     number_field(request, name)?.ok_or_else(|| argument_error(&format!("`{name}` is required")))
 }
 
+fn usize_field(request: &Value, name: &str) -> Result<Option<usize>> {
+    match request.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(|value| Some(value as usize))
+            .ok_or_else(|| argument_error(&format!("`{name}` must be a non-negative integer"))),
+    }
+}
+
 fn text_field(request: &Value, name: &str) -> Result<String> {
     match request.get(name).and_then(Value::as_str) {
         Some(value) if !value.is_empty() => Ok(value.to_string()),
@@ -1259,6 +1269,21 @@ fn load_cases(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Summarises member quantities, mass and degree-of-freedom statistics.
+///
+/// The request accepts an optional `out` path for the JSON report. The summary
+/// is computed from the document alone and does not solve it.
+#[function]
+fn model_summary(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = optional_object(&ctx, 1)?;
+    let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.model_summary(out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Solves a response-spectrum analysis by modal superposition.
 ///
 /// The request accepts `spectrum` (array of `{ period, acceleration }` points),
@@ -1460,20 +1485,24 @@ fn tension_only(ctx: CallContext) -> Result<JsValue> {
 /// Exports a solved document as `csv`, `vtk`, `md`, `html` or `svg`.
 ///
 /// The optional fourth argument is a JSON object with a `scale` number that
-/// multiplies the nodal displacements of the SVG deformed shape (default `1`).
+/// multiplies the nodal displacements of the SVG deformed shape (default `1`)
+/// and a `stations` integer that sets the sampled rows of the CSV
+/// `forces.csv` table (default 11).
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
     let format = text(&ctx, 1)?.parse::<ExportFormat>().map_err(fail)?;
     let target = text(&ctx, 2)?;
     let options = optional_object(&ctx, 3)?;
-    let scale = match options.as_ref() {
-        Some(options) => number_field(options, "scale")?.unwrap_or(1.0),
-        None => 1.0,
-    };
+    let mut scale = 1.0;
+    let mut stations = None;
+    if let Some(options) = options.as_ref() {
+        scale = number_field(options, "scale")?.unwrap_or(1.0);
+        stations = usize_field(options, "stations")?;
+    }
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let report = session.export_with_options(format, Path::new(&target), ExportOptions { scale }).map_err(fail)?;
+    let report = session.export_with_options(format, Path::new(&target), ExportOptions { scale, stations }).map_err(fail)?;
     respond(&ctx, &report)
 }
 
@@ -1548,6 +1577,7 @@ register_module![
     deflections,
     nodal_stresses,
     load_cases,
+    model_summary,
     matrices,
     response_spectrum,
     frequency_response,
