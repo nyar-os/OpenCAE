@@ -10,7 +10,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{CaeError, ExportFormat, ExportOptions, Model, OpenCae, OpenCaeOptions, Units, export_svg, solve};
+use cae_model::{
+    CaeError, ContourQuantity, ElementKind, ExportFormat, ExportOptions, Model, OpenCae, OpenCaeOptions, Units, export_svg,
+    solve,
+};
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock").as_nanos();
@@ -44,6 +47,33 @@ fn three_dimensional_bar(path: &Path) -> OpenCae {
     session.add_support("a", true, true, true).expect("support a");
     session.add_support("b", false, true, true).expect("support b");
     session.add_load("b", Some(1000.0), None, None).expect("load b");
+    session
+}
+
+/// Cantilever beam fixed at `n1` with a 1000 N downward tip load at `n2`.
+fn cantilever(path: &Path) -> OpenCae {
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.create(path, OpenCaeOptions { units: Some(Units::Millimeter), dimension: Some(2) }).expect("create");
+    session.add_node("n1", 0.0, 0.0, None).expect("n1");
+    session.add_node("n2", 1000.0, 0.0, None).expect("n2");
+    session.add_element_full("b1", "n1", "n2", None, None, ElementKind::Beam, Some(1.0e6), None).expect("beam");
+    session.set_material(210_000.0, 100.0, Some("steel".to_string())).expect("material");
+    session.add_support_full("n1", true, true, false, true).expect("fixed support");
+    session.add_load("n2", None, Some(-1000.0), None).expect("tip load");
+    session
+}
+
+/// Single 1000 mm bar in 1000 N tension.
+fn tension_bar(path: &Path) -> OpenCae {
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.create(path, OpenCaeOptions { units: Some(Units::Millimeter), dimension: Some(2) }).expect("create");
+    session.add_node("n1", 0.0, 0.0, None).expect("n1");
+    session.add_node("n2", 1000.0, 0.0, None).expect("n2");
+    session.add_element("e1", "n1", "n2", None, None).expect("bar");
+    session.set_material(210_000.0, 100.0, Some("steel".to_string())).expect("material");
+    session.add_support("n1", true, true, false).expect("support n1");
+    session.add_support("n2", false, true, false).expect("support n2");
+    session.add_load("n2", Some(1000.0), None, None).expect("tension");
     session
 }
 
@@ -119,4 +149,76 @@ fn svg_export_reports_stable_errors() {
 
     assert!(!directory.join("zero.svg").exists());
     let _ = session;
+}
+
+#[test]
+fn svg_moment_contour_reports_the_fixed_end_moment() {
+    let directory = temporary_dir("contour-moment");
+    let path = directory.join("cantilever.ocae");
+    let session = cantilever(&path);
+    let target = directory.join("moment.svg");
+    let options = ExportOptions { contour: Some(ContourQuantity::Moment), stations: Some(11), ..ExportOptions::default() };
+
+    session.export_with_options(ExportFormat::Svg, &target, options).expect("contour export");
+    let text = fs::read_to_string(&target).expect("moment.svg");
+    assert!(text.contains("OpenCAE model and contour"), "missing contour title: {text}");
+    assert!(text.contains("contour: bending moment (N·mm)"), "missing legend title: {text}");
+    // The fixed-end moment of a 1000 N tip load on a 1000 mm cantilever is
+    // P·L = 1e6 N·mm; the legend prints the sampled extreme.
+    assert!(text.contains("1000000.000"), "missing P·L extreme: {text}");
+    assert!(text.contains("<rect"), "missing colour bar: {text}");
+    assert!(text.contains("stroke=\"#1d4ed8\"") || text.contains("stroke=\"#b91c1c\""), "missing contour colour: {text}");
+    assert!(!text.contains("<polyline"), "a contour drawing replaces the blue deformed polyline");
+
+    session.export_with_options(ExportFormat::Svg, &target, options).expect("repeat contour export");
+    let repeated = fs::read_to_string(&target).expect("moment.svg");
+    assert_eq!(text, repeated, "repeated contour exports must be byte-identical");
+}
+
+#[test]
+fn svg_axial_contour_of_a_tension_bar_is_uniform_red() {
+    let directory = temporary_dir("contour-axial");
+    let path = directory.join("bar.ocae");
+    let session = tension_bar(&path);
+    let target = directory.join("axial.svg");
+    let options = ExportOptions { contour: Some(ContourQuantity::Axial), ..ExportOptions::default() };
+
+    session.export_with_options(ExportFormat::Svg, &target, options).expect("contour export");
+    let text = fs::read_to_string(&target).expect("axial.svg");
+    assert!(text.contains("contour: axial force (N)"), "missing axial legend: {text}");
+    assert!(text.contains("1000.000"), "missing 1000 N axial force: {text}");
+    assert!(text.contains("stroke=\"#b91c1c\""), "the maximum must be drawn red: {text}");
+}
+
+#[test]
+fn svg_displacement_contour_reports_the_bar_extension() {
+    let directory = temporary_dir("contour-displacement");
+    let path = directory.join("bar.ocae");
+    let session = tension_bar(&path);
+    let target = directory.join("displacement.svg");
+    let options = ExportOptions { contour: Some(ContourQuantity::Displacement), ..ExportOptions::default() };
+
+    session.export_with_options(ExportFormat::Svg, &target, options).expect("contour export");
+    let text = fs::read_to_string(&target).expect("displacement.svg");
+    assert!(text.contains("contour: displacement (mm)"), "missing displacement legend: {text}");
+    // FL/(EA) = 1000·1000/(210000·100) = 0.047619 mm.
+    assert!(text.contains("0.0476"), "missing bar extension: {text}");
+}
+
+#[test]
+fn svg_contour_rejects_unknown_quantities_and_non_svg_formats() {
+    let error = "pressure".parse::<ContourQuantity>().expect_err("unknown quantity");
+    assert_eq!(error.code, "export/invalid-contour");
+
+    let directory = temporary_dir("contour-errors");
+    let path = directory.join("bar.ocae");
+    let session = tension_bar(&path);
+    let error = session
+        .export_with_options(
+            ExportFormat::Csv,
+            &directory.join("tables"),
+            ExportOptions { contour: Some(ContourQuantity::Axial), ..ExportOptions::default() },
+        )
+        .expect_err("contour on CSV must fail");
+    assert_eq!(error.code, "export/invalid-contour");
 }

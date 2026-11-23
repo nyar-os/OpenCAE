@@ -54,7 +54,10 @@ mod validate;
 
 pub use crate::{
     error::CaeError,
-    export::{export_csv, export_csv_with_stations, export_html, export_md, export_svg, export_vtk, write_atomic},
+    export::{
+        ContourQuantity, export_csv, export_csv_with_stations, export_html, export_md, export_svg, export_svg_with_contour,
+        export_vtk, write_atomic,
+    },
     library::{
         MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, PrincipalSectionReport, SectionProperties, SectionReport,
         StandardSectionReport, angle_section_report, channel_standard_section_report, ellipse_section_report,
@@ -160,6 +163,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "md": "supported",
     "html": "supported",
     "svg": "supported",
+    "svgContour": "supported",
     "inp": "unsupported",
     "step": "unsupported"
   }

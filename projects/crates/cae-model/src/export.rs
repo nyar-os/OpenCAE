@@ -1,4 +1,4 @@
-use std::{fmt::Write as _, fs, path::Path};
+use std::{fmt::Write as _, fs, path::Path, str::FromStr};
 
 use science_mesh::{Cell, CellKind, Field, Mesh, MeshError};
 
@@ -366,6 +366,75 @@ fn format_float(value: f64) -> String {
     format!("{value:.6e}")
 }
 
+/// Result quantity an SVG contour export colours the members by.
+///
+/// The values come from the same reports the CLI and SDK return
+/// (`internalForces` for `axial`, `shear` and `moment`, nodal displacement
+/// magnitudes for `displacement`), so the legend and the numbers cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContourQuantity {
+    /// Axial force, positive in tension.
+    Axial,
+    /// Transverse shear force.
+    Shear,
+    /// Bending moment.
+    Moment,
+    /// Nodal displacement magnitude.
+    Displacement,
+}
+
+impl ContourQuantity {
+    /// Returns the short identifier used by the CLI, the addon and the SDK.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Axial => "axial",
+            Self::Shear => "shear",
+            Self::Moment => "moment",
+            Self::Displacement => "displacement",
+        }
+    }
+
+    /// Returns the human readable label shown in the SVG legend.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Axial => "axial force",
+            Self::Shear => "shear force",
+            Self::Moment => "bending moment",
+            Self::Displacement => "displacement",
+        }
+    }
+
+    /// Returns the unit label of the quantity in the document unit system.
+    pub fn unit(self, units: Units) -> &'static str {
+        match (self, units) {
+            (Self::Axial | Self::Shear, _) => "N",
+            (Self::Moment, Units::Millimeter) => "N·mm",
+            (Self::Moment, Units::Meter) => "N·m",
+            (Self::Displacement, Units::Millimeter) => "mm",
+            (Self::Displacement, Units::Meter) => "m",
+        }
+    }
+}
+
+impl FromStr for ContourQuantity {
+    type Err = CaeError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "axial" => Ok(Self::Axial),
+            "shear" => Ok(Self::Shear),
+            "moment" => Ok(Self::Moment),
+            "displacement" => Ok(Self::Displacement),
+            other => Err(CaeError::new(
+                "export/invalid-contour",
+                format!(
+                    "unsupported contour quantity `{other}`; valid values are `axial`, `shear`, `moment` or `displacement`"
+                ),
+            )),
+        }
+    }
+}
+
 /// Writes a deterministic, self-contained SVG drawing of the model and its
 /// deformed shape.
 ///
@@ -385,6 +454,28 @@ fn format_float(value: f64) -> String {
 /// When `path` ends in `.svg` it is used as the output file, otherwise `path`
 /// is treated as a directory and `model.svg` is created inside it.
 pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -> Result<(), CaeError> {
+    export_svg_with_contour(model, solution, scale, None, 11, path)
+}
+
+/// Writes a deterministic SVG drawing that can colour the members by a result
+/// quantity instead of drawing a plain deformed shape.
+///
+/// With `contour == None` the output is exactly the drawing of
+/// [`export_svg`]. With a quantity the members of the deformed model are drawn
+/// as coloured segments: blue is the minimum, white is zero and red is the
+/// maximum, using the sampled values at `stations` points per member. A colour
+/// bar below the model names the quantity, its unit and the sampled minimum and
+/// maximum, so the drawing and the numbers of `internalForces` (or the nodal
+/// displacement magnitudes) agree. `stations` counts both element ends and must
+/// be at least `2`; it only affects a contour export.
+pub fn export_svg_with_contour(
+    model: &Model,
+    solution: &Solution,
+    scale: f64,
+    contour: Option<ContourQuantity>,
+    stations: usize,
+    path: &Path,
+) -> Result<(), CaeError> {
     if model.nodes.is_empty() {
         return Err(CaeError::new("export/no-solution", "the model has no nodes, so there is no shape to draw"));
     }
@@ -409,6 +500,7 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
         .zip(&solution.nodes)
         .map(|(node, result)| (node.x + scale * result.ux, node.y + scale * result.uy))
         .collect();
+    let series = contour.map(|quantity| contour_series(model, solution, &deformed, quantity, stations)).transpose()?;
 
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
@@ -448,6 +540,7 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
     let project = |x: f64, y: f64| (origin_x + (x - min_x) * factor, origin_y + (max_y - y) * factor);
 
     let scale_label = format!("{scale:.2}");
+    let heading = if contour.is_some() { "OpenCAE model and contour" } else { "OpenCAE model and deformed shape" };
     let mut text = String::new();
     text.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(
@@ -455,11 +548,12 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {VIEW_WIDTH} {VIEW_HEIGHT}\" width=\"960\" height=\"720\" \
          role=\"img\" aria-labelledby=\"ocae-svg-title\">"
     );
-    text.push_str("<title id=\"ocae-svg-title\">OpenCAE model and deformed shape</title>\n");
+    let _ = writeln!(text, "<title id=\"ocae-svg-title\">{heading}</title>");
     text.push_str("<rect x=\"0\" y=\"0\" width=\"960\" height=\"720\" fill=\"#ffffff\"/>\n");
-    text.push_str(
+    let _ = writeln!(
+        text,
         "<text x=\"480\" y=\"30\" text-anchor=\"middle\" font-family=\"system-ui, sans-serif\" font-size=\"20\" \
-         fill=\"#111827\">OpenCAE model and deformed shape</text>\n",
+         fill=\"#111827\">{heading}</text>"
     );
     text.push_str(
         "<defs>\n<marker id=\"ocae-load-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" \
@@ -468,6 +562,7 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
     );
     text.push_str("<g stroke-linecap=\"round\">\n");
 
+    let mut endpoints = Vec::with_capacity(model.elements.len());
     for element in &model.elements {
         let from = model
             .nodes
@@ -479,6 +574,9 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
             .iter()
             .position(|node| node.id == element.to)
             .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+        endpoints.push((from, to));
+    }
+    for &(from, to) in &endpoints {
         let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
         let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
         let _ = writeln!(
@@ -486,23 +584,27 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
             "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1\"/>"
         );
     }
-    for element in &model.elements {
-        let from = model
-            .nodes
-            .iter()
-            .position(|node| node.id == element.from)
-            .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
-        let to = model
-            .nodes
-            .iter()
-            .position(|node| node.id == element.to)
-            .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
-        let (x1, y1) = project(deformed[from].0, deformed[from].1);
-        let (x2, y2) = project(deformed[to].0, deformed[to].1);
-        let _ = writeln!(
-            text,
-            "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
-        );
+    if let Some(series) = &series {
+        let limit = series.min.abs().max(series.max.abs());
+        for segment in &series.segments {
+            let (x1, y1) = project(segment.x1, segment.y1);
+            let (x2, y2) = project(segment.x2, segment.y2);
+            let color = contour_color(segment.value, limit);
+            let _ = writeln!(
+                text,
+                "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"{color}\" stroke-width=\"4\"/>"
+            );
+        }
+    }
+    else {
+        for &(from, to) in &endpoints {
+            let (x1, y1) = project(deformed[from].0, deformed[from].1);
+            let (x2, y2) = project(deformed[to].0, deformed[to].1);
+            let _ = writeln!(
+                text,
+                "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
+            );
+        }
     }
     for &(x, y) in &undeformed {
         let (cx, cy) = project(x, y);
@@ -556,27 +658,255 @@ pub fn export_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -
     }
     text.push_str("</g>\n");
 
+    if let (Some(quantity), Some(series)) = (contour, &series) {
+        write_contour_legend(&mut text, quantity, series, model.units.unwrap_or(Units::Millimeter));
+    }
+    let legend_y = if contour.is_some() { 700.0 } else { 686.0 };
+    let legend_text_y = legend_y + 4.0;
     text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"13\" fill=\"#111827\">\n");
-    text.push_str(
-        "<line x1=\"40\" y1=\"686\" x2=\"70\" y2=\"686\" stroke=\"#9ca3af\" stroke-width=\"1\"/>\n\
-         <text x=\"78\" y=\"690\">undeformed</text>\n",
+    let _ = writeln!(
+        text,
+        "<line x1=\"40\" y1=\"{legend_y}\" x2=\"70\" y2=\"{legend_y}\" stroke=\"#9ca3af\" stroke-width=\"1\"/>\n\
+         <text x=\"78\" y=\"{legend_text_y}\">undeformed</text>"
+    );
+    let deformed_label = if contour.is_some() { "contour" } else { "deformed" };
+    let _ = writeln!(
+        text,
+        "<line x1=\"190\" y1=\"{legend_y}\" x2=\"220\" y2=\"{legend_y}\" stroke=\"#2563eb\" stroke-width=\"2\"/>\n\
+         <text x=\"228\" y=\"{legend_text_y}\">{deformed_label} (scale {scale_label})</text>"
     );
     let _ = writeln!(
         text,
-        "<line x1=\"190\" y1=\"686\" x2=\"220\" y2=\"686\" stroke=\"#2563eb\" stroke-width=\"2\"/>\n\
-         <text x=\"228\" y=\"690\">deformed (scale {scale_label})</text>"
+        "<polygon points=\"400,{:.2} 392,{:.2} 408,{:.2}\" fill=\"#16a34a\"/>\n\
+         <text x=\"416\" y=\"{legend_text_y}\">support</text>",
+        legend_y - 6.0,
+        legend_y + 8.0,
+        legend_y + 8.0
     );
-    text.push_str(
-        "<polygon points=\"400,680 392,694 408,694\" fill=\"#16a34a\"/>\n\
-         <text x=\"416\" y=\"690\">support</text>\n",
+    let _ = writeln!(
+        text,
+        "<line x1=\"520\" y1=\"{legend_y}\" x2=\"550\" y2=\"{legend_y}\" stroke=\"#dc2626\" stroke-width=\"2\" \
+         marker-end=\"url(#ocae-load-arrow)\"/>\n<text x=\"558\" y=\"{legend_text_y}\">load</text>"
     );
-    text.push_str(
-        "<line x1=\"520\" y1=\"686\" x2=\"550\" y2=\"686\" stroke=\"#dc2626\" stroke-width=\"2\" \
-         marker-end=\"url(#ocae-load-arrow)\"/>\n<text x=\"558\" y=\"690\">load</text>\n",
+    let _ = writeln!(
+        text,
+        "<text x=\"920\" y=\"{legend_text_y}\" text-anchor=\"end\">projection: XY (Z ignored)</text>\n</g>\n</svg>\n"
     );
-    text.push_str("<text x=\"920\" y=\"690\" text-anchor=\"end\">projection: XY (Z ignored)</text>\n</g>\n</svg>\n");
 
     write_atomic(&target, &text)
+}
+
+/// One straight coloured piece of a contour drawing, in model coordinates.
+struct ContourSegment {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    value: f64,
+}
+
+/// Coloured segments plus the sampled minimum and maximum of a contour.
+struct ContourSeries {
+    segments: Vec<ContourSegment>,
+    min: f64,
+    max: f64,
+}
+
+/// Samples `quantity` at `stations` points per member and builds the segments
+/// along the deformed centreline.
+///
+/// Each segment is coloured by the endpoint with the larger magnitude, so a
+/// peak at a station always colours the adjacent segment instead of being
+/// averaged away. `min` and `max` are the sampled extremes, which are exactly
+/// the values printed in the legend.
+fn contour_series(
+    model: &Model,
+    solution: &Solution,
+    deformed: &[(f64, f64)],
+    quantity: ContourQuantity,
+    stations: usize,
+) -> Result<ContourSeries, CaeError> {
+    let stations = stations.max(2);
+    let mut segments = Vec::new();
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut displacement_extremes = None;
+    let mut force_extremes = None;
+    let mut push = |x1: f64, y1: f64, x2: f64, y2: f64, value: f64| {
+        min = min.min(value);
+        max = max.max(value);
+        segments.push(ContourSegment { x1, y1, x2, y2, value });
+    };
+
+    if quantity == ContourQuantity::Displacement {
+        let magnitudes: Vec<f64> = solution.nodes.iter().map(|node| node.magnitude).collect();
+        displacement_extremes = Some((
+            magnitudes.iter().copied().fold(f64::INFINITY, f64::min),
+            magnitudes.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        ));
+        let divisions = stations - 1;
+        for element in &model.elements {
+            let from = model
+                .nodes
+                .iter()
+                .position(|node| node.id == element.from)
+                .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+            let to = model
+                .nodes
+                .iter()
+                .position(|node| node.id == element.to)
+                .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+            for index in 0..divisions {
+                let start = index as f64 / divisions as f64;
+                let end = (index + 1) as f64 / divisions as f64;
+                let (x1, y1) = interpolate(deformed[from], deformed[to], start);
+                let (x2, y2) = interpolate(deformed[from], deformed[to], end);
+                let value = interpolate_value(magnitudes[from], magnitudes[to], start)
+                    .abs()
+                    .max(interpolate_value(magnitudes[from], magnitudes[to], end).abs());
+                push(x1, y1, x2, y2, value);
+            }
+        }
+    }
+    else {
+        let forces = solve_internal_forces(model, stations)?;
+        let mut extremes: Option<(f64, f64)> = None;
+        for (element, diagram) in model.elements.iter().zip(&forces.elements) {
+            let from = model
+                .nodes
+                .iter()
+                .position(|node| node.id == element.from)
+                .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+            let to = model
+                .nodes
+                .iter()
+                .position(|node| node.id == element.to)
+                .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+            if !diagram.length.is_finite() || diagram.length <= 0.0 {
+                continue;
+            }
+            let mut low = f64::INFINITY;
+            let mut high = f64::NEG_INFINITY;
+            for station in &diagram.stations {
+                let value = station_value(station, quantity);
+                low = low.min(value);
+                high = high.max(value);
+            }
+            extremes = Some(match extremes {
+                None => (low, high),
+                Some((minimum, maximum)) => (minimum.min(low), maximum.max(high)),
+            });
+            for window in diagram.stations.windows(2) {
+                let start = (window[0].position / diagram.length).clamp(0.0, 1.0);
+                let end = (window[1].position / diagram.length).clamp(0.0, 1.0);
+                let (first, second) = (station_value(&window[0], quantity), station_value(&window[1], quantity));
+                let value = if first.abs() >= second.abs() { first } else { second };
+                let (x1, y1) = interpolate(deformed[from], deformed[to], start);
+                let (x2, y2) = interpolate(deformed[from], deformed[to], end);
+                push(x1, y1, x2, y2, value);
+            }
+        }
+        force_extremes = extremes;
+    }
+
+    if segments.is_empty() {
+        min = 0.0;
+        max = 0.0;
+    }
+    if let Some((low, high)) = displacement_extremes.or(force_extremes) {
+        min = low;
+        max = high;
+    }
+    Ok(ContourSeries { segments, min, max })
+}
+
+fn station_value(station: &crate::solver::SectionForces, quantity: ContourQuantity) -> f64 {
+    match quantity {
+        ContourQuantity::Axial => station.axial_force,
+        ContourQuantity::Shear => station.shear,
+        ContourQuantity::Moment => station.moment,
+        ContourQuantity::Displacement => 0.0,
+    }
+}
+
+fn interpolate(start: (f64, f64), end: (f64, f64), fraction: f64) -> (f64, f64) {
+    (start.0 + (end.0 - start.0) * fraction, start.1 + (end.1 - start.1) * fraction)
+}
+
+fn interpolate_value(start: f64, end: f64, fraction: f64) -> f64 {
+    start + (end - start) * fraction
+}
+
+/// Maps a value onto a blue–white–red diverging scale normalised by `limit`.
+fn contour_color(value: f64, limit: f64) -> String {
+    const NEGATIVE: (f64, f64, f64) = (29.0, 78.0, 216.0);
+    const NEUTRAL: (f64, f64, f64) = (248.0, 250.0, 252.0);
+    const POSITIVE: (f64, f64, f64) = (185.0, 28.0, 28.0);
+    let ratio = if limit.is_finite() && limit > 0.0 { (value / limit).clamp(-1.0, 1.0) } else { 0.0 };
+    let (from, to, t) = if ratio < 0.0 { (NEGATIVE, NEUTRAL, 1.0 + ratio) } else { (NEUTRAL, POSITIVE, ratio) };
+    let blend = |a: f64, b: f64| (a + (b - a) * t).round().clamp(0.0, 255.0) as u8;
+    format!("#{:02x}{:02x}{:02x}", blend(from.0, to.0), blend(from.1, to.1), blend(from.2, to.2))
+}
+
+fn format_contour_value(value: f64) -> String {
+    let magnitude = value.abs();
+    if value == 0.0 {
+        "0".to_string()
+    }
+    else if magnitude >= 1.0e7 || magnitude < 1.0e-3 {
+        format!("{value:.3e}")
+    }
+    else if magnitude < 1.0 {
+        format!("{value:.4}")
+    }
+    else {
+        format!("{value:.3}")
+    }
+}
+
+fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &ContourSeries, units: Units) {
+    const BAR_LEFT: f64 = 600.0;
+    const BAR_RIGHT: f64 = 920.0;
+    const BAR_TOP: f64 = 644.0;
+    const BAR_HEIGHT: f64 = 12.0;
+    const STEPS: usize = 12;
+    let limit = series.min.abs().max(series.max.abs());
+    // Solver round-off leaves values such as -1e-10 where the analytical value
+    // is zero; snapping them keeps the legend readable without hiding a real
+    // extreme (the tolerance is relative to the largest sampled magnitude).
+    let snap = |value: f64| if limit > 0.0 && value.abs() <= 1.0e-12 * limit { 0.0 } else { value };
+    let minimum = snap(series.min);
+    let maximum = snap(series.max);
+    let _ = writeln!(
+        text,
+        "<g font-family=\"system-ui, sans-serif\" font-size=\"13\" fill=\"#111827\">\n\
+         <text x=\"{BAR_LEFT}\" y=\"638\">contour: {} ({})</text>",
+        quantity.label(),
+        quantity.unit(units)
+    );
+    let width = (BAR_RIGHT - BAR_LEFT) / STEPS as f64;
+    for step in 0..STEPS {
+        let ratio = -1.0 + 2.0 * step as f64 / (STEPS - 1) as f64;
+        let color = contour_color(ratio * limit, limit);
+        let x = BAR_LEFT + step as f64 * width;
+        let _ = writeln!(
+            text,
+            "<rect x=\"{x:.2}\" y=\"{BAR_TOP}\" width=\"{width:.2}\" height=\"{BAR_HEIGHT}\" fill=\"{color}\"/>"
+        );
+    }
+    let _ = writeln!(text, "<text x=\"{BAR_LEFT}\" y=\"676\" font-size=\"11\">{}</text>", format_contour_value(minimum));
+    if minimum < 0.0 && maximum > 0.0 {
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"676\" font-size=\"11\" text-anchor=\"middle\">0</text>",
+            (BAR_LEFT + BAR_RIGHT) / 2.0
+        );
+    }
+    let _ = writeln!(
+        text,
+        "<text x=\"{BAR_RIGHT}\" y=\"676\" font-size=\"11\" text-anchor=\"end\">{}</text>\n</g>",
+        format_contour_value(maximum)
+    );
 }
 
 fn missing_svg_node(element: &str, node: &str) -> CaeError {

@@ -16,7 +16,9 @@ use serde::Serialize;
 
 use crate::{
     CAPABILITIES_JSON, CaeError,
-    export::{export_csv_with_stations, export_html, export_md, export_svg, export_vtk, write_atomic},
+    export::{
+        ContourQuantity, export_csv_with_stations, export_html, export_md, export_svg_with_contour, export_vtk, write_atomic,
+    },
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
     solver::{
@@ -167,11 +169,17 @@ pub struct ExportOptions {
     /// `None` keeps the default of 11 stations. The value counts both element
     /// ends and must be at least `2`; other formats ignore it.
     pub stations: Option<usize>,
+    /// Result quantity that an SVG export colours the members by.
+    ///
+    /// `None` keeps the plain deformed-shape drawing. A quantity turns the SVG
+    /// into a contour drawing with a colour bar; every other format rejects the
+    /// option with `export/invalid-contour`.
+    pub contour: Option<ContourQuantity>,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        Self { scale: 1.0, stations: None }
+        Self { scale: 1.0, stations: None, contour: None }
     }
 }
 
@@ -1357,13 +1365,21 @@ impl OpenCae {
     /// Solves the open document and exports the result with `options`.
     ///
     /// `options.scale` only affects the SVG format: it multiplies the nodal
-    /// displacements of the deformed shape. Other formats ignore it.
+    /// displacements of the deformed shape. `options.contour` is also SVG-only
+    /// and turns the drawing into a result contour with a colour bar; every
+    /// other format rejects it with `export/invalid-contour`.
     pub fn export_with_options(
         &self,
         format: ExportFormat,
         target: &Path,
         options: ExportOptions,
     ) -> Result<ExportReport, CaeError> {
+        if options.contour.is_some() && format != ExportFormat::Svg {
+            return Err(CaeError::new(
+                "export/invalid-contour",
+                format!("the contour option only applies to SVG export, not `{}`", format.as_str()),
+            ));
+        }
         let model = &self.current()?.model;
         let solution = solve(model)?;
         let files = match format {
@@ -1412,7 +1428,14 @@ impl OpenCae {
                 vec![file.display().to_string()]
             }
             ExportFormat::Svg => {
-                export_svg(model, &solution, options.scale, target)?;
+                export_svg_with_contour(
+                    model,
+                    &solution,
+                    options.scale,
+                    options.contour,
+                    options.stations.unwrap_or(11),
+                    target,
+                )?;
                 let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {
                     target.to_path_buf()
                 }
