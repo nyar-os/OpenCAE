@@ -114,6 +114,7 @@ Section shapes and their geometry flags:
 | `open-cae load remove <file>` | `--node <n>` | Removes the nodal load. |
 | `open-cae model gravity <file>` | `[--gx] [--gy] [--gz]` | Sets the gravity vector; omitted components are 0. |
 | `open-cae model ambient <file>` | `[--temperature <Ta>] [--clear]` | Sets the ambient temperature used by surface convection in `heat`; `--clear` removes it. Ignored by structural analysis. |
+| `open-cae model summary <file>` | `[--out <file>]` | Member length, volume, mass and mass centroid plus translational, rotational, constrained and free degree-of-freedom counts. Computed without solving; units are never converted (`mm` documents report `mm`, `mm³` and tonnes). |
 | `open-cae self-weight <file>` | `--g <g> [--axis x\|y\|z]` | Shorthand for gravity along one axis; `--axis` defaults to `y`. |
 
 ### Combinations
@@ -183,7 +184,7 @@ negative convection coefficient or a non-positive perimeter reports
 | `open-cae load-cases <file>` | `[--out <file>]` | One summary row for `base` and each combination. |
 | `open-cae matrices <file>` | `[--out <file>]` | Assembled global stiffness and lumped mass matrices with row labels. |
 | `open-cae spectrum <file>` | `[--modes <N>] [--axis x\|y\|z] [--combination srss\|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out <file>]` | Response spectrum from `period:acceleration` points; `--axis` defaults to `x` and `--combination` to `srss`. `--damping` is the single modal damping ratio in `(0, 1]`, required by `cqc` and ignored by `srss`. |
-| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N]` | CSV writes `nodes.csv`, `elements.csv` and `reactions.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. |
+| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N] [--stations N]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and does not change the other tables. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. |
 
 ### Rejected commands
 

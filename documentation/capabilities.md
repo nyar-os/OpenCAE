@@ -33,6 +33,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | moving load train envelopes (`influenceLineTrain`, axle loads at fixed spacings over the influence line polyline; unloaded model required) | ✅ supported |
 | averaged nodal stress and extremes (`nodalStresses`) | ✅ supported |
 | load-case summary table (`loadCases`, `base` plus every combination) | ✅ supported |
+| model quantity and DOF summary (`modelSummary`, member length/volume/mass/centroid plus translational, rotational, constrained and free DOF counts) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
 | linear elastic spring supports (`elasticSupports`, translational and rotational stiffness) | ✅ supported |
 | inclined/rotated roller supports (`inclinedSupports`, arbitrary constraint direction in 2D) | ✅ supported |
@@ -62,7 +63,8 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
 `nodalStress`, `loadCases`, `influenceLine`, `influenceLineTrain`,
-`loadPatterns` and `loadCombinations` are available through the Rust API, the
+`loadPatterns`, `loadCombinations` and `modelSummary` are available through the
+Rust API, the
 native addon and the TypeScript SDK. Load patterns are `add_pattern_load()`
 nodal loads grouped by name in Rust, `pattern_add`/`pattern_remove` in the
 addon and `addPatternLoad()`/`removePattern()` in the SDK. A combination mixes
@@ -118,6 +120,18 @@ and draws grey undeformed lines, a blue deformed polyline at the requested
 contains no timestamps, so repeated exports are byte-identical; the scale must
 be finite and positive and a model without nodes is rejected with
 `export/no-solution`.
+
+Model quantities are exposed as `summarize_model()` in Rust, `model_summary` in
+the addon and `modelSummary()` in the SDK, with CLI subcommand `model summary`.
+The report needs no solve: it sums member length, volume `A·L`, member mass
+`density·A·L` (using each element area override), nodal mass and their centroid,
+and counts the solver degrees of freedom (two translations per node, three in
+three dimensions, plus one rotation at every unreleased 2D beam node; rigid and
+inclined supports restrain one each, springs none). Units are never converted,
+so a `mm` document reports `mm`, `mm³` and tonnes. A CSV export now also writes
+`forces.csv` (one row per sampled station with `position`, `axialForce`,
+`shear` and `moment`); `export --stations` controls that sampling and defaults
+to 11.
 
 ## Numerical methods
 
@@ -644,6 +658,17 @@ session JSON export.
 combinations, a gravity-dominated case, a model without combinations and the
 session JSON export.
 
+`tests/model_summary.rs`: a straight bar checked for length `L`, volume `A·L`,
+member mass `ρAL`, nodal mass, mass centroid, and the translation/constraint
+counts; beam rotations disappear as ends are released; a 3D bar reports three
+translations per node; invalid density, area, nodal mass, coordinates and
+unknown node references report their stable codes.
+
+`tests/csv_forces.rs`: a simply supported beam under `q = -1 N/mm` exports
+`forces.csv` whose first sampled shear is `-qL/2` and midspan moment is
+`-qL²/8`, the `stations` option changes only the force table, and a station
+count below 2 reports `analysis/invalid-stations`.
+
 `tests/partial_load.rs`: a simply supported beam loaded over its middle half —
 reactions `|q|L/4`, the piecewise shear and moments (`3|q|L²/32` at midspan),
 the sampled ends against the element end forces, the midspan deflection
@@ -1060,7 +1085,9 @@ threshold of `1e-9`.
 - CSV/VTK numerical units follow the document declaration and the exporter
   performs no conversion; VTK uses the legacy ASCII format. Markdown and HTML
   reports contain no timestamps, so repeated exports are byte-identical. CSV
-  node columns are `id,x,y,z,ux,uy,uz` (z/uz are 0 in 2D) and `reactions.csv`
-  columns are `node,fx,fy,fz,mz`.
+  node columns are `id,x,y,z,ux,uy,uz` (z/uz are 0 in 2D), `reactions.csv`
+  columns are `node,fx,fy,fz,mz`, and `forces.csv` columns are
+  `element,from,to,kind,position,axialForce,shear,moment` with 11 stations per
+  member by default (`export --stations` changes the count).
 - External formats such as Abaqus `.inp`, Nastran and STEP are neither
   imported nor exported.

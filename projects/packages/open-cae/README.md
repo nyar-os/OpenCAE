@@ -40,10 +40,13 @@ console.log(doc.solve().elements[0].axialForce); // 1000
 await cae.dispose();
 ```
 
-`doc.export()` writes `csv`, `vtk`, `md`, `html` and `svg`. The SVG drawing is
-deterministic and projects onto the global X–Y plane; `{ scale: 2 }` magnifies
-the deformed shape. From the CLI, use
+`doc.export()` writes `csv`, `vtk`, `md`, `html` and `svg`. CSV writes node,
+element, reaction and sampled internal-force tables; `{ stations: 21 }` refines
+the force table. The SVG drawing is deterministic and projects onto the global
+X–Y plane; `{ scale: 2 }` magnifies the deformed shape. From the CLI, use
 `open-cae export bar.ocae --format svg --scale 2 --out bar.svg`.
+`doc.modelSummary()` reports member length, volume, mass and degree-of-freedom
+counts without solving.
 
 ## Constraints
 
