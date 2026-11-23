@@ -605,13 +605,40 @@ pub struct Load {
     pub mz: f64,
 }
 
-/// Linear combination of the applied load case and self-weight.
+/// A named collection of concentrated nodal loads.
+///
+/// A pattern is never solved on its own: load combinations reference it by
+/// name and mix its loads into the combination with their own factor, so two
+/// different nodal load layouts (for example a live-load layout and a wind
+/// layout) can be combined independently of the applied load case.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadPattern {
+    /// Unique human readable pattern name.
+    pub name: String,
+    /// Nodal loads belonging to this pattern.
+    #[serde(default)]
+    pub loads: Vec<Load>,
+}
+
+/// One named load pattern entry of a load combination.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternFactor {
+    /// Name of the [`LoadPattern`] this factor applies to.
+    pub pattern: String,
+    /// Factor applied to every load of that pattern.
+    pub factor: f64,
+}
+
+/// Linear combination of the applied load case, self-weight and named patterns.
 ///
 /// `loads` multiplies every nodal force/moment and every element distributed
-/// load; `gravity` multiplies the gravity vector. Prescribed displacements are
-/// boundary conditions and are never scaled. A combination named `D+L` with
-/// `loads = 1` and `gravity = 1` therefore means `1.0·(live loads) +
-/// 1.0·(dead weight)`.
+/// load; `gravity` multiplies the gravity vector. Each entry of `patterns`
+/// adds the loads of the named [`LoadPattern`] multiplied by its factor.
+/// Prescribed displacements are boundary conditions and are never scaled. A
+/// combination named `D+L` with `loads = 1` and `gravity = 1` therefore means
+/// `1.0·(live loads) + 1.0·(dead weight)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadCombination {
@@ -623,6 +650,11 @@ pub struct LoadCombination {
     /// Factor applied to the gravity vector (self-weight).
     #[serde(default)]
     pub gravity: f64,
+    /// Named load patterns mixed into this combination.
+    ///
+    /// An empty list keeps existing documents and combinations unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<PatternFactor>,
 }
 
 fn default_load_factor() -> f64 {
@@ -659,6 +691,11 @@ pub struct Model {
     /// Concentrated nodal loads.
     #[serde(default)]
     pub loads: Vec<Load>,
+    /// Optional named load patterns referenced by load combinations.
+    ///
+    /// An empty list keeps existing documents unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<LoadPattern>,
     /// Optional gravity acceleration vector `g = (gx, gy, gz)`.
     ///
     /// When set, the solver applies body loads derived from the material
@@ -725,6 +762,7 @@ impl Model {
             elements: Vec::new(),
             supports: Vec::new(),
             loads: Vec::new(),
+            patterns: Vec::new(),
             gravity: None,
             ambient_temperature: None,
             combinations: Vec::new(),
@@ -1707,8 +1745,27 @@ impl Model {
     /// Adds or replaces a linear load combination.
     ///
     /// The name must be non-empty and both factors must be finite. Supplying an
-    /// existing name updates its factors in place.
+    /// existing name updates its factors in place and clears any pattern list.
     pub fn add_combination(&mut self, name: impl Into<String>, loads: f64, gravity: f64) -> Result<(), CaeError> {
+        self.add_combination_with_patterns(name, loads, gravity, Vec::new())
+    }
+
+    /// Adds or replaces a linear load combination that also mixes named load
+    /// patterns.
+    ///
+    /// The name must be non-empty and every factor (including each pattern
+    /// factor) must be finite. Supplying an existing name replaces its whole
+    /// pattern list. Pattern names are checked for emptiness and for
+    /// duplication inside the combination here; whether a referenced pattern
+    /// exists in the document is decided by validation and by the solver, so a
+    /// combination may be declared before its patterns are filled in.
+    pub fn add_combination_with_patterns(
+        &mut self,
+        name: impl Into<String>,
+        loads: f64,
+        gravity: f64,
+        patterns: Vec<PatternFactor>,
+    ) -> Result<(), CaeError> {
         let name = name.into();
         if name.trim().is_empty() {
             return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
@@ -1719,12 +1776,34 @@ impl Model {
                 format!("load combination `{name}` factors must be finite (loads={loads}, gravity={gravity})"),
             ));
         }
+        let mut seen = std::collections::HashSet::new();
+        for entry in &patterns {
+            if entry.pattern.trim().is_empty() {
+                return Err(CaeError::new(
+                    "combination/invalid-name",
+                    format!("load combination `{name}` references a pattern with an empty name"),
+                ));
+            }
+            if !entry.factor.is_finite() {
+                return Err(CaeError::new(
+                    "combination/invalid-factor",
+                    format!("pattern `{}` of load combination `{name}` requires a finite factor", entry.pattern),
+                ));
+            }
+            if !seen.insert(entry.pattern.as_str()) {
+                return Err(CaeError::new(
+                    "combination/duplicate-pattern",
+                    format!("load combination `{name}` references pattern `{}` more than once", entry.pattern),
+                ));
+            }
+        }
         if let Some(existing) = self.combinations.iter_mut().find(|combination| combination.name == name) {
             existing.loads = loads;
             existing.gravity = gravity;
+            existing.patterns = patterns;
         }
         else {
-            self.combinations.push(LoadCombination { name, loads, gravity });
+            self.combinations.push(LoadCombination { name, loads, gravity, patterns });
         }
         self.bump_revision();
         Ok(())
@@ -1735,6 +1814,106 @@ impl Model {
         let before = self.combinations.len();
         self.combinations.retain(|combination| combination.name != name);
         let removed = self.combinations.len() != before;
+        if removed {
+            self.bump_revision();
+        }
+        removed
+    }
+
+    /// Adds or updates a concentrated load inside a named load pattern.
+    ///
+    /// The pattern is created when it does not exist yet. Inside the pattern
+    /// the node entry is upserted exactly like [`Model::add_load_full`], so an
+    /// unknown node is rejected with `load/unknown-node` and out-of-plane
+    /// components are rejected for the document dimension.
+    pub fn add_pattern_load(
+        &mut self,
+        pattern: impl Into<String>,
+        node: impl Into<String>,
+        fx: Option<f64>,
+        fy: Option<f64>,
+        fz: Option<f64>,
+        mz: Option<f64>,
+    ) -> Result<(), CaeError> {
+        let pattern = pattern.into();
+        if pattern.trim().is_empty() {
+            return Err(CaeError::new("pattern/invalid-name", "a load pattern requires a non-empty name"));
+        }
+        let node = node.into();
+        if self.node(&node).is_none() {
+            return Err(CaeError::new("load/unknown-node", format!("load references unknown node `{node}`")));
+        }
+        if self.dimension != 3 && fz.is_some_and(|value| value != 0.0) {
+            return Err(dimension_mismatch(format!(
+                "a two-dimensional document cannot apply a Z load (node `{node}`); set dimension to 3 first"
+            )));
+        }
+        if self.dimension == 3 && mz.is_some_and(|value| value != 0.0) {
+            return Err(dimension_mismatch(format!(
+                "a three-dimensional document cannot apply an mz moment (node `{node}`); beam elements are two-dimensional only"
+            )));
+        }
+        let position = if let Some(index) = self.patterns.iter().position(|entry| entry.name == pattern) {
+            index
+        }
+        else {
+            self.patterns.push(LoadPattern { name: pattern, loads: Vec::new() });
+            self.patterns.len() - 1
+        };
+        let loads = &mut self.patterns[position].loads;
+        if let Some(load) = loads.iter_mut().find(|load| load.node == node) {
+            if let Some(fx) = fx {
+                load.fx = fx;
+            }
+            if let Some(fy) = fy {
+                load.fy = fy;
+            }
+            if let Some(fz) = fz {
+                load.fz = fz;
+            }
+            if let Some(mz) = mz {
+                load.mz = mz;
+            }
+        }
+        else {
+            loads.push(Load {
+                node,
+                fx: fx.unwrap_or(0.0),
+                fy: fy.unwrap_or(0.0),
+                fz: fz.unwrap_or(0.0),
+                mz: mz.unwrap_or(0.0),
+            });
+        }
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Removes a whole load pattern by name, returning whether it existed.
+    ///
+    /// Combinations that still reference the removed name become invalid and
+    /// are reported by validation and by the solver.
+    pub fn remove_pattern(&mut self, name: &str) -> bool {
+        let before = self.patterns.len();
+        self.patterns.retain(|pattern| pattern.name != name);
+        let removed = self.patterns.len() != before;
+        if removed {
+            self.bump_revision();
+        }
+        removed
+    }
+
+    /// Removes one nodal load entry from a load pattern, returning whether it
+    /// existed.
+    ///
+    /// The pattern itself is kept even when its last load is removed.
+    pub fn remove_pattern_load(&mut self, name: &str, node: &str) -> bool {
+        let Some(pattern) = self.patterns.iter_mut().find(|pattern| pattern.name == name)
+        else {
+            return false;
+        };
+        let before = pattern.loads.len();
+        pattern.loads.retain(|load| load.node != node);
+        let removed = pattern.loads.len() != before;
         if removed {
             self.bump_revision();
         }

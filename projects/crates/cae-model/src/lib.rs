@@ -63,7 +63,8 @@ pub use crate::{
     },
     model::{
         Element, ElementKind, ElementMaterial, ElementSplit, ElementUpdate, EndRelease, FORMAT, Load, LoadCombination,
-        Material, Model, Node, PrescribedDisplacement, Section, SpringStiffness, Support, Units, VERSION,
+        LoadPattern, Material, Model, Node, PatternFactor, PrescribedDisplacement, Section, SpringStiffness, Support, Units,
+        VERSION,
     },
     session::{
         DocumentSummary, ElementSplitReport, ExportFormat, ExportOptions, ExportReport, OpenCae, OpenCaeOptions, Report,
@@ -126,6 +127,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "loadCases": "supported",
     "deflections": "supported",
     "loadCombinations": "supported",
+    "loadPatterns": "supported",
     "materialLibrary": "supported",
     "polygonSection": "supported",
     "standardSection": "supported",

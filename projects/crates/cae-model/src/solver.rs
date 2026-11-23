@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CaeError, Severity,
-    model::{Element, ElementKind, Load, LoadCombination, Model, Units, rotation_nodes},
+    model::{Element, ElementKind, Load, LoadCombination, Model, PatternFactor, Units, rotation_nodes},
 };
 
 /// Version of the JSON result report produced by [`solve`].
@@ -1160,6 +1160,9 @@ pub struct CombinationCase {
     pub loads: f64,
     /// Factor applied to the gravity vector.
     pub gravity: f64,
+    /// Named load patterns mixed into this combination.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<PatternFactor>,
     /// Static solution of the scaled model.
     pub solution: Solution,
 }
@@ -2899,7 +2902,7 @@ pub fn solve_buckling_combinations(
                 format!("load combination `{}` factors must be finite", combination.name),
             ));
         }
-        let scaled = scaled_model(model, combination.loads, combination.gravity);
+        let scaled = combination_model(model, combination)?;
         let solution = solve_buckling(&scaled, modes)?;
         cases.push(BucklingCase {
             name: combination.name.clone(),
@@ -3462,7 +3465,7 @@ pub fn summarize_load_cases(model: &Model) -> Result<LoadCaseSummary, CaeError> 
                 format!("load combination `{}` requires finite loads and gravity factors", combination.name),
             ));
         }
-        let scaled = scaled_model(model, combination.loads, combination.gravity);
+        let scaled = combination_model(model, combination)?;
         let solution = solve(&scaled)?;
         cases.push(load_case_row(&combination.name, combination.loads, combination.gravity, &solution));
     }
@@ -3595,12 +3598,13 @@ pub fn solve_combinations(model: &Model, combinations: &[LoadCombination]) -> Re
                 format!("load combination `{}` factors must be finite", combination.name),
             ));
         }
-        let scaled = scaled_model(model, combination.loads, combination.gravity);
+        let scaled = combination_model(model, combination)?;
         let solution = solve(&scaled)?;
         cases.push(CombinationCase {
             name: combination.name.clone(),
             loads: combination.loads,
             gravity: combination.gravity,
+            patterns: combination.patterns.clone(),
             solution,
         });
     }
@@ -3907,6 +3911,41 @@ fn scaled_model(model: &Model, loads: f64, gravity: f64) -> Model {
         }
     }
     scaled
+}
+
+/// Builds the model solved for one load combination.
+///
+/// The applied load case and gravity are scaled by the combination factors
+/// exactly like [`scaled_model`], then every referenced load pattern adds
+/// its own nodal loads multiplied by its factor. An unknown pattern name is
+/// rejected with `combination/unknown-pattern` and a non-finite factor with
+/// `combination/invalid-factor`.
+fn combination_model(model: &Model, combination: &LoadCombination) -> Result<Model, CaeError> {
+    let mut scaled = scaled_model(model, combination.loads, combination.gravity);
+    for entry in &combination.patterns {
+        if !entry.factor.is_finite() {
+            return Err(CaeError::new(
+                "combination/invalid-factor",
+                format!("pattern `{}` of load combination `{}` requires a finite factor", entry.pattern, combination.name),
+            ));
+        }
+        let pattern = model.patterns.iter().find(|pattern| pattern.name == entry.pattern).ok_or_else(|| {
+            CaeError::new(
+                "combination/unknown-pattern",
+                format!("load combination `{}` references unknown load pattern `{}`", combination.name, entry.pattern),
+            )
+        })?;
+        for load in &pattern.loads {
+            scaled.loads.push(Load {
+                node: load.node.clone(),
+                fx: load.fx * entry.factor,
+                fy: load.fy * entry.factor,
+                fz: load.fz * entry.factor,
+                mz: load.mz * entry.factor,
+            });
+        }
+    }
+    Ok(scaled)
 }
 
 fn build_envelope(cases: &[CombinationCase]) -> CombinationEnvelope {

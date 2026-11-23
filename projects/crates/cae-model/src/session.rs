@@ -18,7 +18,7 @@ use crate::{
     CAPABILITIES_JSON, CaeError,
     export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::material_preset,
-    model::{ElementKind, ElementSplit, Material, Model, Section, Units},
+    model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InfluenceDirection, InfluenceLineSolution,
@@ -756,6 +756,65 @@ impl OpenCae {
     /// place.
     pub fn add_combination(&mut self, name: &str, loads: f64, gravity: f64) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.add_combination(name, loads, gravity))
+    }
+
+    /// Adds or replaces a load combination that also mixes named load patterns
+    /// and saves the document.
+    ///
+    /// `patterns` replaces the whole pattern list of an existing combination.
+    pub fn add_combination_with_patterns(
+        &mut self,
+        name: &str,
+        loads: f64,
+        gravity: f64,
+        patterns: &[PatternFactor],
+    ) -> Result<DocumentSummary, CaeError> {
+        let patterns = patterns.to_vec();
+        self.edit(move |model| model.add_combination_with_patterns(name, loads, gravity, patterns))
+    }
+
+    /// Adds or updates a concentrated load inside a named load pattern and
+    /// saves the document.
+    ///
+    /// The pattern is created when it does not exist yet.
+    pub fn add_pattern_load(
+        &mut self,
+        pattern: &str,
+        node: &str,
+        fx: Option<f64>,
+        fy: Option<f64>,
+        fz: Option<f64>,
+        mz: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.add_pattern_load(pattern, node, fx, fy, fz, mz))
+    }
+
+    /// Removes a whole load pattern by name and saves the document.
+    ///
+    /// A missing pattern is rejected with `pattern/unknown-pattern`.
+    pub fn remove_pattern(&mut self, name: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| {
+            if model.remove_pattern(name) {
+                Ok(())
+            }
+            else {
+                Err(CaeError::new("pattern/unknown-pattern", format!("no load pattern `{name}` exists")))
+            }
+        })
+    }
+
+    /// Removes one nodal load entry from a load pattern and saves the document.
+    ///
+    /// A missing pattern or load entry is rejected with `load/unknown-load`.
+    pub fn remove_pattern_load(&mut self, pattern: &str, node: &str) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| {
+            if model.remove_pattern_load(pattern, node) {
+                Ok(())
+            }
+            else {
+                Err(CaeError::new("load/unknown-load", format!("load pattern `{pattern}` has no load entry for node `{node}`")))
+            }
+        })
     }
 
     /// Removes a load combination by name and saves the document.

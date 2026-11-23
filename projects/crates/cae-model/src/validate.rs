@@ -701,6 +701,45 @@ impl Model {
             }
         }
 
+        let mut pattern_names = HashSet::new();
+        for pattern in &self.patterns {
+            if pattern.name.trim().is_empty() {
+                report.push(check_error("pattern/invalid-name", "a load pattern requires a non-empty name"));
+            }
+            else if !pattern_names.insert(pattern.name.as_str()) {
+                report
+                    .push(check_error("pattern/duplicate-name", format!("load pattern name `{}` is duplicated", pattern.name)));
+            }
+            for load in &pattern.loads {
+                if self.node(&load.node).is_none() {
+                    report.push(check_error("load/unknown-node", format!("load references unknown node `{}`", load.node)));
+                }
+                if self.dimension == 2 && load.fz != 0.0 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!(
+                            "node `{}` in a two-dimensional document cannot carry a Z load fz (currently fz={}); set dimension to 3 for 3D models",
+                            load.node, load.fz
+                        ),
+                    ));
+                }
+                if load.mz != 0.0 {
+                    if self.dimension == 3 {
+                        report.push(check_error(
+                            "document/dimension-mismatch",
+                            format!("node `{}` in a three-dimensional document cannot carry an mz moment; beam elements are two-dimensional only", load.node),
+                        ));
+                    }
+                    else if !rotation_nodes.contains(load.node.as_str()) {
+                        report.push(check_error(
+                            "load/inactive-dof",
+                            format!("node `{}` has no rotational degree of freedom for the mz moment: it has no beam element, or every beam end at the node is released", load.node),
+                        ));
+                    }
+                }
+            }
+        }
+
         if let Some(gravity) = self.gravity {
             if gravity.iter().any(|value| !value.is_finite()) {
                 report.push(check_error("document/invalid-gravity", "gravity acceleration g components must be finite"));
@@ -747,6 +786,39 @@ impl Model {
                         combination.name, combination.gravity
                     ),
                 ));
+            }
+            let mut pattern_refs = HashSet::new();
+            for entry in &combination.patterns {
+                if entry.pattern.trim().is_empty() {
+                    report.push(check_error(
+                        "combination/invalid-name",
+                        format!("load combination `{}` references a pattern with an empty name", combination.name),
+                    ));
+                }
+                else if !pattern_refs.insert(entry.pattern.as_str()) {
+                    report.push(check_error(
+                        "combination/duplicate-pattern",
+                        format!(
+                            "load combination `{}` references pattern `{}` more than once",
+                            combination.name, entry.pattern
+                        ),
+                    ));
+                }
+                else if !self.patterns.iter().any(|pattern| pattern.name == entry.pattern) {
+                    report.push(check_error(
+                        "combination/unknown-pattern",
+                        format!("load combination `{}` references unknown load pattern `{}`", combination.name, entry.pattern),
+                    ));
+                }
+                if !entry.factor.is_finite() {
+                    report.push(check_error(
+                        "combination/invalid-factor",
+                        format!(
+                            "pattern `{}` of load combination `{}` requires a finite factor",
+                            entry.pattern, combination.name
+                        ),
+                    ));
+                }
             }
         }
 

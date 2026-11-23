@@ -42,9 +42,9 @@ fn cantilever_load_case() -> Model {
 
 fn combinations() -> Vec<LoadCombination> {
     vec![
-        LoadCombination { name: "D".to_string(), loads: 0.0, gravity: 1.0 },
-        LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0 },
-        LoadCombination { name: "D+L".to_string(), loads: 1.0, gravity: 1.0 },
+        LoadCombination { name: "D".to_string(), loads: 0.0, gravity: 1.0, patterns: Vec::new() },
+        LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0, patterns: Vec::new() },
+        LoadCombination { name: "D+L".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() },
     ]
 }
 
@@ -116,17 +116,20 @@ fn combination_solver_rejects_an_empty_list() {
 #[test]
 fn combination_solver_rejects_invalid_factors() {
     let model = cantilever_load_case();
-    let error = solve_combinations(&model, &[LoadCombination { name: "bad".to_string(), loads: f64::NAN, gravity: 1.0 }])
-        .expect_err("non-finite factors must be rejected");
+    let error = solve_combinations(
+        &model,
+        &[LoadCombination { name: "bad".to_string(), loads: f64::NAN, gravity: 1.0, patterns: Vec::new() }],
+    )
+    .expect_err("non-finite factors must be rejected");
     assert_eq!(error.code, "combination/invalid-factor");
 }
 
 #[test]
 fn model_validates_combination_names_and_factors() {
     let mut model = cantilever_load_case();
-    model.combinations.push(LoadCombination { name: "".to_string(), loads: 1.0, gravity: 0.0 });
-    model.combinations.push(LoadCombination { name: "D".to_string(), loads: 1.0, gravity: 1.0 });
-    model.combinations.push(LoadCombination { name: "D".to_string(), loads: 1.0, gravity: 1.0 });
+    model.combinations.push(LoadCombination { name: "".to_string(), loads: 1.0, gravity: 0.0, patterns: Vec::new() });
+    model.combinations.push(LoadCombination { name: "D".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() });
+    model.combinations.push(LoadCombination { name: "D".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() });
     let codes: Vec<String> = model.validate().into_iter().map(|issue| issue.code).collect();
     assert!(codes.iter().any(|code| code == "combination/invalid-name"));
     assert!(codes.iter().any(|code| code == "combination/duplicate-name"));
@@ -170,8 +173,11 @@ fn live_only_combination_solves_without_density() {
     model.add_support("n1", true, true).expect("pin");
     model.add_support("n2", false, true).expect("lateral guide");
     model.add_load("n2", Some(1000.0), None).expect("load");
-    let result = solve_combinations(&model, &[LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0 }])
-        .expect("live combination");
+    let result = solve_combinations(
+        &model,
+        &[LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0, patterns: Vec::new() }],
+    )
+    .expect("live combination");
     let expected = 1000.0 * L / (E * A);
     assert_close(result.combinations[0].solution.nodes[1].ux, expected, 1e-9);
 }
@@ -180,7 +186,10 @@ fn live_only_combination_solves_without_density() {
 fn single_combination_matches_the_static_solution() {
     let model = cantilever_load_case();
     let static_solution = solve(&model).expect("static");
-    let result = solve_combinations(&model, &[LoadCombination { name: "full".to_string(), loads: 1.0, gravity: 1.0 }])
-        .expect("combination");
+    let result = solve_combinations(
+        &model,
+        &[LoadCombination { name: "full".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() }],
+    )
+    .expect("combination");
     assert_eq!(result.combinations[0].solution, static_solution);
 }
