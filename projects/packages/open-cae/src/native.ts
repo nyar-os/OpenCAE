@@ -60,6 +60,7 @@ export interface NativeBinding {
     pattern_remove(path: string, requestJson: string): string;
     solve_combinations(path: string, requestJson?: string): string;
     solve_buckling_combinations(path: string, requestJson?: string): string;
+    envelope(path: string, requestJson?: string): string;
     validate(path: string): string;
     solve(path: string, requestJson?: string): string;
     heat(path: string, requestJson?: string): string;

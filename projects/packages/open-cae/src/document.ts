@@ -33,6 +33,8 @@ import type {
     ElementTemperatureGradientRequest,
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
+    EnvelopeOptions,
+    EnvelopeReport,
     ExportFormat,
     ExportOptions,
     ExportReport,
@@ -415,6 +417,12 @@ export class CaeDocument {
     solveCombinations(options: CombinationSolveOptions = {}): CombinationSolution {
         this.assertOpen();
         return service.solveCombinations(this.path, options);
+    }
+
+    /** Solves the base case and every load combination, then returns the extremes and governing combinations. */
+    envelope(options: EnvelopeOptions = {}): EnvelopeReport {
+        this.assertOpen();
+        return service.envelope(this.path, options);
     }
 
     /** Solves linear buckling for every load combination and returns the factors. */

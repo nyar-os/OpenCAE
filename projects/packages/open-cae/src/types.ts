@@ -1352,6 +1352,67 @@ export interface CombinationSolution {
     readonly envelope: CombinationEnvelope;
 }
 
+/** Minimum, maximum and governing combination of one signed value. */
+export interface EnvelopeExtreme {
+    readonly min: number;
+    readonly max: number;
+    /** Combination that produced `min`; ties keep the earlier case. */
+    readonly minCombination: string;
+    /** Combination that produced `max`; ties keep the earlier case. */
+    readonly maxCombination: string;
+}
+
+/** Displacement envelope of one node. */
+export interface EnvelopeNode {
+    readonly id: string;
+    readonly ux: EnvelopeExtreme;
+    readonly uy: EnvelopeExtreme;
+    /** Present only in three-dimensional documents. */
+    readonly uz?: EnvelopeExtreme;
+}
+
+/** Force envelope of one element. */
+export interface EnvelopeElement {
+    readonly id: string;
+    /** Signed axial force, positive in tension. */
+    readonly axial: EnvelopeExtreme;
+    /** Signed shear of the end with the larger absolute shear. */
+    readonly shear: EnvelopeExtreme;
+    /** Signed bending moment of the end with the larger absolute moment. */
+    readonly moment: EnvelopeExtreme;
+}
+
+/** Reaction envelope of one supported node. */
+export interface EnvelopeReaction {
+    readonly node: string;
+    readonly fx: EnvelopeExtreme;
+    readonly fy: EnvelopeExtreme;
+    /** Present only in three-dimensional documents. */
+    readonly fz?: EnvelopeExtreme;
+}
+
+/** Result of `envelope()`. */
+export interface EnvelopeReport {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    /** Number of load combinations declared in the document. */
+    readonly combinationCount: number;
+    /** Solved case names in report order; `base` is always first. */
+    readonly cases: readonly string[];
+    readonly nodes: readonly EnvelopeNode[];
+    readonly elements: readonly EnvelopeElement[];
+    readonly reactions: readonly EnvelopeReaction[];
+    /** `true` when every case solved successfully. */
+    readonly ok: boolean;
+}
+
+/** Options of `envelope()`. */
+export interface EnvelopeOptions {
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Request of `addCombination()`. */
 export interface CombinationAddRequest {
     readonly name: string;

@@ -33,6 +33,8 @@ import type {
     ElementTemperatureGradientRequest,
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
+    EnvelopeOptions,
+    EnvelopeReport,
     ExportFormat,
     ExportOptions,
     ExportReport,
@@ -473,6 +475,14 @@ export function solveCombinations(path: string, options: CombinationSolveOptions
         request === undefined
             ? binding('combination.solve').solve_combinations(path)
             : binding('combination.solve').solve_combinations(path, request),
+    );
+}
+
+/** Solves the base case and every load combination, then returns the extremes and governing combinations. */
+export function envelope(path: string, options: EnvelopeOptions = {}): EnvelopeReport {
+    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    return decode<EnvelopeReport>(() =>
+        request === undefined ? binding('envelope').envelope(path) : binding('envelope').envelope(path, request),
     );
 }
 
