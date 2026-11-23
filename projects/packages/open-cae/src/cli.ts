@@ -1692,6 +1692,22 @@ cli
     );
 
 cli
+    .command('envelope', 'cli.cmd.envelope')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('envelope <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.envelope({ out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
     .command('buckling-combinations', 'cli.cmd.buckling-combinations')
     .option('--modes <n>', 'cli.opt.modes')
     .option('--out <file>', 'cli.opt.out')
