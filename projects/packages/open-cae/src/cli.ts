@@ -1508,7 +1508,7 @@ loadCommand
         }),
     );
 
-const modelCommand = cli.command('model', 'cli.cmd.model').actionCtx(groupAction('model', 'gravity or ambient'));
+const modelCommand = cli.command('model', 'cli.cmd.model').actionCtx(groupAction('model', 'gravity, ambient or summary'));
 modelCommand
     .command('gravity', 'cli.cmd.model-gravity')
     .option('--gx <gx>', 'cli.opt.gx')
@@ -1554,6 +1554,21 @@ modelCommand
                         revision: String(summary.revision),
                     }),
                 );
+                return 0;
+            });
+        }),
+    );
+
+modelCommand
+    .command('summary', 'cli.cmd.model-summary')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('model summary <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                ctx.stdout(JSON.stringify(document.modelSummary({ out: b.raw('--out') }), null, 2));
                 return 0;
             });
         }),
@@ -2098,16 +2113,18 @@ cli
     .option('--format <format>', 'cli.opt.format')
     .option('--out <path>', 'cli.opt.out')
     .option('--scale <n>', 'cli.opt.scale')
+    .option('--stations <n>', 'cli.opt.stations')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
-            const file = b.file('export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N]');
+            const file = b.file('export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N]');
             const format = exportFormat(ctx, b.required('--format'));
             const out = b.required('--out');
             const scale = b.number('--scale');
+            const stations = b.raw('--stations') === undefined ? undefined : stationsOption(ctx, b);
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
-                const result = document.export(format, out, scale === undefined ? {} : { scale });
+                const result = document.export(format, out, { scale, stations });
                 ctx.stdout(b.message('exported', { format: result.format, path: result.path }));
                 return 0;
             });

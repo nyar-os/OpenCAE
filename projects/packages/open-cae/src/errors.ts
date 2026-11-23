@@ -60,6 +60,8 @@ export const errorCodes = [
     'node/duplicate-id',
     'node/unknown-id',
     'node/invalid-coordinate',
+    'node/invalid-coordinate',
+    'node/invalid-mass',
     'node/invalid-temperature',
     'node/referenced-by-element',
     'node/referenced-by-support',
