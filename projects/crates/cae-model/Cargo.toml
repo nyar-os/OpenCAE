@@ -3,12 +3,8 @@ name = "cae-model"
 version.workspace = true
 edition = "2021"
 publish = false
-description = "Honest 2D/3D truss linear-static FEA solver, document format and CLI"
+description = "Honest 2D/3D truss linear-static FEA solver and document format"
 license = "MPL-2.0"
-
-[[bin]]
-name = "ocae"
-path = "src/bin/ocae.rs"
 
 [dependencies]
 serde = { workspace = true }

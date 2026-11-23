@@ -112,7 +112,7 @@
                 </div>
 
                 <div class="sheet__foot">
-                    <span>$ ocae export demo.ocae --format svg --scale 2000</span>
+                    <span>$ open-cae export demo.ocae --format svg --scale 2000</span>
                     <span>2 elements · 3 nodes · 4 DOF fixed</span>
                 </div>
             </div>
@@ -145,7 +145,7 @@
             </div>
             <p class="table-note">
                 The machine-readable matrix is printed by
-                <code>ocae capabilities</code> and matches actual behaviour at
+                <code>open-cae capabilities</code> and matches actual behaviour at
                 every entry point.
             </p>
         </section>
@@ -182,7 +182,7 @@
                         </tr>
                         <tr>
                             <td class="name">CLI</td>
-                            <td class="name">ocae</td>
+                            <td class="name">open-cae</td>
                             <td>Argument parsing, JSON output and exit codes <code>0</code> / <code>1</code> / <code>2</code> only.</td>
                         </tr>
                     </tbody>

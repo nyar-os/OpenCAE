@@ -58,7 +58,7 @@
                     <span class="chip chip--available">available</span>
                     <h3>Capability matrix</h3>
                     <p>
-                        <code>ocae capabilities</code> prints the machine-readable
+                        <code>open-cae capabilities</code> prints the machine-readable
                         matrix from one source of truth. A route is described as
                         available only when the corresponding solve or export
                         exists in this build.

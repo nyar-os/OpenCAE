@@ -3,8 +3,8 @@
 //! Every export performs one orthogonal operation and returns a JSON string, so
 //! the TypeScript layer owns argument parsing, help text and exit codes. The
 //! document editing, validation, solving and export calls forward to
-//! `cae-model`'s [`cae_model::OpenCae`] session, which the `ocae` binary also
-//! calls, so the two entry points cannot disagree.
+//! `cae-model`'s [`cae_model::OpenCae`] session, the same session the
+//! `open-cae` CLI drives, so the entry points cannot disagree.
 //!
 //! Unimplemented routes keep the stable `capability/not-implemented` code. Bad
 //! arguments report `session/argument-invalid`; every other failure keeps the

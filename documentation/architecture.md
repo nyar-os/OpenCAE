@@ -96,7 +96,7 @@ OpenCae session (cae-model)      edit → validate → solve → export
 
 ```text
 projects/
-  crates/cae-model/      core model, validation, solver, export and `ocae` CLI
+  crates/cae-model/      core model, validation, solver and export
     src/session.rs       OpenCae session API (all editing/validation/solving/export)
     src/model.rs         data model and document I/O
     src/library.rs       material presets and section properties
@@ -106,7 +106,6 @@ projects/
                          tension-only active set, axial heat conduction with optional
                          surface convection, internal forces and stress recovery
     src/export.rs        CSV / VTK / Markdown / HTML export and atomic writes
-    src/bin/ocae.rs      thin Rust CLI
     tests/               analytical and regression tests
   crates/cae-napi/       `open-cae-napi` orthogonal Node-API exports
   packages/open-cae/     `@wae/open-cae` TypeScript SDK and `open-cae` CLI

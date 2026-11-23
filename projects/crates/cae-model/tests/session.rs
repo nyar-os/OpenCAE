@@ -1,6 +1,6 @@
 //! Integration tests for the path-backed [`cae_model::OpenCae`] session API.
 //!
-//! The tests drive the same sequence the `ocae` CLI performs: create a file,
+//! The tests drive the same sequence the `open-cae` CLI performs: create a file,
 //! edit it through the session, validate, solve, export and report.
 
 use std::{
