@@ -538,7 +538,9 @@ export class CaeDocument {
      * Exports the solved document as `csv`, `vtk`, `md`, `html` or `svg`.
      * `options.scale` multiplies the nodal displacements of an SVG deformed
      * shape and defaults to `1`; `options.stations` sets the sampled rows of the
-     * CSV `forces.csv` table and defaults to `11`.
+     * CSV `forces.csv` table and defaults to `11`. `options.contour` colours an
+     * SVG export by `axial`, `shear`, `moment` or `displacement` and adds a
+     * colour bar; other formats reject it with `export/invalid-contour`.
      */
     export(format: ExportFormat, target: string, options: ExportOptions = {}): ExportReport {
         this.assertOpen();

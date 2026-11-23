@@ -28,6 +28,14 @@ export type Severity = 'error' | 'warning' | 'notice';
 /** Export formats `export()` can write. */
 export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html' | 'svg';
 
+/**
+ * Result quantity an SVG export can colour the members by.
+ *
+ * `axial` and `shear` are reported in N, `moment` in N·mm (`mm` documents) or
+ * N·m (`m` documents) and `displacement` in the document length unit.
+ */
+export type ContourQuantity = 'axial' | 'shear' | 'moment' | 'displacement';
+
 /** Options of `export()`. */
 export interface ExportOptions {
     /**
@@ -40,6 +48,12 @@ export interface ExportOptions {
      * Counts both element ends and must be at least 2; defaults to `11`.
      */
     readonly stations?: number;
+    /**
+     * Colours the members of an SVG export by a result quantity and adds a
+     * colour bar with the sampled minimum and maximum. Only SVG accepts it;
+     * every other format rejects it with `export/invalid-contour`.
+     */
+    readonly contour?: ContourQuantity;
 }
 
 /** Session options. Constructing a session opens no file. */

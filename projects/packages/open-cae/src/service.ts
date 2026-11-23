@@ -707,9 +707,9 @@ export function exportDocument(
     target: string,
     options: ExportOptions = {},
 ): ExportReport {
-    const request = options.scale === undefined && options.stations === undefined
+    const request = options.scale === undefined && options.stations === undefined && options.contour === undefined
         ? undefined
-        : JSON.stringify({ scale: options.scale, stations: options.stations });
+        : JSON.stringify({ scale: options.scale, stations: options.stations, contour: options.contour });
     return decode<ExportReport>(() =>
         request === undefined
             ? binding('export').export(path, format, target)
