@@ -30,7 +30,7 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | Command | Flags | Notes |
 |---------|-------|-------|
 | `open-cae create <file.ocae>` | `[--units mm\|m] [--dimension 2\|3]` | Creates a document; defaults are `mm` and 2D. Refuses to replace an existing file. |
-| `open-cae validate <file>` | — | Prints validation issues; exit code 1 when errors exist. |
+| `open-cae validate <file>` | — | Prints validation issues; exit code 1 when errors exist. Warnings and notices never change the exit code, including `units/density-scale`, `units/gravity-scale`, `pattern/unused` and `combination/empty`. |
 | `open-cae report <file>` | — | Solves and prints the document summary, issues and solution. |
 | `open-cae capabilities` | — | Prints the machine-readable capability matrix. |
 
@@ -184,7 +184,7 @@ negative convection coefficient or a non-positive perimeter reports
 | `open-cae load-cases <file>` | `[--out <file>]` | One summary row for `base` and each combination. |
 | `open-cae matrices <file>` | `[--out <file>]` | Assembled global stiffness and lumped mass matrices with row labels. |
 | `open-cae spectrum <file>` | `[--modes <N>] [--axis x\|y\|z] [--combination srss\|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out <file>]` | Response spectrum from `period:acceleration` points; `--axis` defaults to `x` and `--combination` to `srss`. `--damping` is the single modal damping ratio in `(0, 1]`, required by `cqc` and ignored by `srss`. |
-| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N] [--stations N]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and does not change the other tables. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. |
+| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N] [--stations N] [--contour axial\|shear\|moment\|displacement]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and the sampling of an SVG contour. `--contour` colours SVG members by a result quantity and adds a colour bar with the sampled minimum and maximum and the unit; it is rejected for every other format with `export/invalid-contour`, and an unknown quantity reports `cli/invalid-option`. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. |
 
 ### Rejected commands
 
@@ -228,6 +228,16 @@ open-cae modal beam.ocae --modes 5
 open-cae buckling beam.ocae --modes 2
 open-cae export beam.ocae --format md --out report.md
 ```
+
+Colour the same cantilever by bending moment; the bar below the drawing prints
+the sampled minimum and maximum in `N·mm`:
+
+```shell
+open-cae export beam.ocae --format svg --out moment.svg --contour moment --stations 21
+```
+
+The same drawing can be coloured by `axial`, `shear` or `displacement`; omit
+`--contour` for the plain deformed shape.
 
 Steady heat conduction through one bar in the metre system:
 

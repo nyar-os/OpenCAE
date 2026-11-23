@@ -51,6 +51,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | principal section axes (`principalSection`, Ix/Iy/Ixy; principal moments, polar moment and major-axis angle) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
 | CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
+| SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
@@ -65,7 +66,10 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `nodalStress`, `loadCases`, `influenceLine`, `influenceLineTrain`,
 `loadPatterns`, `loadCombinations` and `modelSummary` are available through the
 Rust API, the
-native addon and the TypeScript SDK. Load patterns are `add_pattern_load()`
+native addon and the TypeScript SDK. SVG contours are exposed as
+`export_svg_with_contour()` with `ContourQuantity` in Rust, the `contour`
+field of the addon export options and `export({ contour })` in the SDK and the
+CLI (`export --contour ...`). Load patterns are `add_pattern_load()`
 nodal loads grouped by name in Rust, `pattern_add`/`pattern_remove` in the
 addon and `addPatternLoad()`/`removePattern()` in the SDK. A combination mixes
 them through `add_combination_with_patterns()`/`add_combination_full()` in
@@ -120,6 +124,17 @@ and draws grey undeformed lines, a blue deformed polyline at the requested
 contains no timestamps, so repeated exports are byte-identical; the scale must
 be finite and positive and a model without nodes is rejected with
 `export/no-solution`.
+
+`export --contour <quantity>` (SDK `export({ contour })`, addon `contour`,
+Rust `export_svg_with_contour`) replaces the blue deformed polyline with
+coloured member segments: `axial`, `shear` and `moment` come from the same
+`internalForces` sampling that `--stations` (default 11, at least 2) controls,
+and `displacement` uses the nodal displacement magnitudes. The colours map a
+blue–white–red diverging scale over the sampled extremes; the colour bar names
+the quantity, its unit (`N`, `N·mm`/`N·m`, `mm`/`m`) and the sampled minimum and
+maximum, so the drawing and the numbers agree. A contour is SVG-only; every
+other format rejects it with `export/invalid-contour`, and an unknown quantity
+is rejected with the same code (the CLI reports `cli/invalid-option`).
 
 Model quantities are exposed as `summarize_model()` in Rust, `model_summary` in
 the addon and `modelSummary()` in the SDK, with CLI subcommand `model summary`.
@@ -637,13 +652,23 @@ plus:
 - validation warnings for `node/unconnected` (a node that no element
   references) and `node/duplicate-coordinates` (two nodes at the same point);
   both warnings never block solving;
+- unit-scale warnings: a density in the wrong system reports
+  `units/density-scale` and a gravity magnitude that looks like the other
+  system (9.81 in a `mm` document, 9810 in an `m` document) reports
+  `units/gravity-scale`; neither converts the value or blocks solving;
+- reference-integrity notices: a load pattern no combination references
+  reports `pattern/unused`, and a combination that scales no active action
+  (loads, gravity, patterns, temperature) reports `combination/empty`;
 - CSV/VTK/Markdown/HTML content and `.ocae` round trips.
 
 `tests/svg_export.rs`: a two-bar truss and a three-dimensional bar, checked for
 `<svg`, `<line`, `<polyline`, the title, the requested scale, support and load
 markers, the documented XY projection note, byte-identical repeated exports,
-and the stable `export/no-solution`, `export/invalid-scale` and
-`export/mismatch` errors.
+and the stable `export/no-solution`, `export/invalid-scale`,
+`export/invalid-contour` and `export/mismatch` errors. The contour cases draw
+the fixed-end moment `P·L = 1e6 N·mm` of a cantilever, the uniform 1000 N axial
+force of a tension bar and the `FL/(EA) = 0.047619 mm` extension, and check the
+legend values and colours.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load
@@ -1089,5 +1114,12 @@ threshold of `1e-9`.
   columns are `node,fx,fy,fz,mz`, and `forces.csv` columns are
   `element,from,to,kind,position,axialForce,shear,moment` with 11 stations per
   member by default (`export --stations` changes the count).
+- SVG contours are **sampled**: each straight coloured segment takes the
+  governing signed value of its two stations, so a peak between stations is
+  resolved only as finely as `--stations` (`--stations 21` draws twenty
+  segments per member). The drawing still projects onto the global X–Y plane,
+  so a contour of a Z-direction quantity is not geometrically visible, and the
+  colour scale is always relative to the extremes of the exported model, not a
+  fixed engineering scale.
 - External formats such as Abaqus `.inp`, Nastran and STEP are neither
   imported nor exported.
