@@ -7,7 +7,7 @@ use std::{
 };
 
 use cae_model::{
-    ElementKind, Load, LoadCombination, LoadPattern, Model, OpenCae, OpenCaeOptions, PatternFactor, Units, solve,
+    ElementKind, Load, LoadCombination, LoadPattern, Model, OpenCae, OpenCaeOptions, PatternFactor, Severity, Units, solve,
     solve_combinations,
 };
 
@@ -243,4 +243,29 @@ fn session_removes_patterns_with_stable_errors() {
     session.remove_pattern("live").expect("remove pattern");
     let reopened = Model::load(&path).expect("reload");
     assert!(reopened.patterns.is_empty());
+}
+
+#[test]
+fn validation_reports_unused_patterns_and_empty_combinations() {
+    let mut model = bare_cantilever();
+    model.add_pattern_load("wind", "n2", Some(1000.0), None, None, None).expect("wind");
+    model.add_combination("zero", 0.0, 0.0).expect("empty combination");
+    let issues = model.validate();
+    assert!(
+        issues.iter().any(|issue| issue.code == "pattern/unused" && issue.severity == Severity::Notice),
+        "missing unused-pattern notice: {issues:?}"
+    );
+    assert!(
+        issues.iter().any(|issue| issue.code == "combination/empty" && issue.severity == Severity::Notice),
+        "missing empty-combination notice: {issues:?}"
+    );
+
+    let mut referenced = bare_cantilever();
+    referenced.add_pattern_load("wind", "n2", Some(1000.0), None, None, None).expect("wind");
+    referenced
+        .add_combination_with_patterns("wind case", 0.0, 0.0, vec![PatternFactor { pattern: "wind".to_string(), factor: 1.0 }])
+        .expect("combination");
+    let codes: Vec<String> = referenced.validate().into_iter().map(|issue| issue.code).collect();
+    assert!(!codes.iter().any(|code| code == "pattern/unused"), "false positive: {codes:?}");
+    assert!(!codes.iter().any(|code| code == "combination/empty"), "false positive: {codes:?}");
 }

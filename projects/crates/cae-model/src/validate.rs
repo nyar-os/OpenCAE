@@ -4,7 +4,7 @@ use boost_check::{CheckReport, Issue as CheckIssue, Severity as CheckSeverity};
 use serde::Serialize;
 
 use crate::{
-    model::{ElementKind, FORMAT, Model, VERSION, rotation_nodes},
+    model::{ElementKind, FORMAT, Model, Units, VERSION, rotation_nodes},
     solver::check_stability,
 };
 
@@ -76,6 +76,12 @@ impl Model {
     /// two nodes at identical coordinates as `node/duplicate-coordinates`.
     /// Warnings never block solving, so a load path that ignores an isolated
     /// node still solves while the document stays visibly suspicious.
+    ///
+    /// A density or gravity value that belongs to the other unit system is
+    /// reported as `units/density-scale` or `units/gravity-scale`, because the
+    /// solver never converts units. A load pattern no combination references is
+    /// `pattern/unused` and a combination whose factors scale no active action
+    /// is `combination/empty`; both are notices, not failures.
     ///
     /// A two-dimensional document (`dimension == 2`) must not contain a
     /// non-zero node `z`, a `dz` support or a non-zero `fz` load; such values
@@ -819,6 +825,88 @@ impl Model {
                         ),
                     ));
                 }
+            }
+        }
+
+        // The solver and exporters never convert units, so a density or gravity
+        // value written in the other system silently scales every body load.
+        // The thresholds below catch the two common mix-ups (kg/m³ in a `mm`
+        // document and m/s² in a `mm` document) without touching the numbers.
+        if let Some(units) = self.units {
+            let density = self.material.density;
+            let density_mismatch = match units {
+                Units::Millimeter => density > 1.0e-6,
+                Units::Meter => density > 0.0 && density < 1.0e-3,
+            };
+            if density > 0.0 && density.is_finite() && density_mismatch {
+                let expected = match units {
+                    Units::Millimeter => "t/mm³ (steel is about 7.85e-9)",
+                    Units::Meter => "kg/m³ (steel is about 7850)",
+                };
+                report.push(check_warning(
+                    "units/density-scale",
+                    format!(
+                        "density of material `{}` is {density}, which does not look like the `{}` system, where density is {expected}; units are never converted, so every body load uses this value unchanged",
+                        self.material.name,
+                        units.as_str()
+                    ),
+                ));
+            }
+            if let Some(gravity) = self.gravity {
+                let magnitude = (gravity[0] * gravity[0] + gravity[1] * gravity[1] + gravity[2] * gravity[2]).sqrt();
+                let gravity_mismatch = match units {
+                    Units::Millimeter => (9.5..=10.0).contains(&magnitude),
+                    Units::Meter => (9_500.0..=10_000.0).contains(&magnitude),
+                };
+                if gravity_mismatch {
+                    let expected = match units {
+                        Units::Millimeter => "mm/s² (standard gravity is 9810)",
+                        Units::Meter => "m/s² (standard gravity is 9.81)",
+                    };
+                    report.push(check_warning(
+                        "units/gravity-scale",
+                        format!(
+                            "gravity magnitude {magnitude} looks like the other unit system; a `{}` document expects acceleration in {expected}, and units are never converted",
+                            units.as_str()
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Reference integrity: a pattern no combination uses, or a combination
+        // that scales nothing, is a silent zero rather than a solve failure.
+        // `thermal` defaults to 1, so a zero-thermal check alone would miss the
+        // common empty case; the temperature actions decide whether that factor
+        // can contribute anything.
+        for pattern in &self.patterns {
+            let referenced = self
+                .combinations
+                .iter()
+                .any(|combination| combination.patterns.iter().any(|entry| entry.pattern == pattern.name));
+            if !referenced {
+                report.push(check_notice(
+                    "pattern/unused",
+                    format!(
+                        "load pattern `{}` is defined but no load combination references it, so it never affects a result",
+                        pattern.name
+                    ),
+                ));
+            }
+        }
+        let has_thermal_actions =
+            self.elements.iter().any(|element| element.temperature.is_some() || element.temperature_gradient.is_some());
+        for combination in &self.combinations {
+            let thermal_contributes = combination.thermal != 0.0 && has_thermal_actions;
+            if combination.loads == 0.0 && combination.gravity == 0.0 && combination.patterns.is_empty() && !thermal_contributes
+            {
+                report.push(check_notice(
+                    "combination/empty",
+                    format!(
+                        "load combination `{}` scales no active action (loads, gravity, patterns and temperature contribute nothing), so it produces a zero result",
+                        combination.name
+                    ),
+                ));
             }
         }
 

@@ -329,6 +329,7 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["io"]["vtk"], "supported");
     assert_eq!(capabilities["io"]["md"], "supported");
     assert_eq!(capabilities["io"]["inp"], "unsupported");
+    assert_eq!(capabilities["io"]["svgContour"], "supported");
 }
 
 #[test]
@@ -491,4 +492,28 @@ fn three_dimensional_csv_and_vtk_contain_z_columns() {
     assert!(vtk.contains("POINTS 2 double"));
     assert!(vtk.contains("0.0 0.0 1000.0"), "vtk: {vtk}");
     assert!(vtk.contains("VECTORS DISPLACEMENT double"));
+}
+
+#[test]
+fn unit_scale_warnings_flag_values_from_the_other_system() {
+    let mut model = single_bar_model();
+    model.set_material_full(Some("steel".to_string()), 210_000.0, 100.0, 7850.0);
+    model.set_gravity(0.0, -9.81, 0.0).expect("gravity");
+    let issues = model.validate();
+    assert!(
+        issues.iter().any(|issue| issue.code == "units/density-scale" && issue.severity == Severity::Warning),
+        "missing density warning: {issues:?}"
+    );
+    assert!(
+        issues.iter().any(|issue| issue.code == "units/gravity-scale" && issue.severity == Severity::Warning),
+        "missing gravity warning: {issues:?}"
+    );
+    assert!(!issues.iter().any(|issue| issue.severity == Severity::Error), "warnings must not block: {issues:?}");
+
+    let mut consistent = single_bar_model();
+    consistent.set_material_full(Some("steel".to_string()), 210_000.0, 100.0, 7.85e-9);
+    consistent.set_gravity(0.0, -9810.0, 0.0).expect("gravity");
+    let codes: Vec<String> = consistent.validate().into_iter().map(|issue| issue.code).collect();
+    assert!(!codes.iter().any(|code| code == "units/density-scale"), "false positive: {codes:?}");
+    assert!(!codes.iter().any(|code| code == "units/gravity-scale"), "false positive: {codes:?}");
 }
