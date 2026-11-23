@@ -400,6 +400,35 @@ function spectrumCombinationOption(ctx: CommandContext, b: Bound): SpectrumCombi
     throw failure(ctx, 'spectrum/invalid-combination', 'unknownSpectrumCombination', { value });
 }
 
+/**
+ * Parse a `--patterns` value such as `live=1.0,wind=1.5` into pattern factor
+ * entries. Empty parts are ignored; a malformed part or an empty list is
+ * rejected with `cli/invalid-option`.
+ */
+function parsePatternList(
+    ctx: CommandContext,
+    value: string,
+): readonly { pattern: string; factor: number }[] {
+    const entries: { pattern: string; factor: number }[] = [];
+    for (const part of value.split(',')) {
+        const trimmed = part.trim();
+        if (trimmed.length === 0) {
+            continue;
+        }
+        const separator = trimmed.indexOf('=');
+        const pattern = separator === -1 ? '' : trimmed.slice(0, separator).trim();
+        const factor = separator === -1 ? Number.NaN : Number(trimmed.slice(separator + 1).trim());
+        if (pattern.length === 0 || !Number.isFinite(factor)) {
+            throw failure(ctx, 'cli/invalid-option', 'invalidPatternList', { value });
+        }
+        entries.push({ pattern, factor });
+    }
+    if (entries.length === 0) {
+        throw failure(ctx, 'cli/invalid-option', 'invalidPatternList', { value });
+    }
+    return entries;
+}
+
 /** One short-lived session per command, mirroring the process lifetime. */
 async function withSession(work: (session: OpenCAE) => Promise<number>): Promise<number> {
     const session = new OpenCAE();
@@ -1573,16 +1602,18 @@ combinationCommand
     .option('--name <name>', 'cli.opt.name')
     .option('--loads <f>', 'cli.opt.loads')
     .option('--gravity <f>', 'cli.opt.gravity')
+    .option('--patterns <list>', 'cli.opt.patterns')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
-            const file = b.file('combination add <file> --name <name> [--loads <f>] [--gravity <f>]');
+            const file = b.file('combination add <file> --name <name> [--loads <f>] [--gravity <f>] [--patterns <list>]');
             const name = b.required('--name');
             const loads = b.number('--loads') ?? 1;
             const gravity = b.number('--gravity') ?? 0;
+            const patterns = b.raw('--patterns') === undefined ? undefined : parsePatternList(ctx, b.required('--patterns'));
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
-                const summary = document.addCombination({ name, loads, gravity });
+                const summary = document.addCombination({ name, loads, gravity, patterns });
                 ctx.stdout(
                     b.message('combinationSet', {
                         name,
