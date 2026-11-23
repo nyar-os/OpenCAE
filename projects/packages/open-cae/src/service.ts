@@ -52,6 +52,7 @@ import type {
     LoadAddRequest,
     LoadCaseOptions,
     LoadCaseSummary,
+    LoadPatternRequest,
     MaterialLibrary,
     MaterialPresetRequest,
     MaterialSetRequest,
@@ -434,6 +435,18 @@ export function tensionOnly(path: string, options: TensionOnlyOptions = {}): Ten
         request === undefined
             ? binding('tension.only').tension_only(path)
             : binding('tension.only').tension_only(path, request),
+    );
+}
+
+/** Adds or updates a concentrated load inside a named load pattern. */
+export function addPatternLoad(path: string, request: LoadPatternRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('pattern.add').pattern_add(path, JSON.stringify(request)));
+}
+
+/** Removes a whole load pattern, or one nodal entry of it when `node` is given. */
+export function removePattern(path: string, pattern: string, node?: string): DocumentSummary {
+    return decode<DocumentSummary>(() =>
+        binding('pattern.remove').pattern_remove(path, JSON.stringify(node === undefined ? { pattern } : { pattern, node })),
     );
 }
 

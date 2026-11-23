@@ -16,10 +16,10 @@ use std::path::Path;
 
 use cae_model::{
     CaeError, ConstructionStage, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions, InfluenceDirection,
-    InfluenceQuantity, InfluenceTrainRequest, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint,
-    Units, angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report,
-    library_json, polygon_section_report, principal_section_report, section_report, t_section_report, triangle_section_report,
-    tube_standard_section_report, z_section_report,
+    InfluenceQuantity, InfluenceTrainRequest, Material, OpenCae, OpenCaeOptions, PatternFactor, Section, SpectrumCombination,
+    SpectrumPoint, Units, angle_section_report, channel_standard_section_report, ellipse_section_report,
+    i_standard_section_report, library_json, polygon_section_report, principal_section_report, section_report,
+    t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -926,7 +926,9 @@ fn element_kind_field(request: &Value) -> Result<ElementKind> {
 
 /// Adds or replaces a linear load combination and saves the document.
 ///
-/// The request accepts `name`, `loads` (default 1) and `gravity` (default 0).
+/// The request accepts `name`, `loads` (default 1) and `gravity` (default 0),
+/// plus an optional `patterns` array of `{ pattern, factor }` entries that mix
+/// named load patterns into the combination.
 #[function]
 fn combination_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -934,9 +936,64 @@ fn combination_add(ctx: CallContext) -> Result<JsValue> {
     let name = text_field(&request, "name")?;
     let loads = number_field(&request, "loads")?.unwrap_or(1.0);
     let gravity = number_field(&request, "gravity")?.unwrap_or(0.0);
+    let patterns = match request.get("patterns") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .map(|entry| {
+                Ok(PatternFactor { pattern: text_field(entry, "pattern")?, factor: required_number_field(entry, "factor")? })
+            })
+            .collect::<Result<Vec<_>>>()?,
+        Some(_) => return Err(argument_error("`patterns` must be an array")),
+    };
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary = session.add_combination(&name, loads, gravity).map_err(fail)?;
+    let summary = session.add_combination_with_patterns(&name, loads, gravity, &patterns).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Adds or updates a concentrated load inside a named load pattern and saves
+/// the document.
+///
+/// The request accepts `pattern`, `node` and any of `fx`, `fy`, `fz` or `mz`;
+/// the pattern is created when it does not exist yet.
+#[function]
+fn pattern_add(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let pattern = text_field(&request, "pattern")?;
+    let node = text_field(&request, "node")?;
+    let fx = number_field(&request, "fx")?;
+    let fy = number_field(&request, "fy")?;
+    let fz = number_field(&request, "fz")?;
+    let mz = number_field(&request, "mz")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.add_pattern_load(&pattern, &node, fx, fy, fz, mz).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Removes a whole load pattern, or one nodal entry of it, and saves the
+/// document.
+///
+/// The request accepts `pattern`; with `node` only that load entry is removed
+/// and the pattern itself is kept.
+#[function]
+fn pattern_remove(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let pattern = text_field(&request, "pattern")?;
+    let node = match request.get("node") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(value.as_str().map(str::to_string).ok_or_else(|| argument_error("`node` must be a string"))?),
+    };
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = match node {
+        Some(node) => session.remove_pattern_load(&pattern, &node),
+        None => session.remove_pattern(&pattern),
+    }
+    .map_err(fail)?;
     respond(&ctx, &summary)
 }
 
@@ -1471,6 +1528,8 @@ register_module![
     ambient_temperature_set,
     combination_add,
     combination_remove,
+    pattern_add,
+    pattern_remove,
     solve_combinations,
     solve_buckling_combinations,
     validate,

@@ -1239,6 +1239,8 @@ export interface CombinationCase {
     readonly name: string;
     readonly loads: number;
     readonly gravity: number;
+    /** Named load patterns mixed into this combination. */
+    readonly patterns?: readonly PatternFactorRequest[];
     readonly solution: Solution;
 }
 
@@ -1291,6 +1293,33 @@ export interface CombinationAddRequest {
     readonly loads?: number;
     /** Factor applied to the gravity vector; defaults to 0. */
     readonly gravity?: number;
+    /** Named load patterns mixed into the combination. */
+    readonly patterns?: readonly PatternFactorRequest[];
+}
+
+/** One named load pattern entry of a load combination. */
+export interface PatternFactorRequest {
+    /** Name of the load pattern this factor applies to. */
+    readonly pattern: string;
+    /** Factor applied to every load of that pattern. */
+    readonly factor: number;
+}
+
+/**
+ * Request of `addPatternLoad()`.
+ *
+ * The pattern is created when it does not exist yet; inside the pattern the
+ * node entry is upserted exactly like {@link LoadAddRequest}.
+ */
+export interface LoadPatternRequest {
+    /** Name of the load pattern. */
+    readonly pattern: string;
+    readonly node: string;
+    readonly fx?: number;
+    readonly fy?: number;
+    readonly fz?: number;
+    /** Concentrated moment about Z; only valid at beam nodes. */
+    readonly mz?: number;
 }
 
 /** Options of `solveCombinations()`. */

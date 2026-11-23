@@ -50,6 +50,7 @@ import type {
     LoadAddRequest,
     LoadCaseOptions,
     LoadCaseSummary,
+    LoadPatternRequest,
     Material,
     MaterialPresetRequest,
     MaterialSetRequest,
@@ -382,6 +383,18 @@ export class CaeDocument {
     heat(options: HeatOptions = {}): HeatSolution {
         this.assertOpen();
         return service.heat(this.path, options);
+    }
+
+    /** Adds or updates a concentrated load inside a named load pattern and saves the file. */
+    addPatternLoad(request: LoadPatternRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.addPatternLoad(this.path, request));
+    }
+
+    /** Removes a whole load pattern, or one nodal entry of it when `node` is given, and saves the file. */
+    removePattern(pattern: string, node?: string): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.removePattern(this.path, pattern, node));
     }
 
     /** Adds or replaces a linear load combination and saves the file. */
