@@ -236,10 +236,5 @@ fn controlling_moment(element: &ElementResult) -> f64 {
 }
 
 fn controlling_end(start: f64, end: f64) -> f64 {
-    if end.abs() > start.abs() {
-        end
-    }
-    else {
-        start
-    }
+    if end.abs() > start.abs() { end } else { start }
 }
