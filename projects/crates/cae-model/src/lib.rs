@@ -44,6 +44,7 @@
 
 #![deny(missing_docs)]
 
+mod envelope;
 mod error;
 mod export;
 mod library;
@@ -53,6 +54,10 @@ mod solver;
 mod validate;
 
 pub use crate::{
+    envelope::{
+        ENVELOPE_REPORT_FORMAT, ENVELOPE_REPORT_VERSION, EnvelopeElement, EnvelopeExtreme, EnvelopeNode, EnvelopeReaction,
+        EnvelopeReport, solve_envelope,
+    },
     error::CaeError,
     export::{
         ContourQuantity, export_csv, export_csv_with_stations, export_html, export_md, export_svg, export_svg_with_contour,
@@ -129,6 +134,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "stressRecovery": "supported",
     "nodalStress": "supported",
     "loadCases": "supported",
+    "combinationEnvelope": "supported",
     "modelSummary": "supported",
     "deflections": "supported",
     "loadCombinations": "supported",
