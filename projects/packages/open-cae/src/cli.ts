@@ -21,6 +21,7 @@ import { NotImplementedError, OpenCAEError, type OpenCAEErrorCode } from './erro
 import { OpenCAE } from './open-cae.js';
 import type {
     Analysis,
+    ContourQuantity,
     Dimension,
     ElementKind,
     ExportFormat,
@@ -323,6 +324,17 @@ function exportFormat(ctx: CommandContext, value: string): ExportFormat {
         throw new NotImplementedError(`${value} export`);
     }
     throw failure(ctx, 'cli/unknown-format', 'unknownFormat', { format: value });
+}
+
+function contourOption(ctx: CommandContext, b: Bound): ContourQuantity | undefined {
+    const value = b.raw('--contour');
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === 'axial' || value === 'shear' || value === 'moment' || value === 'displacement') {
+        return value;
+    }
+    throw failure(ctx, 'cli/invalid-option', 'unknownContour', { value });
 }
 
 function parsePolygonPoints(ctx: CommandContext, value: string): readonly PolygonPoint[] {
@@ -2114,17 +2126,21 @@ cli
     .option('--out <path>', 'cli.opt.out')
     .option('--scale <n>', 'cli.opt.scale')
     .option('--stations <n>', 'cli.opt.stations')
+    .option('--contour <quantity>', 'cli.opt.contour')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
-            const file = b.file('export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N]');
+            const file = b.file(
+                'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement]',
+            );
             const format = exportFormat(ctx, b.required('--format'));
             const out = b.required('--out');
             const scale = b.number('--scale');
             const stations = b.raw('--stations') === undefined ? undefined : stationsOption(ctx, b);
+            const contour = contourOption(ctx, b);
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
-                const result = document.export(format, out, { scale, stations });
+                const result = document.export(format, out, { scale, stations, contour });
                 ctx.stdout(b.message('exported', { format: result.format, path: result.path }));
                 return 0;
             });
