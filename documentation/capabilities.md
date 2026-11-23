@@ -51,7 +51,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | parametric standard sections (`standardSection`, I / rectangular tube / channel / L angle / T / solid ellipse / equilateral triangle / equal-thickness Z; area, centroid, Ix/Iy/Ixy, torsion constant and radii of gyration) | ✅ supported |
 | principal section axes (`principalSection`, Ix/Iy/Ixy; principal moments, polar moment and major-axis angle) | ✅ supported |
 | `.ocae` JSON I/O | ✅ supported |
-| CSV / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
+| CSV (solution tables and the `envelope --csv` table) / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
@@ -337,6 +337,14 @@ to 11.
     declared combinations while `cases` always lists `base` first. Values stay
     in the document unit system, ties keep the earlier case, and a failing
     combination returns its solver code instead of a partial envelope.
+    `envelope_csv(report)` (CLI `envelope --csv`, SDK `envelope({ csv })`)
+    renders that same report as UTF-8 CSV with LF line endings and the header
+    `section,id,component,min,max,minCombination,maxCombination`: one row per
+    node, element and reaction component in report order, JSON number
+    formatting, RFC 4180 quoting for identifiers and combination names, and no
+    unit conversion. The CSV is a rendering of the report only; it is not a
+    second export format for the other result types, and a failing case writes
+    neither the JSON nor the CSV file.
 21. **Partial-span loads**: `distributed_load_from`/`distributed_load_to`
     limit a beam transverse load to the fractions `[a, b]` of the length, with
     the intensity varying linearly from the start to the end of that segment

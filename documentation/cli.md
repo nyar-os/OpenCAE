@@ -124,7 +124,7 @@ Section shapes and their geometry flags:
 | `open-cae combination add <file>` | `--name <name> [--loads <f>] [--gravity <f>] [--thermal <f>] [--patterns <list>]` | Adds or replaces a combination; `--loads`, `--gravity` and `--thermal` default to `1`, `0` and `1`. `--thermal` scales every element temperature change and through-depth gradient (`0` removes the thermal actions). `--patterns` replaces the whole pattern list with `name=factor` entries such as `live=1.0,wind=1.5`; an empty or malformed list reports `cli/invalid-option`, and a pattern missing from the document reports `combination/unknown-pattern` at solve time. |
 | `open-cae combination remove <file>` | `--name <name>` | Removes a combination. |
 | `open-cae combinations <file>` | `[--out <file>]` | Solves every combination and prints solutions plus the envelope. |
-| `open-cae envelope <file>` | `[--out <file>]` | Solves the unfactored `base` case and every combination, then prints per-node displacement, per-element axial/shear/moment and per-support reaction minima and maxima with the governing combination. |
+| `open-cae envelope <file>` | `[--out <file>] [--csv <file>]` | Solves the unfactored `base` case and every combination, then prints per-node displacement, per-element axial/shear/moment and per-support reaction minima and maxima with the governing combination. `--csv` also writes the same report as a CSV table. |
 | `open-cae buckling-combinations <file>` | `[--modes <N>] [--out <file>]` | Buckling factors per combination and the governing combination. |
 
 Named load patterns are stored in the document as a list of concentrated nodal
@@ -144,6 +144,17 @@ reports `axial`, `shear` and `moment`, and each supported node reports `fx`,
 with the larger absolute value, so a truss reports zero. Ties keep the earlier
 case, values stay in the document units and a failing combination returns its
 solver code instead of a partial report.
+
+`--csv <file>` writes the same solved report as UTF-8 CSV with LF line endings
+and the header `section,id,component,min,max,minCombination,maxCombination`.
+There is one row per node component (`nodes`, the node id, `ux`/`uy`, plus
+`uz` in 3D), per element component (`elements`, `axial`/`shear`/`moment`) and
+per support reaction component (`reactions`, the support node,
+`fx`/`fy`/`fz`), in exactly the JSON report order. Numbers use the JSON
+formatting, and identifiers or combination names containing a comma, quote,
+CR or LF are quoted with RFC 4180 rules. `--csv` may be combined with `--out`;
+the JSON report still goes to stdout, both files are written only after a
+successful solve, and values are never converted.
 
 ### Analysis
 
