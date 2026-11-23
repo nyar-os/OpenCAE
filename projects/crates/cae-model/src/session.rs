@@ -16,19 +16,20 @@ use serde::Serialize;
 
 use crate::{
     CAPABILITIES_JSON, CaeError,
-    export::{export_csv, export_html, export_md, export_svg, export_vtk, write_atomic},
+    export::{export_csv_with_stations, export_html, export_md, export_svg, export_vtk, write_atomic},
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InfluenceDirection, InfluenceLineSolution,
         InfluenceQuantity, InfluenceTrainRequest, InfluenceTrainSolution, InternalForceSolution, LoadCaseSummary,
-        ModalSolution, NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION,
-        ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint, StressSolution,
-        SupportReaction, SystemMatrices, TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations,
-        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_heat,
-        solve_influence_line, solve_influence_line_train, solve_internal_forces, solve_matrices, solve_modal,
+        ModalSolution, ModelSummaryReport, NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT,
+        REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint,
+        StressSolution, SupportReaction, SystemMatrices, TensionOnlySolution, solve, solve_buckling,
+        solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response,
+        solve_heat, solve_influence_line, solve_influence_line_train, solve_internal_forces, solve_matrices, solve_modal,
         solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only, summarize_load_cases,
+        summarize_model,
     },
     validate::{Issue, Severity},
 };
@@ -161,11 +162,16 @@ pub struct ExportOptions {
     /// Scale factor applied to nodal displacements when drawing the deformed
     /// shape of an SVG export. Must be finite and positive; defaults to `1.0`.
     pub scale: f64,
+    /// Stations sampled per member in the `forces.csv` table of a CSV export.
+    ///
+    /// `None` keeps the default of 11 stations. The value counts both element
+    /// ends and must be at least `2`; other formats ignore it.
+    pub stations: Option<usize>,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        Self { scale: 1.0 }
+        Self { scale: 1.0, stations: None }
     }
 }
 
@@ -1180,6 +1186,20 @@ impl OpenCae {
         Ok(summary)
     }
 
+    /// Reports member quantities, mass and degree-of-freedom statistics without
+    /// solving the document.
+    ///
+    /// When `out` is given the JSON report is written atomically to that path.
+    pub fn model_summary(&self, out: Option<&Path>) -> Result<ModelSummaryReport, CaeError> {
+        let summary = summarize_model(&self.current()?.model)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize model summary: {error}")))?;
+            write_atomic(path, &json)?;
+        }
+        Ok(summary)
+    }
+
     /// Solves every load combination stored in the open document and returns
     /// the individual solutions plus their envelope.
     ///
@@ -1348,11 +1368,12 @@ impl OpenCae {
         let solution = solve(model)?;
         let files = match format {
             ExportFormat::Csv => {
-                export_csv(model, &solution, target)?;
+                export_csv_with_stations(model, &solution, target, options.stations.unwrap_or(11))?;
                 vec![
                     target.join("nodes.csv").display().to_string(),
                     target.join("elements.csv").display().to_string(),
                     target.join("reactions.csv").display().to_string(),
+                    target.join("forces.csv").display().to_string(),
                 ]
             }
             ExportFormat::Vtk => {

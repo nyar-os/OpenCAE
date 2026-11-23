@@ -54,7 +54,9 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
     let session = two_bar_truss(&path);
     let target = directory.join("model.svg");
 
-    let first = session.export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5 }).expect("first export");
+    let first = session
+        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5, ..ExportOptions::default() })
+        .expect("first export");
     assert_eq!(first.format, "svg");
     assert_eq!(first.files, vec![target.display().to_string()]);
     let text = fs::read_to_string(&target).expect("model.svg");
@@ -67,7 +69,9 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
     assert!(text.contains("ocae-load-arrow"), "missing load arrow marker: {text}");
     assert!(text.contains("projection: XY (Z ignored)"), "missing projection note: {text}");
 
-    session.export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5 }).expect("second export");
+    session
+        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5, ..ExportOptions::default() })
+        .expect("second export");
     let repeated = fs::read_to_string(&target).expect("model.svg");
     assert_eq!(text, repeated, "repeated SVG exports must be byte-identical");
 

@@ -5,7 +5,7 @@ use science_mesh::{Cell, CellKind, Field, Mesh, MeshError};
 use crate::{
     CaeError,
     model::{ElementKind, Model, Units},
-    solver::{ModalSolution, Solution},
+    solver::{ModalSolution, Solution, solve_internal_forces},
     validate::{Issue, Severity},
 };
 
@@ -27,12 +27,26 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CaeError> {
         .map_err(|error| CaeError::new("io/write", format!("cannot write `{}`: {error}", target.display())))
 }
 
-/// Writes `nodes.csv`, `elements.csv` and `reactions.csv` into `directory`.
+/// Writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv` into
+/// `directory`.
 ///
 /// The solution must have been obtained from the same model so that node
 /// coordinates and displacement rows line up. `reactions.csv` lists one row per
 /// support (`node,fx,fy,fz,mz`) using the signs of the reaction summary.
+/// `forces.csv` writes the sampled internal forces at the default 11 stations
+/// per element; use [`export_csv_with_stations`] to change the sampling.
 pub fn export_csv(model: &Model, solution: &Solution, directory: &Path) -> Result<(), CaeError> {
+    export_csv_with_stations(model, solution, directory, 11)
+}
+
+/// Writes the four CSV result tables with `stations` sampled points per member.
+///
+/// `stations` counts both element ends and must be at least `2`; the force table
+/// stores one row per station with `position`, `axialForce`, `shear` and
+/// `moment`. Truss members report a constant axial force and zero shear and
+/// moment. The station count only affects `forces.csv`; the other three tables
+/// are unchanged.
+pub fn export_csv_with_stations(model: &Model, solution: &Solution, directory: &Path, stations: usize) -> Result<(), CaeError> {
     check_alignment(model, solution)?;
     fs::create_dir_all(directory).map_err(|error| {
         CaeError::new("io/write", format!("cannot create export directory `{}`: {error}", directory.display()))
@@ -73,9 +87,29 @@ pub fn export_csv(model: &Model, solution: &Solution, directory: &Path) -> Resul
         let _ = writeln!(reactions, "{},{},{},{},{}", csv_field(&support.node), support.fx, support.fy, support.fz, support.mz);
     }
 
+    let diagrams = solve_internal_forces(model, stations)?;
+    let mut forces = String::from("element,from,to,kind,position,axialForce,shear,moment\n");
+    for element in &diagrams.elements {
+        for station in &element.stations {
+            let _ = writeln!(
+                forces,
+                "{},{},{},{},{},{},{},{}",
+                csv_field(&element.id),
+                csv_field(&element.from),
+                csv_field(&element.to),
+                element.kind.as_str(),
+                station.position,
+                station.axial_force,
+                station.shear,
+                station.moment
+            );
+        }
+    }
+
     write_atomic(&directory.join("nodes.csv"), &nodes)?;
     write_atomic(&directory.join("elements.csv"), &elements)?;
     write_atomic(&directory.join("reactions.csv"), &reactions)?;
+    write_atomic(&directory.join("forces.csv"), &forces)?;
     Ok(())
 }
 

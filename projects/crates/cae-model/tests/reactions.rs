@@ -76,7 +76,7 @@ fn csv_export_includes_one_row_per_support() {
     let session = session_with_cantilever(&path);
     let csv_directory = directory.join("csv");
     let report = session.export(cae_model::ExportFormat::Csv, &csv_directory).expect("export");
-    assert_eq!(report.files.len(), 3);
+    assert_eq!(report.files.len(), 4);
 
     let reactions = fs::read_to_string(csv_directory.join("reactions.csv")).expect("reactions.csv");
     let mut lines = reactions.lines();

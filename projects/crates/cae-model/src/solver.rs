@@ -112,6 +112,12 @@ pub const HEAT_REPORT_FORMAT: &str = "open-cae-heat-report";
 /// Value identifying a heat-conduction result in [`HeatSolution::analysis`].
 pub const HEAT_ANALYSIS: &str = "heat";
 
+/// Version of the JSON report produced by [`summarize_model`].
+pub const MODEL_SUMMARY_VERSION: u32 = 1;
+
+/// Format tag of the model-quantity JSON report.
+pub const MODEL_SUMMARY_FORMAT: &str = "open-cae-model-summary";
+
 /// Nodal displacement result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1115,6 +1121,74 @@ pub struct LoadCaseSummary {
     pub units: String,
     /// Unfactored case followed by every stored load combination.
     pub cases: Vec<LoadCaseResult>,
+}
+
+/// Quantity and degree-of-freedom summary of a document.
+///
+/// The report is computed from the model alone, never from a solve, so it also
+/// describes documents that are not yet buildable. Lengths and coordinates use
+/// the declared length unit; `volume` uses the matching cubic unit; masses use
+/// the unit consistent with [`crate::Material::density`] (tonnes for `mm`
+/// documents, kilograms for `m` documents) and are never converted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSummaryReport {
+    /// Report format tag, always `open-cae-model-summary`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Spatial dimension, `2` or `3`.
+    pub dimension: u32,
+    /// Monotonically increasing edit counter.
+    pub revision: u32,
+    /// Number of nodes.
+    pub nodes: usize,
+    /// Number of elements.
+    pub elements: usize,
+    /// Number of truss elements.
+    pub truss_elements: usize,
+    /// Number of beam elements.
+    pub beam_elements: usize,
+    /// Number of support entries.
+    pub supports: usize,
+    /// Number of concentrated load entries.
+    pub loads: usize,
+    /// Number of named load patterns.
+    pub patterns: usize,
+    /// Number of load combinations.
+    pub combinations: usize,
+    /// Total member length.
+    pub total_length: f64,
+    /// Total length of the truss members.
+    pub truss_length: f64,
+    /// Total length of the beam members.
+    pub beam_length: f64,
+    /// Total member volume `Σ A·L`.
+    pub volume: f64,
+    /// Mass of the members `Σ density·A·L`.
+    pub member_mass: f64,
+    /// Sum of the concentrated nodal masses.
+    pub nodal_mass: f64,
+    /// `member_mass + nodal_mass`.
+    pub total_mass: f64,
+    /// Mass centroid `[x, y, z]`, or `null` when the total mass is zero.
+    ///
+    /// Member mass acts at the member midpoint and nodal mass at its node.
+    pub center_of_mass: Option<[f64; 3]>,
+    /// Number of active translational degrees of freedom.
+    pub translational_dofs: usize,
+    /// Number of active rotational degrees of freedom (2D beam nodes only).
+    pub rotational_dofs: usize,
+    /// `translational_dofs + rotational_dofs`.
+    pub total_dofs: usize,
+    /// Degrees of freedom restrained by rigid or inclined supports.
+    ///
+    /// Spring supports leave their degrees of freedom free and are not counted.
+    pub constrained_dofs: usize,
+    /// `total_dofs - constrained_dofs`.
+    pub free_dofs: usize,
 }
 
 /// One active degree of freedom of an assembled system.
@@ -3478,6 +3552,186 @@ pub fn summarize_load_cases(model: &Model) -> Result<LoadCaseSummary, CaeError> 
         units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
         cases,
     })
+}
+
+/// Summarises member quantities, mass and degree-of-freedom statistics of a
+/// document without solving it.
+///
+/// Every member contributes its Euclidean length, volume `A·L` and mass
+/// `density·A·L`, where `A` is the element area override or the global material
+/// area. Nodal mass entries are added to the member mass, and the mass centroid
+/// weights each member at its midpoint. The degree-of-freedom count mirrors the
+/// solver layout: two translations per node in two dimensions, three in three
+/// dimensions, plus one rotation at every 2D beam node whose beam end is not
+/// released. Rigid and inclined supports restrain one degree of freedom each,
+/// while springs leave their degree of freedom free.
+///
+/// Units are never converted: a `mm` document reports `mm`, `mm³` and tonnes,
+/// a `m` document reports `m`, `m³` and kilograms. A negative or non-finite
+/// density, an invalid effective area, a non-finite coordinate or nodal mass and
+/// an element or support that references an unknown node are rejected with the
+/// matching stable code instead of producing a meaningless summary.
+pub fn summarize_model(model: &Model) -> Result<ModelSummaryReport, CaeError> {
+    let density = model.material.density;
+    if !density.is_finite() || density < 0.0 {
+        return Err(CaeError::new(
+            "material/invalid-density",
+            format!("the model summary requires a finite non-negative mass density (currently {density})"),
+        ));
+    }
+    let nodes: HashMap<&str, usize> =
+        model.nodes.iter().enumerate().map(|(position, node)| (node.id.as_str(), position)).collect();
+    let mut nodal_mass = 0.0;
+    for node in &model.nodes {
+        if !node.x.is_finite() || !node.y.is_finite() || !node.z.is_finite() {
+            return Err(CaeError::new(
+                "node/invalid-coordinate",
+                format!("node `{}` must have finite coordinates before a summary can be produced", node.id),
+            ));
+        }
+        if !node.mass.is_finite() || node.mass < 0.0 {
+            return Err(CaeError::new(
+                "node/invalid-mass",
+                format!("mass of node `{}` must be finite and non-negative (currently {})", node.id, node.mass),
+            ));
+        }
+        nodal_mass += node.mass;
+    }
+
+    let mut total_length = 0.0;
+    let mut truss_length = 0.0;
+    let mut beam_length = 0.0;
+    let mut volume = 0.0;
+    let mut member_mass = 0.0;
+    let mut weighted_centroid = [0.0; 3];
+    let mut truss_elements = 0;
+    let mut beam_elements = 0;
+    for element in &model.elements {
+        let from = *nodes.get(element.from.as_str()).ok_or_else(|| {
+            CaeError::new(
+                "element/unknown-node",
+                format!("element `{}` references unknown node `{}`", element.id, element.from),
+            )
+        })?;
+        let to = *nodes.get(element.to.as_str()).ok_or_else(|| {
+            CaeError::new("element/unknown-node", format!("element `{}` references unknown node `{}`", element.id, element.to))
+        })?;
+        let start = &model.nodes[from];
+        let end = &model.nodes[to];
+        let delta_x = end.x - start.x;
+        let delta_y = end.y - start.y;
+        let delta_z = end.z - start.z;
+        let length = (delta_x * delta_x + delta_y * delta_y + delta_z * delta_z).sqrt();
+        let area = effective_area(model, element)?;
+        let element_mass = density * area * length;
+        total_length += length;
+        volume += area * length;
+        member_mass += element_mass;
+        match element.kind {
+            ElementKind::Truss => {
+                truss_elements += 1;
+                truss_length += length;
+            }
+            ElementKind::Beam => {
+                beam_elements += 1;
+                beam_length += length;
+            }
+        }
+        weighted_centroid[0] += element_mass * 0.5 * (start.x + end.x);
+        weighted_centroid[1] += element_mass * 0.5 * (start.y + end.y);
+        weighted_centroid[2] += element_mass * 0.5 * (start.z + end.z);
+    }
+    for node in &model.nodes {
+        weighted_centroid[0] += node.mass * node.x;
+        weighted_centroid[1] += node.mass * node.y;
+        weighted_centroid[2] += node.mass * node.z;
+    }
+    let total_mass = member_mass + nodal_mass;
+    let center_of_mass = if total_mass > 0.0 {
+        Some([weighted_centroid[0] / total_mass, weighted_centroid[1] / total_mass, weighted_centroid[2] / total_mass])
+    }
+    else {
+        None
+    };
+
+    let three_dimensional = model.dimension == 3;
+    let rotations = if three_dimensional { std::collections::HashSet::new() } else { rotation_nodes(model) };
+    let uses_rotation = !rotations.is_empty();
+    let translational_dofs = model.nodes.len() * if three_dimensional { 3 } else { 2 };
+    let rotational_dofs = rotations.len();
+    let slots = if three_dimensional || uses_rotation { 3 } else { 2 };
+    let mut constrained = vec![false; model.nodes.len() * slots];
+    for support in &model.supports {
+        let Some(&position) = nodes.get(support.node.as_str())
+        else {
+            return Err(CaeError::new("support/unknown-node", format!("support references unknown node `{}`", support.node)));
+        };
+        let base = position * slots;
+        if support.dx {
+            constrained[base] = true;
+        }
+        if support.dy {
+            constrained[base + 1] = true;
+        }
+        if three_dimensional && support.dz {
+            constrained[base + 2] = true;
+        }
+        if !three_dimensional && support.rz && rotations.contains(support.node.as_str()) {
+            constrained[base + 2] = true;
+        }
+        if support.direction.is_some() {
+            constrained[base] = true;
+        }
+    }
+    let constrained_dofs = constrained.iter().filter(|restrained| **restrained).count();
+    let total_dofs = translational_dofs + rotational_dofs;
+
+    Ok(ModelSummaryReport {
+        format: MODEL_SUMMARY_FORMAT.to_string(),
+        version: MODEL_SUMMARY_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        dimension: model.dimension,
+        revision: model.revision,
+        nodes: model.nodes.len(),
+        elements: model.elements.len(),
+        truss_elements,
+        beam_elements,
+        supports: model.supports.len(),
+        loads: model.loads.len(),
+        patterns: model.patterns.len(),
+        combinations: model.combinations.len(),
+        total_length,
+        truss_length,
+        beam_length,
+        volume,
+        member_mass,
+        nodal_mass,
+        total_mass,
+        center_of_mass,
+        translational_dofs,
+        rotational_dofs,
+        total_dofs,
+        constrained_dofs,
+        free_dofs: total_dofs.saturating_sub(constrained_dofs),
+    })
+}
+
+/// Returns the area used by quantity reports: the element override or the
+/// global material area, provided it is positive and finite.
+fn effective_area(model: &Model, element: &Element) -> Result<f64, CaeError> {
+    let area = match element.material.as_ref().and_then(|material| material.area) {
+        Some(area) => area,
+        None => model.material.area,
+    };
+    if positive_finite(area) {
+        Ok(area)
+    }
+    else {
+        Err(CaeError::new(
+            "material/invalid",
+            format!("effective area of element `{}` must be positive and finite (currently {area})", element.id),
+        ))
+    }
 }
 
 /// Solves a sequence of construction stages by element activation and

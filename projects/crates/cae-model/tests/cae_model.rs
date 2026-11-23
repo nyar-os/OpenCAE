@@ -244,9 +244,17 @@ fn csv_vtk_and_json_exports_are_consistent() {
     export_csv(&model, &solution, &directory).expect("csv export");
     let nodes = fs::read_to_string(directory.join("nodes.csv")).expect("nodes.csv");
     let elements = fs::read_to_string(directory.join("elements.csv")).expect("elements.csv");
+    let forces = fs::read_to_string(directory.join("forces.csv")).expect("forces.csv");
     assert_eq!(nodes.lines().count(), 1 + model.nodes.len());
     assert_eq!(elements.lines().count(), 1 + model.elements.len());
+    assert_eq!(forces.lines().count(), 1 + 11 * model.elements.len());
     assert!(nodes.starts_with("id,x,y,z,ux,uy,uz"));
+    assert!(forces.starts_with("element,from,to,kind,position,axialForce,shear,moment"));
+    let first_station: Vec<&str> = forces.lines().nth(1).expect("first force row").split(',').collect();
+    assert_eq!(first_station[0], "e1");
+    assert_close(first_station[5].parse::<f64>().expect("axial force"), 1000.0, 1e-9);
+    assert_close(first_station[6].parse::<f64>().expect("shear"), 0.0, 1e-12);
+    assert_close(first_station[7].parse::<f64>().expect("moment"), 0.0, 1e-12);
 
     export_vtk(&model, &solution, &directory).expect("vtk export");
     let vtk = fs::read_to_string(directory.join("model.vtk")).expect("model.vtk");
