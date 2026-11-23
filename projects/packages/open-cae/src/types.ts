@@ -1411,6 +1411,8 @@ export interface EnvelopeReport {
 export interface EnvelopeOptions {
     /** When given, the JSON report is written atomically to this path. */
     readonly out?: string;
+    /** When given, the same report is written atomically as UTF-8 CSV to this path. */
+    readonly csv?: string;
 }
 
 /** Request of `addCombination()`. */

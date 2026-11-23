@@ -480,7 +480,10 @@ export function solveCombinations(path: string, options: CombinationSolveOptions
 
 /** Solves the base case and every load combination, then returns the extremes and governing combinations. */
 export function envelope(path: string, options: EnvelopeOptions = {}): EnvelopeReport {
-    const request = options.out === undefined ? undefined : JSON.stringify({ out: options.out });
+    const request =
+        options.out === undefined && options.csv === undefined
+            ? undefined
+            : JSON.stringify({ out: options.out, csv: options.csv });
     return decode<EnvelopeReport>(() =>
         request === undefined ? binding('envelope').envelope(path) : binding('envelope').envelope(path, request),
     );

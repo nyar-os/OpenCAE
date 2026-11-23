@@ -419,7 +419,12 @@ export class CaeDocument {
         return service.solveCombinations(this.path, options);
     }
 
-    /** Solves the base case and every load combination, then returns the extremes and governing combinations. */
+    /**
+     * Solves the base case and every load combination, then returns the extremes and governing combinations.
+     *
+     * `options.out` writes the JSON report and `options.csv` writes the same
+     * report as a UTF-8 CSV table, both atomically.
+     */
     envelope(options: EnvelopeOptions = {}): EnvelopeReport {
         this.assertOpen();
         return service.envelope(this.path, options);

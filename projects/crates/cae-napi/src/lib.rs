@@ -1041,15 +1041,17 @@ fn solve_combinations(ctx: CallContext) -> Result<JsValue> {
 /// Solves the unfactored case and every load combination, then returns the
 /// minimum and maximum of each result component and the governing combination.
 ///
-/// The request accepts an optional `out` path.
+/// The request accepts an optional `out` path for the JSON report and an
+/// optional `csv` path for the same report as a UTF-8 CSV table.
 #[function]
 fn envelope(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
     let request = optional_object(&ctx, 1)?;
     let out = request.as_ref().and_then(|request| request.get("out")).and_then(Value::as_str);
+    let csv = request.as_ref().and_then(|request| request.get("csv")).and_then(Value::as_str);
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let result = session.envelope(out.map(Path::new)).map_err(fail)?;
+    let result = session.envelope(out.map(Path::new), csv.map(Path::new)).map_err(fail)?;
     respond(&ctx, &result)
 }
 
