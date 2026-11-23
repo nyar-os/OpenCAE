@@ -19,10 +19,13 @@
 //! the earlier case in `cases` order, so the report is deterministic for an
 //! identical document.
 
+use std::fmt::Write as _;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
     CaeError,
+    export::csv_field,
     model::{Model, Units},
     solver::{ElementResult, Solution, solve, solve_combinations},
 };
@@ -149,6 +152,60 @@ pub fn solve_envelope(model: &Model) -> Result<EnvelopeReport, CaeError> {
         }
     }
     Ok(build_envelope(model, &cases))
+}
+
+/// Renders an [`EnvelopeReport`] as UTF-8 CSV with LF line endings.
+///
+/// The header is
+/// `section,id,component,min,max,minCombination,maxCombination`. Rows follow
+/// the report order exactly: one row per node component (`nodes`, the node id,
+/// `ux`, `uy` and, in three-dimensional documents, `uz`), then one row per
+/// element component (`elements`, `axial`, `shear`, `moment`) and one row per
+/// support reaction component (`reactions`, `fx`, `fy` and, in three
+/// dimensions, `fz`). Numbers use the same shortest round-trip formatting as
+/// the JSON report. Fields containing a comma, quote, carriage return or line
+/// feed are quoted with RFC 4180 rules. Values stay in the document unit
+/// system and are never converted; identical reports always produce
+/// byte-identical text.
+pub fn envelope_csv(report: &EnvelopeReport) -> String {
+    let mut text = String::from("section,id,component,min,max,minCombination,maxCombination\n");
+    for node in &report.nodes {
+        push_csv_row(&mut text, "nodes", &node.id, "ux", &node.ux);
+        push_csv_row(&mut text, "nodes", &node.id, "uy", &node.uy);
+        if let Some(uz) = &node.uz {
+            push_csv_row(&mut text, "nodes", &node.id, "uz", uz);
+        }
+    }
+    for element in &report.elements {
+        push_csv_row(&mut text, "elements", &element.id, "axial", &element.axial);
+        push_csv_row(&mut text, "elements", &element.id, "shear", &element.shear);
+        push_csv_row(&mut text, "elements", &element.id, "moment", &element.moment);
+    }
+    for reaction in &report.reactions {
+        push_csv_row(&mut text, "reactions", &reaction.node, "fx", &reaction.fx);
+        push_csv_row(&mut text, "reactions", &reaction.node, "fy", &reaction.fy);
+        if let Some(fz) = &reaction.fz {
+            push_csv_row(&mut text, "reactions", &reaction.node, "fz", fz);
+        }
+    }
+    text
+}
+
+fn push_csv_row(text: &mut String, section: &str, id: &str, component: &str, extreme: &EnvelopeExtreme) {
+    let _ = writeln!(
+        text,
+        "{section},{},{component},{},{},{},{}",
+        csv_field(id),
+        csv_number(extreme.min),
+        csv_number(extreme.max),
+        csv_field(&extreme.min_combination),
+        csv_field(&extreme.max_combination)
+    );
+}
+
+/// Formats a value exactly like the JSON report so the CSV and JSON agree.
+fn csv_number(value: f64) -> String {
+    serde_json::to_string(&value).unwrap_or_else(|_| value.to_string())
 }
 
 fn build_envelope(model: &Model, cases: &[(String, Solution)]) -> EnvelopeReport {

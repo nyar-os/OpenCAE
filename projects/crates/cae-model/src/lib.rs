@@ -56,7 +56,7 @@ mod validate;
 pub use crate::{
     envelope::{
         ENVELOPE_REPORT_FORMAT, ENVELOPE_REPORT_VERSION, EnvelopeElement, EnvelopeExtreme, EnvelopeNode, EnvelopeReaction,
-        EnvelopeReport, solve_envelope,
+        EnvelopeReport, envelope_csv, solve_envelope,
     },
     error::CaeError,
     export::{

@@ -4,7 +4,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{LoadCombination, Model, OpenCae, OpenCaeOptions, PatternFactor, Units, solve_envelope};
+use cae_model::{
+    EnvelopeExtreme, EnvelopeNode, EnvelopeReport, LoadCombination, Model, OpenCae, OpenCaeOptions, PatternFactor, Units,
+    envelope_csv, solve_envelope,
+};
 
 const E: f64 = 210_000.0;
 const A: f64 = 100.0;
@@ -158,8 +161,8 @@ fn envelope_json_is_deterministic_and_never_writes_the_document() {
     let second = directory.join("second.json");
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(&source).expect("open");
-    session.envelope(Some(&first)).expect("first envelope");
-    session.envelope(Some(&second)).expect("second envelope");
+    session.envelope(Some(&first), None).expect("first envelope");
+    session.envelope(Some(&second), None).expect("second envelope");
 
     assert_eq!(fs::read(&first).expect("first report"), fs::read(&second).expect("second report"));
     assert_eq!(fs::read(&source).expect("document bytes"), before, "the report must not write the document");
@@ -178,4 +181,134 @@ fn a_failing_combination_propagates_the_solver_code() {
 
     let error = solve_envelope(&model).expect_err("an unknown pattern must fail the envelope");
     assert_eq!(error.code, "combination/unknown-pattern");
+}
+
+const CSV_HEADER: &str = "section,id,component,min,max,minCombination,maxCombination";
+
+#[test]
+fn csv_reports_the_header_and_the_json_report_order() {
+    let mut model = single_bar_model();
+    model.combinations.push(combination("tension", 1.0, 0.0));
+    model.combinations.push(combination("compression", -1.0, 0.0));
+
+    let report = solve_envelope(&model).expect("envelope");
+    let csv = envelope_csv(&report);
+    let rows: Vec<&str> = csv.lines().collect();
+
+    assert_eq!(rows[0], CSV_HEADER);
+    assert_eq!(rows.len(), 1 + 2 * 2 + 3 + 2 * 2, "nodes, elements and reactions rows in report order");
+    let sections: Vec<Vec<&str>> = rows[1..].iter().map(|row| row.split(',').collect()).collect();
+    assert_eq!(sections[0][..3], ["nodes", "n1", "ux"]);
+    assert_eq!(sections[1][..3], ["nodes", "n1", "uy"]);
+    assert_eq!(sections[2][..3], ["nodes", "n2", "ux"]);
+    assert_eq!(sections[3][..3], ["nodes", "n2", "uy"]);
+    assert_eq!(sections[4][..3], ["elements", "e1", "axial"]);
+    assert_eq!(sections[5][..3], ["elements", "e1", "shear"]);
+    assert_eq!(sections[6][..3], ["elements", "e1", "moment"]);
+    assert_eq!(sections[7][..3], ["reactions", "n1", "fx"]);
+    assert_eq!(sections[8][..3], ["reactions", "n1", "fy"]);
+    assert_eq!(sections[9][..3], ["reactions", "n2", "fx"]);
+    assert_eq!(sections[10][..3], ["reactions", "n2", "fy"]);
+    assert!(!csv.contains(",uz,"), "a two-dimensional document has no uz column");
+    assert!(!csv.contains(",fz,"), "a two-dimensional document has no fz column");
+
+    let tip = report.nodes.iter().find(|node| node.id == "n2").expect("tip node");
+    assert_eq!(
+        rows[3],
+        format!(
+            "nodes,n2,ux,{},{},{},{}",
+            serde_json::to_string(&tip.ux.min).expect("min"),
+            serde_json::to_string(&tip.ux.max).expect("max"),
+            tip.ux.min_combination,
+            tip.ux.max_combination
+        )
+    );
+}
+
+#[test]
+fn csv_reports_uz_and_fz_rows_in_three_dimensions() {
+    let model = vertical_bar_3d_model();
+    let report = solve_envelope(&model).expect("envelope");
+    let csv = envelope_csv(&report);
+    let rows: Vec<&str> = csv.lines().collect();
+
+    assert_eq!(rows[0], CSV_HEADER);
+    assert!(rows.iter().any(|row| row.starts_with("nodes,n1,uz,")), "3D nodes report uz");
+    assert!(rows.iter().any(|row| row.starts_with("nodes,n2,uz,")), "3D nodes report uz");
+    assert!(rows.iter().any(|row| row.starts_with("reactions,n1,fz,")), "3D reactions report fz");
+    assert_eq!(rows.len(), 1 + 2 * 3 + 3 + 2 * 3);
+}
+
+#[test]
+fn csv_quotes_identifiers_and_combination_names_with_commas_or_quotes() {
+    let extreme =
+        EnvelopeExtreme { min: -1.0, max: 2.5, min_combination: "a,b".to_string(), max_combination: "say \"hi\"".to_string() };
+    let report = EnvelopeReport {
+        format: "open-cae-envelope".to_string(),
+        version: 1,
+        units: "mm".to_string(),
+        combination_count: 1,
+        cases: vec!["base".to_string(), "a,b".to_string()],
+        nodes: vec![EnvelopeNode { id: "n,1".to_string(), ux: extreme.clone(), uy: extreme, uz: None }],
+        elements: Vec::new(),
+        reactions: Vec::new(),
+        ok: true,
+    };
+
+    let csv = envelope_csv(&report);
+    assert_eq!(
+        csv,
+        "section,id,component,min,max,minCombination,maxCombination\n\
+         nodes,\"n,1\",ux,-1.0,2.5,\"a,b\",\"say \"\"hi\"\"\"\n\
+         nodes,\"n,1\",uy,-1.0,2.5,\"a,b\",\"say \"\"hi\"\"\"\n"
+    );
+    assert!(!csv.contains('\r'), "CSV rows end with LF only");
+    assert_eq!(csv.matches('\n').count(), 3, "one LF per header or row");
+    assert!(csv.ends_with('\n'));
+}
+
+#[test]
+fn csv_is_deterministic_and_matches_the_session_output() {
+    let directory = temporary_dir("envelope-csv");
+    let source = directory.join("model.ocae");
+    let mut model = single_bar_model();
+    model.combinations.push(combination("tension", 1.0, 0.0));
+    model.combinations.push(combination("compression", -1.0, 0.0));
+    model.save_atomic(&source).expect("save");
+
+    let first = directory.join("first.csv");
+    let second = directory.join("second.csv");
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(&source).expect("open");
+    let report = session.envelope(None, Some(&first)).expect("first csv");
+    session.envelope(None, Some(&second)).expect("second csv");
+
+    let first_bytes = fs::read(&first).expect("first csv bytes");
+    assert_eq!(first_bytes, fs::read(&second).expect("second csv bytes"));
+    assert_eq!(first_bytes, envelope_csv(&report).into_bytes());
+}
+
+#[test]
+fn a_failing_combination_writes_neither_the_json_report_nor_the_csv() {
+    let directory = temporary_dir("envelope-failing");
+    let source = directory.join("model.ocae");
+    let mut model = single_bar_model();
+    model.combinations.push(LoadCombination {
+        name: "missing".to_string(),
+        loads: 1.0,
+        gravity: 0.0,
+        thermal: 1.0,
+        patterns: vec![PatternFactor { pattern: "absent".to_string(), factor: 1.0 }],
+    });
+    model.save_atomic(&source).expect("save");
+
+    let json = directory.join("envelope.json");
+    let csv = directory.join("envelope.csv");
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(&source).expect("open");
+    let error = session.envelope(Some(&json), Some(&csv)).expect_err("a failing case must fail");
+
+    assert_eq!(error.code, "combination/unknown-pattern");
+    assert!(!json.exists(), "a failed solve must not write the JSON report");
+    assert!(!csv.exists(), "a failed solve must not write the CSV report");
 }

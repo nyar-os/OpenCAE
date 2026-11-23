@@ -1157,7 +1157,7 @@ fn mesh_error(error: MeshError) -> CaeError {
     CaeError::new(error.code(), error.message())
 }
 
-fn csv_field(value: &str) -> String {
+pub(crate) fn csv_field(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))
     }

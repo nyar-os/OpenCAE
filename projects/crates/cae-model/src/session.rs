@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::{
     CAPABILITIES_JSON, CaeError,
-    envelope::{EnvelopeReport, solve_envelope},
+    envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
         ContourQuantity, export_csv_with_stations, export_html, export_md, export_svg_with_contour, export_vtk, write_atomic,
     },
@@ -1229,14 +1229,20 @@ impl OpenCae {
     /// returns the minimum and maximum of each displacement, force and reaction
     /// component with the governing combination.
     ///
-    /// When `out` is given the JSON report is written atomically to that path.
-    pub fn envelope(&self, out: Option<&Path>) -> Result<EnvelopeReport, CaeError> {
+    /// When `out` is given the JSON report is written atomically to that path;
+    /// when `csv` is given the UTF-8 CSV table of the same report is written
+    /// atomically to that path. Both files are written only after the envelope
+    /// has been solved, so a failing case writes nothing.
+    pub fn envelope(&self, out: Option<&Path>, csv: Option<&Path>) -> Result<EnvelopeReport, CaeError> {
         let model = &self.current()?.model;
         let envelope = solve_envelope(model)?;
         if let Some(path) = out {
             let json = serde_json::to_string_pretty(&envelope)
                 .map_err(|error| CaeError::new("document/serialize", format!("cannot serialize envelope report: {error}")))?;
             write_atomic(path, &json)?;
+        }
+        if let Some(path) = csv {
+            write_atomic(path, &envelope_csv(&envelope))?;
         }
         Ok(envelope)
     }
