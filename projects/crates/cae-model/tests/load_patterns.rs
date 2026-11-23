@@ -46,6 +46,7 @@ fn combination(name: &str, patterns: &[(&str, f64)]) -> LoadCombination {
         name: name.to_string(),
         loads: 1.0,
         gravity: 0.0,
+        thermal: 1.0,
         patterns: patterns
             .iter()
             .map(|(pattern, factor)| PatternFactor { pattern: (*pattern).to_string(), factor: *factor })

@@ -769,8 +769,24 @@ impl OpenCae {
         gravity: f64,
         patterns: &[PatternFactor],
     ) -> Result<DocumentSummary, CaeError> {
+        self.add_combination_full(name, loads, gravity, 1.0, patterns)
+    }
+
+    /// Adds or replaces a load combination with load, gravity, thermal and
+    /// named-pattern factors and saves the document.
+    ///
+    /// `thermal` scales element temperature changes and gradients, and
+    /// `patterns` replaces the whole pattern list of an existing combination.
+    pub fn add_combination_full(
+        &mut self,
+        name: &str,
+        loads: f64,
+        gravity: f64,
+        thermal: f64,
+        patterns: &[PatternFactor],
+    ) -> Result<DocumentSummary, CaeError> {
         let patterns = patterns.to_vec();
-        self.edit(move |model| model.add_combination_with_patterns(name, loads, gravity, patterns))
+        self.edit(move |model| model.add_combination_full(name, loads, gravity, thermal, patterns))
     }
 
     /// Adds or updates a concentrated load inside a named load pattern and

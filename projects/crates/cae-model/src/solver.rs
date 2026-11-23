@@ -1160,6 +1160,8 @@ pub struct CombinationCase {
     pub loads: f64,
     /// Factor applied to the gravity vector.
     pub gravity: f64,
+    /// Factor applied to element temperature changes and gradients.
+    pub thermal: f64,
     /// Named load patterns mixed into this combination.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<PatternFactor>,
@@ -2868,10 +2870,11 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
 
 /// Solves the linear buckling eigenproblem for every load combination.
 ///
-/// Each combination scales the applied nodal and element loads by `loads` and
-/// the gravity vector by `gravity`, then runs [`solve_buckling`] on the scaled
-/// model, so every factor multiplies that combination's load set. Prescribed
-/// displacements are boundary conditions and stay unchanged.
+/// Each combination scales the applied nodal and element loads by `loads`, the
+/// gravity vector by `gravity`, element temperature changes and gradients by
+/// `thermal`, then runs [`solve_buckling`] on the scaled model, so every factor
+/// multiplies that combination's load set. Prescribed displacements are
+/// boundary conditions and stay unchanged.
 ///
 /// An empty list is rejected with `combination/none`, `modes` must be at least
 /// one, and every combination is validated by the static reference solve.
@@ -3446,8 +3449,8 @@ fn load_case_row(name: &str, loads: f64, gravity: f64, solution: &Solution) -> L
 /// stored load combination.
 ///
 /// The unfactored solve is always the first row and is called `base` with
-/// factors `1/1`. Each combination is solved on the model scaled by its `loads`
-/// and `gravity` factors, exactly like [`solve_combinations`], and contributes
+/// factors `1/1`. Each combination is solved on the model scaled by its `loads`,
+/// `gravity` and `thermal` factors, exactly like [`solve_combinations`], and contributes
 /// one row with the applied resultant, the largest displacement and its node,
 /// the extreme axial force and bending moment with their elements, the strain
 /// energy and the reaction balance flag. The table is intended for reports and
@@ -3459,10 +3462,10 @@ pub fn summarize_load_cases(model: &Model) -> Result<LoadCaseSummary, CaeError> 
         if combination.name.trim().is_empty() {
             return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
         }
-        if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+        if !combination.loads.is_finite() || !combination.gravity.is_finite() || !combination.thermal.is_finite() {
             return Err(CaeError::new(
                 "combination/invalid-factor",
-                format!("load combination `{}` requires finite loads and gravity factors", combination.name),
+                format!("load combination `{}` requires finite loads, gravity and thermal factors", combination.name),
             ));
         }
         let scaled = combination_model(model, combination)?;
@@ -3574,9 +3577,10 @@ fn resolve_inertia(model: &Model, element: &Element) -> Option<f64> {
 /// Solves every provided load combination and returns each solution plus an
 /// envelope of the governing values.
 ///
-/// Each combination scales the applied nodal and element loads by `loads` and
-/// the gravity vector by `gravity`; prescribed displacements are boundary
-/// conditions and stay unchanged. An empty list is rejected with
+/// Each combination scales the applied nodal and element loads by `loads`, the
+/// gravity vector by `gravity`, element temperature changes and gradients by
+/// `thermal`, and adds its named load patterns; prescribed displacements are
+/// boundary conditions and stay unchanged. An empty list is rejected with
 /// `combination/none`. Every combination is validated by the static solver, so
 /// invalid factors, mechanisms or a missing density surface with their usual
 /// codes.
@@ -3592,7 +3596,7 @@ pub fn solve_combinations(model: &Model, combinations: &[LoadCombination]) -> Re
         if combination.name.trim().is_empty() {
             return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
         }
-        if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+        if !combination.loads.is_finite() || !combination.gravity.is_finite() || !combination.thermal.is_finite() {
             return Err(CaeError::new(
                 "combination/invalid-factor",
                 format!("load combination `{}` factors must be finite", combination.name),
@@ -3604,6 +3608,7 @@ pub fn solve_combinations(model: &Model, combinations: &[LoadCombination]) -> Re
             name: combination.name.clone(),
             loads: combination.loads,
             gravity: combination.gravity,
+            thermal: combination.thermal,
             patterns: combination.patterns.clone(),
             solution,
         });
@@ -3916,12 +3921,27 @@ fn scaled_model(model: &Model, loads: f64, gravity: f64) -> Model {
 /// Builds the model solved for one load combination.
 ///
 /// The applied load case and gravity are scaled by the combination factors
-/// exactly like [`scaled_model`], then every referenced load pattern adds
-/// its own nodal loads multiplied by its factor. An unknown pattern name is
-/// rejected with `combination/unknown-pattern` and a non-finite factor with
+/// exactly like [`scaled_model`], element temperature changes and gradients are
+/// multiplied by `thermal`, and then every referenced load pattern adds its own
+/// nodal loads multiplied by its factor. An unknown pattern name is rejected
+/// with `combination/unknown-pattern` and a non-finite factor with
 /// `combination/invalid-factor`.
 fn combination_model(model: &Model, combination: &LoadCombination) -> Result<Model, CaeError> {
+    if !combination.thermal.is_finite() {
+        return Err(CaeError::new(
+            "combination/invalid-factor",
+            format!("load combination `{}` requires a finite thermal factor", combination.name),
+        ));
+    }
     let mut scaled = scaled_model(model, combination.loads, combination.gravity);
+    for element in &mut scaled.elements {
+        if let Some(value) = &mut element.temperature {
+            *value *= combination.thermal;
+        }
+        if let Some(value) = &mut element.temperature_gradient {
+            *value *= combination.thermal;
+        }
+    }
     for entry in &combination.patterns {
         if !entry.factor.is_finite() {
             return Err(CaeError::new(

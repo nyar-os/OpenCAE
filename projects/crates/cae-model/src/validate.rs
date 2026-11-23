@@ -772,7 +772,7 @@ impl Model {
                     format!("load combination name `{}` is duplicated", combination.name),
                 ));
             }
-            if !combination.loads.is_finite() || !combination.gravity.is_finite() {
+            if !combination.loads.is_finite() || !combination.gravity.is_finite() || !combination.thermal.is_finite() {
                 report.push(check_error(
                     "combination/invalid-factor",
                     format!("load combination `{}` factors must be finite", combination.name),

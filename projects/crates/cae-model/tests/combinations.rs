@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use cae_model::{ElementKind, LoadCombination, Model, OpenCae, OpenCaeOptions, Units, solve, solve_combinations};
+use cae_model::{ElementKind, LoadCombination, Material, Model, OpenCae, OpenCaeOptions, Units, solve, solve_combinations};
 
 const E: f64 = 210_000.0;
 const A: f64 = 100.0;
@@ -13,6 +13,8 @@ const L: f64 = 1000.0;
 const RHO: f64 = 7.85e-9;
 const GRAVITY: f64 = 9810.0;
 const TIP_LOAD: f64 = -1000.0;
+const ALPHA: f64 = 12.0e-6;
+const DT: f64 = 50.0;
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock").as_nanos();
@@ -42,9 +44,9 @@ fn cantilever_load_case() -> Model {
 
 fn combinations() -> Vec<LoadCombination> {
     vec![
-        LoadCombination { name: "D".to_string(), loads: 0.0, gravity: 1.0, patterns: Vec::new() },
-        LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0, patterns: Vec::new() },
-        LoadCombination { name: "D+L".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() },
+        LoadCombination { name: "D".to_string(), loads: 0.0, gravity: 1.0, thermal: 1.0, patterns: Vec::new() },
+        LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0, thermal: 1.0, patterns: Vec::new() },
+        LoadCombination { name: "D+L".to_string(), loads: 1.0, gravity: 1.0, thermal: 1.0, patterns: Vec::new() },
     ]
 }
 
@@ -118,7 +120,7 @@ fn combination_solver_rejects_invalid_factors() {
     let model = cantilever_load_case();
     let error = solve_combinations(
         &model,
-        &[LoadCombination { name: "bad".to_string(), loads: f64::NAN, gravity: 1.0, patterns: Vec::new() }],
+        &[LoadCombination { name: "bad".to_string(), loads: f64::NAN, gravity: 1.0, thermal: 1.0, patterns: Vec::new() }],
     )
     .expect_err("non-finite factors must be rejected");
     assert_eq!(error.code, "combination/invalid-factor");
@@ -127,9 +129,27 @@ fn combination_solver_rejects_invalid_factors() {
 #[test]
 fn model_validates_combination_names_and_factors() {
     let mut model = cantilever_load_case();
-    model.combinations.push(LoadCombination { name: "".to_string(), loads: 1.0, gravity: 0.0, patterns: Vec::new() });
-    model.combinations.push(LoadCombination { name: "D".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() });
-    model.combinations.push(LoadCombination { name: "D".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() });
+    model.combinations.push(LoadCombination {
+        name: "".to_string(),
+        loads: 1.0,
+        gravity: 0.0,
+        thermal: 1.0,
+        patterns: Vec::new(),
+    });
+    model.combinations.push(LoadCombination {
+        name: "D".to_string(),
+        loads: 1.0,
+        gravity: 1.0,
+        thermal: 1.0,
+        patterns: Vec::new(),
+    });
+    model.combinations.push(LoadCombination {
+        name: "D".to_string(),
+        loads: 1.0,
+        gravity: 1.0,
+        thermal: 1.0,
+        patterns: Vec::new(),
+    });
     let codes: Vec<String> = model.validate().into_iter().map(|issue| issue.code).collect();
     assert!(codes.iter().any(|code| code == "combination/invalid-name"));
     assert!(codes.iter().any(|code| code == "combination/duplicate-name"));
@@ -139,6 +159,74 @@ fn model_validates_combination_names_and_factors() {
     assert_eq!(error.code, "combination/invalid-name");
     let error = model.add_combination("x", f64::INFINITY, 1.0).expect_err("infinite factor");
     assert_eq!(error.code, "combination/invalid-factor");
+    let error = model.add_combination_full("x", 1.0, 1.0, f64::NAN, Vec::new()).expect_err("non-finite thermal factor");
+    assert_eq!(error.code, "combination/invalid-factor");
+}
+
+/// Bar restrained at both ends and heated uniformly.
+fn restrained_thermal_bar() -> Model {
+    let mut model = Model::new(Units::Millimeter);
+    model
+        .set_material_data(Material {
+            name: "steel".to_string(),
+            youngs_modulus: E,
+            area: A,
+            density: 0.0,
+            allowable_stress: None,
+            alpha: Some(ALPHA),
+            conductivity: None,
+            section: None,
+        })
+        .expect("material");
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", L, 0.0).expect("n2");
+    model.add_element("e1", "n1", "n2", None).expect("bar");
+    model.add_support("n1", true, true).expect("fixed n1");
+    model.add_support("n2", true, true).expect("fixed n2");
+    model.set_element_temperature("e1", Some(DT)).expect("temperature");
+    model
+}
+
+#[test]
+fn combination_thermal_factor_scales_member_temperature() {
+    let model = restrained_thermal_bar();
+    let thermal_combination = |thermal: f64| LoadCombination {
+        name: format!("thermal {thermal}"),
+        loads: 0.0,
+        gravity: 0.0,
+        thermal,
+        patterns: Vec::new(),
+    };
+
+    let expected = E * A * ALPHA * DT;
+    let full = solve_combinations(&model, &[thermal_combination(1.0)]).expect("full thermal");
+    let half = solve_combinations(&model, &[thermal_combination(0.5)]).expect("half thermal");
+    let none = solve_combinations(&model, &[thermal_combination(0.0)]).expect("no thermal");
+
+    assert_close(full.combinations[0].solution.elements[0].axial_force, -expected, 1e-12);
+    assert_close(half.combinations[0].solution.elements[0].axial_force, -0.5 * expected, 1e-12);
+    assert_close(none.combinations[0].solution.elements[0].axial_force, 0.0, 1e-12);
+    assert_close(half.combinations[0].thermal, 0.5, 1e-12);
+}
+
+#[test]
+fn thermal_factor_round_trips_and_defaults_to_one() {
+    let directory = temporary_dir("thermal-combination");
+    let path = directory.join("thermal.ocae");
+    let mut model = restrained_thermal_bar();
+    model.add_combination_full("half", 0.0, 0.0, 0.5, Vec::new()).expect("combination");
+    model.save_atomic(&path).expect("save");
+
+    let loaded = Model::load(&path).expect("load");
+    assert_eq!(loaded.combinations, model.combinations);
+
+    // A document written before the factor existed keeps thermal actions whole.
+    let text = fs::read_to_string(&path).expect("document");
+    let mut legacy: serde_json::Value = serde_json::from_str(&text).expect("json");
+    legacy["combinations"][0].as_object_mut().expect("combination object").remove("thermal").expect("thermal field");
+    fs::write(&path, serde_json::to_string_pretty(&legacy).expect("serialize legacy")).expect("write legacy document");
+    let loaded = Model::load(&path).expect("load legacy");
+    assert_close(loaded.combinations[0].thermal, 1.0, 1e-12);
 }
 
 #[test]
@@ -175,7 +263,7 @@ fn live_only_combination_solves_without_density() {
     model.add_load("n2", Some(1000.0), None).expect("load");
     let result = solve_combinations(
         &model,
-        &[LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0, patterns: Vec::new() }],
+        &[LoadCombination { name: "L".to_string(), loads: 1.0, gravity: 0.0, thermal: 1.0, patterns: Vec::new() }],
     )
     .expect("live combination");
     let expected = 1000.0 * L / (E * A);
@@ -188,7 +276,7 @@ fn single_combination_matches_the_static_solution() {
     let static_solution = solve(&model).expect("static");
     let result = solve_combinations(
         &model,
-        &[LoadCombination { name: "full".to_string(), loads: 1.0, gravity: 1.0, patterns: Vec::new() }],
+        &[LoadCombination { name: "full".to_string(), loads: 1.0, gravity: 1.0, thermal: 1.0, patterns: Vec::new() }],
     )
     .expect("combination");
     assert_eq!(result.combinations[0].solution, static_solution);

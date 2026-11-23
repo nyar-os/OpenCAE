@@ -634,10 +634,12 @@ pub struct PatternFactor {
 /// Linear combination of the applied load case, self-weight and named patterns.
 ///
 /// `loads` multiplies every nodal force/moment and every element distributed
-/// load; `gravity` multiplies the gravity vector. Each entry of `patterns`
-/// adds the loads of the named [`LoadPattern`] multiplied by its factor.
-/// Prescribed displacements are boundary conditions and are never scaled. A
-/// combination named `D+L` with `loads = 1` and `gravity = 1` therefore means
+/// load; `gravity` multiplies the gravity vector; `thermal` multiplies every
+/// element temperature change and through-depth gradient and defaults to `1`,
+/// which leaves thermal actions unscaled. Each entry of `patterns` adds the
+/// loads of the named [`LoadPattern`] multiplied by its factor. Prescribed
+/// displacements are boundary conditions and are never scaled. A combination
+/// named `D+L` with `loads = 1` and `gravity = 1` therefore means
 /// `1.0·(live loads) + 1.0·(dead weight)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -650,6 +652,13 @@ pub struct LoadCombination {
     /// Factor applied to the gravity vector (self-weight).
     #[serde(default)]
     pub gravity: f64,
+    /// Factor applied to element temperature changes and gradients.
+    ///
+    /// It defaults to `1`, so documents written before this factor existed keep
+    /// their thermal actions unscaled. `0` removes the thermal actions from the
+    /// combination.
+    #[serde(default = "default_thermal_factor")]
+    pub thermal: f64,
     /// Named load patterns mixed into this combination.
     ///
     /// An empty list keeps existing documents and combinations unchanged.
@@ -658,6 +667,10 @@ pub struct LoadCombination {
 }
 
 fn default_load_factor() -> f64 {
+    1.0
+}
+
+fn default_thermal_factor() -> f64 {
     1.0
 }
 
@@ -1751,7 +1764,7 @@ impl Model {
     }
 
     /// Adds or replaces a linear load combination that also mixes named load
-    /// patterns.
+    /// patterns, leaving thermal actions unscaled.
     ///
     /// The name must be non-empty and every factor (including each pattern
     /// factor) must be finite. Supplying an existing name replaces its whole
@@ -1766,14 +1779,32 @@ impl Model {
         gravity: f64,
         patterns: Vec<PatternFactor>,
     ) -> Result<(), CaeError> {
+        self.add_combination_full(name, loads, gravity, default_thermal_factor(), patterns)
+    }
+
+    /// Adds or replaces a linear load combination with load, gravity, thermal
+    /// and named-pattern factors.
+    ///
+    /// The name must be non-empty and every factor must be finite. Supplying an
+    /// existing name replaces its whole pattern list and thermal factor.
+    pub fn add_combination_full(
+        &mut self,
+        name: impl Into<String>,
+        loads: f64,
+        gravity: f64,
+        thermal: f64,
+        patterns: Vec<PatternFactor>,
+    ) -> Result<(), CaeError> {
         let name = name.into();
         if name.trim().is_empty() {
             return Err(CaeError::new("combination/invalid-name", "a load combination requires a non-empty name"));
         }
-        if !loads.is_finite() || !gravity.is_finite() {
+        if !loads.is_finite() || !gravity.is_finite() || !thermal.is_finite() {
             return Err(CaeError::new(
                 "combination/invalid-factor",
-                format!("load combination `{name}` factors must be finite (loads={loads}, gravity={gravity})"),
+                format!(
+                    "load combination `{name}` factors must be finite (loads={loads}, gravity={gravity}, thermal={thermal})"
+                ),
             ));
         }
         let mut seen = std::collections::HashSet::new();
@@ -1800,10 +1831,11 @@ impl Model {
         if let Some(existing) = self.combinations.iter_mut().find(|combination| combination.name == name) {
             existing.loads = loads;
             existing.gravity = gravity;
+            existing.thermal = thermal;
             existing.patterns = patterns;
         }
         else {
-            self.combinations.push(LoadCombination { name, loads, gravity, patterns });
+            self.combinations.push(LoadCombination { name, loads, gravity, thermal, patterns });
         }
         self.bump_revision();
         Ok(())
