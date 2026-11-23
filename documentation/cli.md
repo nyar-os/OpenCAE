@@ -167,6 +167,7 @@ negative convection coefficient or a non-positive perimeter reports
 | `open-cae reactions <file>` | `[--out <file>]` | Per-support reactions and the global equilibrium check. |
 | `open-cae reaction <file>` | `--node <n>` | One support reaction. |
 | `open-cae forces <file>` | `[--stations <N>] [--out <file>]` | Sampled axial force, shear and bending moment; `--stations` defaults to 11 and must be at least 2. |
+| `open-cae influence <file>` | `--track <element> --quantity reaction\|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x\|y] [--points <N>] [--out <file>]` | Influence-line ordinates as a unit load moves along the track beam; the model must be unloaded. `--quantity reaction` needs `--node` and `--component fx\|fy\|mz`; `--quantity section` needs `--position` and `--component axial\|shear\|moment` (only `axial` for truss section elements); `--direction` defaults to `y` and `--points` to 11. |
 | `open-cae stresses <file>` | `[--stations <N>] [--out <file>]` | Extreme-fibre stresses, governing station and utilisation. A beam needs a material section. |
 | `open-cae deflections <file>` | `[--stations <N>] [--out <file>]` | Local deflection/rotation and deformed coordinates. |
 | `open-cae nodal-stresses <file>` | `[--stations <N>] [--out <file>]` | Averaged nodal stress and extremes. |

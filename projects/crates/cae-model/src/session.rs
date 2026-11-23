@@ -21,13 +21,13 @@ use crate::{
     model::{ElementKind, ElementSplit, Material, Model, Section, Units},
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
-        DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InternalForceSolution, LoadCaseSummary,
-        ModalSolution, NodalStressSolution, NodeDisplacement, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION,
-        ReactionSummary, ResponseSpectrumSolution, Solution, SpectrumCombination, SpectrumPoint, StressSolution,
-        SupportReaction, SystemMatrices, TensionOnlySolution, solve, solve_buckling, solve_buckling_combinations,
-        solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response, solve_heat,
-        solve_internal_forces, solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum,
-        solve_stress, solve_tension_only, summarize_load_cases,
+        DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InfluenceDirection, InfluenceLineSolution,
+        InfluenceQuantity, InternalForceSolution, LoadCaseSummary, ModalSolution, NodalStressSolution, NodeDisplacement,
+        NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, ReactionSummary, ResponseSpectrumSolution, Solution,
+        SpectrumCombination, SpectrumPoint, StressSolution, SupportReaction, SystemMatrices, TensionOnlySolution, solve,
+        solve_buckling, solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection,
+        solve_frequency_response, solve_heat, solve_influence_line, solve_internal_forces, solve_matrices, solve_modal,
+        solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only, summarize_load_cases,
     },
     validate::{Issue, Severity},
 };
@@ -1029,6 +1029,29 @@ impl OpenCae {
             write_atomic(path, &json)?;
         }
         Ok(deflections)
+    }
+
+    /// Builds an influence line as a unit load moves along a track beam element.
+    ///
+    /// The model must not carry any other load. When `out` is given the JSON
+    /// report is written atomically to that path.
+    pub fn influence_line(
+        &self,
+        track: &str,
+        quantity: &InfluenceQuantity,
+        direction: InfluenceDirection,
+        points: usize,
+        out: Option<&Path>,
+    ) -> Result<InfluenceLineSolution, CaeError> {
+        let model = &self.current()?.model;
+        let solution = solve_influence_line(model, track, quantity, direction, points)?;
+        if let Some(path) = out {
+            let json = serde_json::to_string_pretty(&solution).map_err(|error| {
+                CaeError::new("document/serialize", format!("cannot serialize influence line result: {error}"))
+            })?;
+            write_atomic(path, &json)?;
+        }
+        Ok(solution)
     }
 
     /// Averages element-end stresses at shared nodes and reports the extremes.

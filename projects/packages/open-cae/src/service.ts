@@ -39,6 +39,10 @@ import type {
     GravitySetRequest,
     HeatOptions,
     HeatSolution,
+    InfluenceDirection,
+    InfluenceLineOptions,
+    InfluenceLineSolution,
+    InfluenceQuantity,
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
@@ -488,6 +492,22 @@ export function internalForces(path: string, options: InternalForceOptions = {})
         : JSON.stringify({ stations: options.stations, out: options.out });
     return decode<InternalForceSolution>(() =>
         request === undefined ? binding('internal.forces').internal_forces(path) : binding('internal.forces').internal_forces(path, request),
+    );
+}
+
+/** Builds an influence line as a unit load moves along a track beam element. */
+export function influenceLine(path: string, options: InfluenceLineOptions): InfluenceLineSolution {
+    return decode<InfluenceLineSolution>(() =>
+        binding('influence.line').influence_line(
+            path,
+            JSON.stringify({
+                track: options.track,
+                quantity: options.quantity,
+                direction: options.direction,
+                points: options.points,
+                out: options.out,
+            }),
+        ),
     );
 }
 

@@ -15,10 +15,11 @@
 use std::path::Path;
 
 use cae_model::{
-    CaeError, ConstructionStage, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions, Material, OpenCae,
-    OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
-    ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, principal_section_report,
-    section_report, t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
+    CaeError, ConstructionStage, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions, InfluenceDirection,
+    InfluenceQuantity, Material, OpenCae, OpenCaeOptions, Section, SpectrumCombination, SpectrumPoint, Units,
+    angle_section_report, channel_standard_section_report, ellipse_section_report, i_standard_section_report, library_json,
+    polygon_section_report, principal_section_report, section_report, t_section_report, triangle_section_report,
+    tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1259,6 +1260,35 @@ fn construction_stages(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &result)
 }
 
+/// Builds an influence line as a unit load moves along a track beam element.
+///
+/// The request requires `track` and `quantity` and accepts optional
+/// `direction` (`x` or `y`, default `y`), `points` (default 11) and `out`.
+#[function]
+fn influence_line(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let track = request.get("track").and_then(Value::as_str).ok_or_else(|| argument_error("`track` is required"))?;
+    let quantity: InfluenceQuantity = match request.get("quantity") {
+        Some(value) => {
+            serde_json::from_value(value.clone()).map_err(|error| argument_error(&format!("`quantity` is invalid: {error}")))?
+        }
+        None => return Err(argument_error("`quantity` is required")),
+    };
+    let direction = match request.get("direction").and_then(Value::as_str).unwrap_or("y") {
+        "x" => InfluenceDirection::X,
+        "y" => InfluenceDirection::Y,
+        other => return Err(argument_error(&format!("`direction` must be `x` or `y`, not `{other}`"))),
+    };
+    let points = usize::try_from(request.get("points").and_then(Value::as_u64).unwrap_or(11))
+        .map_err(|_| argument_error("`points` must be a positive integer"))?;
+    let out = request.get("out").and_then(Value::as_str);
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let result = session.influence_line(track, &quantity, direction, points, out.map(Path::new)).map_err(fail)?;
+    respond(&ctx, &result)
+}
+
 /// Solves a geometric-nonlinear truss model with a large-displacement Newton
 /// iteration.
 ///
@@ -1391,6 +1421,7 @@ register_module![
     element_result,
     node_reaction,
     internal_forces,
+    influence_line,
     stresses,
     deflections,
     nodal_stresses,

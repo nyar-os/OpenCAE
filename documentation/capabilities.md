@@ -29,6 +29,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | internal force diagrams (`internalForces`, sampled N/V/M per element) | ✅ supported |
 | beam stress recovery and utilisation (`stresses`) | ✅ supported |
 | deflected-shape sampling (`deflections`, local deflection/rotation and deformed coordinates) | ✅ supported |
+| influence lines (`influenceLine`, reaction/section ordinates as a unit load moves along a track beam; unloaded model required) | ✅ supported |
 | averaged nodal stress and extremes (`nodalStresses`) | ✅ supported |
 | load-case summary table (`loadCases`, `base` plus every combination) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
@@ -58,7 +59,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `thermalGradient`, `heat`, `partialSpanLoad`, `elasticSupports`,
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
-`nodalStress` and `loadCases` are available through the Rust API, the native
+`nodalStress`, `loadCases` and `influenceLine` are available through the Rust API, the native
 addon and the TypeScript SDK. Custom polygon section properties
 (`polygonSection`) are exposed as `polygon_section_report()` in Rust,
 `section_polygon` in the addon and `sectionPolygon()` in the SDK/CLI.
@@ -548,6 +549,29 @@ be finite and positive and a model without nodes is rejected with
     negative, non-finite or impossible combinations report
     `section/invalid-second-moments`. The calculator is standalone and its
     output is neither stored in documents nor consumed by the solver.
+33. **Influence lines**: `solve_influence_line(model, track, quantity,
+    direction, points)` (CLI `open-cae influence`, SDK
+    `document.influenceLine`) moves a unit load along a track beam element.
+    `points` equally spaced load positions including both track ends are
+    sampled; each position clones the model, splits the track element at
+    strictly interior positions, applies the unit load in `direction` (`x` or
+    `y`, default `y`) at the load point and solves the linear-static response.
+    The reported quantity is either a reaction component (`fx`/`fy`/`mz`) at a
+    supported node or a section force component (`axial`/`shear`/`moment`) at a
+    fixed fraction `position` of an element, defaulting to the track element.
+    The model must carry no other load — nodal, distributed, thermal, gravity
+    or prescribed support displacements report `influence/loads-present` —
+    because the influence line is defined as the response to the moving unit
+    load alone. A non-beam track reports `influence/track-not-beam`, a section
+    position outside `[0, 1]` reports `influence/invalid-position`, and
+    `shear`/`moment` on a truss section element reports
+    `influence/invalid-component`. When the section position coincides with an
+    interior split point, the from-side limit of the section force is reported.
+    Each sample carries the load-position fraction and the ordinate; the report
+    adds the `min`, `max` and largest-magnitude `governing` extremes. Simply
+    supported and cantilever beams reproduce the closed-form ordinates, e.g.
+    the midspan bending-moment line of a simply supported beam peaks at
+    `−L/4`.
 
 ## Validation and tests
 ```shell

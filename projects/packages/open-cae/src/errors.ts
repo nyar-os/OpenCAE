@@ -41,6 +41,7 @@ export const errorCodes = [
     'model/mechanism',
     'analysis/invalid-modes',
     'analysis/invalid-stations',
+    'analysis/invalid-points',
     'analysis/invalid-axis',
     'analysis/invalid-spectrum',
     'spectrum/invalid-combination',
@@ -96,6 +97,10 @@ export const errorCodes = [
     'cli/dimension-mismatch',
     'cli/direction-conflict',
     'cli/invalid-spectrum',
+    'influence/loads-present',
+    'influence/track-not-beam',
+    'influence/invalid-position',
+    'influence/invalid-component',
     'capability/not-implemented',
 ] as const;
 

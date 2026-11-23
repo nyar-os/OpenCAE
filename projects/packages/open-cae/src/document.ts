@@ -39,6 +39,8 @@ import type {
     GravitySetRequest,
     HeatOptions,
     HeatSolution,
+    InfluenceLineOptions,
+    InfluenceLineSolution,
     InternalForceOptions,
     InternalForceSolution,
     LoadAddRequest,
@@ -387,6 +389,12 @@ export class CaeDocument {
     internalForces(options: InternalForceOptions = {}): InternalForceSolution {
         this.assertOpen();
         return service.internalForces(this.path, options);
+    }
+
+    /** Builds an influence line as a unit load moves along a track beam element. */
+    influenceLine(options: InfluenceLineOptions): InfluenceLineSolution {
+        this.assertOpen();
+        return service.influenceLine(this.path, options);
     }
 
     /** Returns support reactions and the global force equilibrium check. */

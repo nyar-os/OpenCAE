@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CaeError, Severity,
-    model::{Element, ElementKind, LoadCombination, Model, Units, rotation_nodes},
+    model::{Element, ElementKind, Load, LoadCombination, Model, Units, rotation_nodes},
 };
 
 /// Version of the JSON result report produced by [`solve`].
@@ -5111,4 +5111,372 @@ fn residual(system: &System, displacement: &[f64]) -> Vec<f64> {
 
 fn positive_finite(value: f64) -> bool {
     value.is_finite() && value > 0.0
+}
+
+/// Version of the JSON report produced by [`solve_influence_line`].
+pub const INFLUENCE_LINE_REPORT_VERSION: u32 = 1;
+
+/// Format tag of the influence-line JSON report.
+pub const INFLUENCE_LINE_REPORT_FORMAT: &str = "open-cae-influence-line-report";
+
+/// Value identifying an influence-line result in [`InfluenceLineSolution::analysis`].
+pub const INFLUENCE_ANALYSIS: &str = "influenceLine";
+
+/// Direction of the moving unit load of an influence line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InfluenceDirection {
+    /// Horizontal unit load acting along global X.
+    #[serde(rename = "x")]
+    X,
+    /// Vertical unit load acting along global Y.
+    #[serde(rename = "y")]
+    Y,
+}
+
+impl InfluenceDirection {
+    /// Returns the short identifier used by requests and reports (`"x"` or `"y"`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::X => "x",
+            Self::Y => "y",
+        }
+    }
+}
+
+/// Component of a support reaction sampled on an influence line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReactionComponent {
+    /// Reaction along global X.
+    #[serde(rename = "fx")]
+    Fx,
+    /// Reaction along global Y.
+    #[serde(rename = "fy")]
+    Fy,
+    /// Reaction moment about the out-of-plane axis.
+    #[serde(rename = "mz")]
+    Mz,
+}
+
+/// Component of a section force sampled on an influence line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SectionComponent {
+    /// Axial force, positive in tension.
+    #[serde(rename = "axial")]
+    Axial,
+    /// Local shear force at the section.
+    #[serde(rename = "shear")]
+    Shear,
+    /// Local bending moment at the section.
+    #[serde(rename = "moment")]
+    Moment,
+}
+
+/// Quantity sampled along the track element as the unit load moves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum InfluenceQuantity {
+    /// Reaction component reported at a supported node.
+    #[serde(rename_all = "camelCase")]
+    Reaction {
+        /// Node carrying the support.
+        node: String,
+        /// Reaction component reported at that node.
+        component: ReactionComponent,
+    },
+    /// Section force component reported at a fixed position of an element.
+    #[serde(rename_all = "camelCase")]
+    Section {
+        /// Element carrying the section; defaults to the track element.
+        #[serde(default)]
+        element: Option<String>,
+        /// Section location as a fraction of the element length in `[0, 1]`.
+        position: f64,
+        /// Section force component reported at that position.
+        component: SectionComponent,
+    },
+}
+
+/// Influence-line ordinate at one load position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfluenceSample {
+    /// Load position as a fraction of the track length in `[0, 1]`.
+    pub position: f64,
+    /// Influence ordinate at that load position.
+    pub value: f64,
+}
+
+/// Position and value of an extreme influence ordinate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfluenceExtreme {
+    /// Load position of the extreme, as a fraction of the track length.
+    pub position: f64,
+    /// Extreme influence ordinate.
+    pub value: f64,
+}
+
+/// Influence-line solution produced by [`solve_influence_line`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfluenceLineSolution {
+    /// Report format tag, always `open-cae-influence-line-report`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Unit system declared by the model.
+    pub units: String,
+    /// Analysis identifier, always `influenceLine`.
+    pub analysis: String,
+    /// Identifier of the track element the unit load moves along.
+    pub track: String,
+    /// Length of the (unsplit) track element.
+    pub length: f64,
+    /// Direction of the moving unit load (`"x"` or `"y"`).
+    pub direction: String,
+    /// Sampled quantity with the track element filled in as section default.
+    pub quantity: InfluenceQuantity,
+    /// Number of sampled load positions, including both track ends.
+    pub points: usize,
+    /// Influence ordinates in load-position order.
+    pub samples: Vec<InfluenceSample>,
+    /// Sample with the smallest ordinate.
+    pub min: InfluenceExtreme,
+    /// Sample with the largest ordinate.
+    pub max: InfluenceExtreme,
+    /// Sample with the largest absolute ordinate.
+    pub governing: InfluenceExtreme,
+}
+
+/// Length of one element computed from its node coordinates.
+fn influence_element_length(model: &Model, id: &str) -> Result<f64, CaeError> {
+    let element = model
+        .elements
+        .iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
+    let from = model.node(&element.from).ok_or_else(|| {
+        CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{}`", element.from))
+    })?;
+    let to = model.node(&element.to).ok_or_else(|| {
+        CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{}`", element.to))
+    })?;
+    Ok(((to.x - from.x).powi(2) + (to.y - from.y).powi(2)).sqrt())
+}
+
+/// Builds an influence line by moving a unit load along a track beam element.
+///
+/// `points` equally spaced load positions including both track ends are
+/// sampled. Every sample rebuilds a load-free copy of the model, applies the
+/// unit load in `direction` at the load position — splitting the track element
+/// at strictly interior positions — and reports the requested reaction or
+/// section ordinate of the linear-static solution. The model must not carry
+/// any other load, because the influence line is defined for the moving unit
+/// load alone; a loaded model reports `influence/loads-present`. When the
+/// section position coincides with the interior split point, the from-side
+/// limit of the section force is reported.
+pub fn solve_influence_line(
+    model: &Model,
+    track: &str,
+    quantity: &InfluenceQuantity,
+    direction: InfluenceDirection,
+    points: usize,
+) -> Result<InfluenceLineSolution, CaeError> {
+    if points < 2 {
+        return Err(CaeError::new(
+            "analysis/invalid-points",
+            format!("influence line sampling requires at least 2 points, but {points} were requested"),
+        ));
+    }
+    let track_index = model
+        .elements
+        .iter()
+        .position(|entry| entry.id == track)
+        .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{track}`")))?;
+    let track_element = &model.elements[track_index];
+    if track_element.kind != ElementKind::Beam {
+        return Err(CaeError::new(
+            "influence/track-not-beam",
+            format!(
+                "influence line track `{track}` must be a beam element, but it is a `{}` element",
+                track_element.kind.as_str()
+            ),
+        ));
+    }
+    if model.dimension != 2 {
+        return Err(CaeError::new(
+            "capability/not-implemented",
+            "influence line analysis is only implemented for two-dimensional models",
+        ));
+    }
+    let loaded = !model.loads.is_empty()
+        || model.elements.iter().any(|element| {
+            [
+                element.distributed_load,
+                element.distributed_load_from,
+                element.distributed_load_to,
+                element.temperature,
+                element.temperature_gradient,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|value| value != 0.0)
+        })
+        || model.gravity.is_some_and(|gravity| gravity.iter().any(|component| *component != 0.0))
+        || model.supports.iter().any(|support| {
+            support.prescribed.as_ref().is_some_and(|prescribed| {
+                prescribed.ux != 0.0 || prescribed.uy != 0.0 || prescribed.uz != 0.0 || prescribed.rz != 0.0
+            })
+        });
+    if loaded {
+        return Err(CaeError::new(
+            "influence/loads-present",
+            "influence line analysis requires an unloaded model; the influence line is the response to the moving unit load alone",
+        ));
+    }
+
+    let quantity = match quantity {
+        InfluenceQuantity::Reaction { node, component } => {
+            if model.node(node).is_none() {
+                return Err(CaeError::new("node/unknown-id", format!("unknown node `{node}`")));
+            }
+            if !model.supports.iter().any(|support| support.node == *node) {
+                return Err(CaeError::new("result/no-reaction", format!("node `{node}` has no support reaction")));
+            }
+            InfluenceQuantity::Reaction { node: node.clone(), component: *component }
+        }
+        InfluenceQuantity::Section { element, position, component } => {
+            let position = *position;
+            let element_id = element.as_deref().unwrap_or(track);
+            let section_index = model
+                .elements
+                .iter()
+                .position(|entry| entry.id == element_id)
+                .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{element_id}`")))?;
+            if !position.is_finite() || position < 0.0 || position > 1.0 {
+                return Err(CaeError::new(
+                    "influence/invalid-position",
+                    format!("influence line section position must be finite and within [0, 1] (currently {position})"),
+                ));
+            }
+            if model.elements[section_index].kind == ElementKind::Truss && *component != SectionComponent::Axial {
+                let name = match component {
+                    SectionComponent::Axial => "axial",
+                    SectionComponent::Shear => "shear",
+                    SectionComponent::Moment => "moment",
+                };
+                return Err(CaeError::new(
+                    "influence/invalid-component",
+                    format!(
+                        "section component `{name}` is not defined for truss element `{element_id}`; only `axial` is supported"
+                    ),
+                ));
+            }
+            InfluenceQuantity::Section { element: Some(element_id.to_string()), position, component: *component }
+        }
+    };
+    let track_length = influence_element_length(model, track)?;
+
+    let mut samples = Vec::with_capacity(points);
+    for index in 0..points {
+        let t = index as f64 / (points - 1) as f64;
+        let mut working = model.clone();
+        let mut split: Option<crate::ElementSplit> = None;
+        let load_node = if t == 0.0 {
+            track_element.from.clone()
+        }
+        else if t == 1.0 {
+            track_element.to.clone()
+        }
+        else {
+            let produced = working.split_element(track, t)?;
+            split = Some(produced.clone());
+            produced.node
+        };
+        working.loads.push(Load {
+            node: load_node,
+            fx: if direction == InfluenceDirection::X { 1.0 } else { 0.0 },
+            fy: if direction == InfluenceDirection::Y { 1.0 } else { 0.0 },
+            fz: 0.0,
+            mz: 0.0,
+        });
+        let solution = solve(&working)?;
+        let value = match &quantity {
+            InfluenceQuantity::Reaction { node, component } => {
+                let reaction = solution
+                    .reactions
+                    .iter()
+                    .find(|entry| entry.node == *node)
+                    .ok_or_else(|| CaeError::new("node/unknown-id", format!("unknown node `{node}`")))?;
+                match component {
+                    ReactionComponent::Fx => reaction.fx,
+                    ReactionComponent::Fy => reaction.fy,
+                    ReactionComponent::Mz => reaction.mz,
+                }
+            }
+            InfluenceQuantity::Section { element, position, component } => {
+                let position = *position;
+                let element_id = element.as_deref().unwrap_or(track);
+                let (evaluated, x) = if element_id != track {
+                    (element_id.to_string(), position * influence_element_length(model, element_id)?)
+                }
+                else if t > 0.0 && t < 1.0 {
+                    let split = split.expect("strictly interior positions are split");
+                    if position <= t {
+                        (track.to_string(), position * track_length)
+                    }
+                    else {
+                        (split.second.clone(), (position - t) / (1.0 - t) * (1.0 - t) * track_length)
+                    }
+                }
+                else {
+                    (element_id.to_string(), position * track_length)
+                };
+                let result = solution
+                    .elements
+                    .iter()
+                    .find(|entry| entry.id == evaluated)
+                    .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{evaluated}`")))?;
+                let end = &result.end_forces;
+                match component {
+                    SectionComponent::Axial => -end.n1,
+                    SectionComponent::Shear => end.v1,
+                    SectionComponent::Moment => -end.m1 + end.v1 * x,
+                }
+            }
+        };
+        samples.push(InfluenceSample { position: t, value });
+    }
+
+    let min = samples.iter().fold(
+        samples[0].clone(),
+        |current: InfluenceSample, sample| {
+            if sample.value < current.value { sample.clone() } else { current }
+        },
+    );
+    let max = samples.iter().fold(
+        samples[0].clone(),
+        |current: InfluenceSample, sample| {
+            if sample.value > current.value { sample.clone() } else { current }
+        },
+    );
+    let governing = samples.iter().fold(samples[0].clone(), |current: InfluenceSample, sample| {
+        if sample.value.abs() > current.value.abs() { sample.clone() } else { current }
+    });
+
+    Ok(InfluenceLineSolution {
+        format: INFLUENCE_LINE_REPORT_FORMAT.to_string(),
+        version: INFLUENCE_LINE_REPORT_VERSION,
+        units: model.units.unwrap_or(Units::Millimeter).as_str().to_string(),
+        analysis: INFLUENCE_ANALYSIS.to_string(),
+        track: track.to_string(),
+        length: track_length,
+        direction: direction.as_str().to_string(),
+        quantity,
+        points,
+        samples,
+        min: InfluenceExtreme { position: min.position, value: min.value },
+        max: InfluenceExtreme { position: max.position, value: max.value },
+        governing: InfluenceExtreme { position: governing.position, value: governing.value },
+    })
 }

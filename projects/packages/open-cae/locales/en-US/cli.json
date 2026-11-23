@@ -63,6 +63,7 @@
             "  ocae reactions <file> [--out report.json]",
             "  ocae reaction <file> --node <node>",
             "  ocae forces <file> [--stations N] [--out report.json]",
+            "  ocae influence <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] [--points N] [--out report.json]",
             "  ocae stresses <file> [--stations N] [--out report.json]",
             "  ocae deflections <file> [--stations N] [--out report.json]",
             "  ocae nodal-stresses <file> [--stations N] [--out report.json]",
@@ -131,6 +132,10 @@
             "emptySpectrum": "provide at least one `period:acceleration` spectrum point",
             "unknownSpectrumAxis": "unknown spectrum axis `{value}`; use `x`, `y` or `z`",
             "unknownSpectrumCombination": "unknown spectrum combination `{value}`; use `srss` or `cqc`",
+            "unknownInfluenceQuantity": "unknown influence quantity `{value}`; use `reaction` or `section`",
+            "unknownInfluenceDirection": "unknown influence direction `{value}`; use `x` or `y`",
+            "unknownReactionComponent": "unknown reaction component `{value}`; use `fx`, `fy` or `mz`",
+            "unknownSectionComponent": "unknown section component `{value}`; use `axial`, `shear` or `moment`",
             "directionConflict": "`--direction` is an independent inclined-support constraint; do not combine it with `--dx`, `--dy`, `--dz`, `--rz`, a prescribed displacement or a spring",
             "invalidDirection": "`--direction` must be two comma-separated numbers `nx,ny`, not `{value}`",
             "invalidPoint": "polygon point `{value}` must use the form `x,y` with finite numbers"

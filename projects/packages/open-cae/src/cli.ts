@@ -20,8 +20,11 @@ import type {
     Dimension,
     ElementKind,
     ExportFormat,
+    InfluenceQuantity,
     PolygonPoint,
+    ReactionComponent,
     Section,
+    SectionComponent,
     SpectrumCombination,
     SpectrumPoint,
     Units,
@@ -232,6 +235,8 @@ async function dispatch(args: readonly string[]): Promise<number> {
             return heatCommand(args.slice(1));
         case 'forces':
             return forcesCommand(args.slice(1));
+        case 'influence':
+            return influenceCommand(args.slice(1));
         case 'reactions':
             return reactionsCommand(args.slice(1));
         case 'reaction':
@@ -1629,6 +1634,62 @@ async function forcesCommand(args: readonly string[]): Promise<number> {
         console.log(JSON.stringify(result, null, 2));
         return 0;
     });
+}
+
+async function influenceCommand(args: readonly string[]): Promise<number> {
+    const parsed = parse(
+        args,
+        ['--track', '--quantity', '--node', '--component', '--element', '--position', '--direction', '--points', '--out'],
+        [],
+    );
+    const usage =
+        'influence <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] [--points N] [--out report.json]';
+    const file = positional(parsed, 0, usage);
+    const track = required(parsed, '--track');
+    const quantityKind = required(parsed, '--quantity');
+    if (quantityKind !== 'reaction' && quantityKind !== 'section') {
+        throw failure('cli/invalid-option', 'unknownInfluenceQuantity', { value: quantityKind });
+    }
+    const direction = influenceDirectionOption(parsed);
+    const points = stationsOption(parsed);
+    const component = influenceComponentOption(quantityKind, parsed);
+    const quantity: InfluenceQuantity =
+        quantityKind === 'reaction'
+            ? { kind: 'reaction', node: required(parsed, '--node'), component: component as ReactionComponent }
+            : {
+                  kind: 'section',
+                  element: parsed.options.get('--element'),
+                  position: requiredNumber(parsed, '--position'),
+                  component: component as SectionComponent,
+              };
+    return withSession(async (session) => {
+        const document = await openDocument(session, file);
+        const result = document.influenceLine({ track, quantity, direction, points, out: parsed.options.get('--out') });
+        console.log(JSON.stringify(result, null, 2));
+        return 0;
+    });
+}
+
+function influenceDirectionOption(parsed: Parsed): 'x' | 'y' {
+    const raw = parsed.options.get('--direction') ?? 'y';
+    if (raw === 'x' || raw === 'y') {
+        return raw;
+    }
+    throw failure('cli/invalid-option', 'unknownInfluenceDirection', { value: raw });
+}
+
+function influenceComponentOption(quantityKind: string, parsed: Parsed): string {
+    const raw = required(parsed, '--component');
+    if (quantityKind === 'reaction') {
+        if (raw === 'fx' || raw === 'fy' || raw === 'mz') {
+            return raw;
+        }
+        throw failure('cli/invalid-option', 'unknownReactionComponent', { value: raw });
+    }
+    if (raw === 'axial' || raw === 'shear' || raw === 'moment') {
+        return raw;
+    }
+    throw failure('cli/invalid-option', 'unknownSectionComponent', { value: raw });
 }
 
 async function reactionsCommand(args: readonly string[]): Promise<number> {

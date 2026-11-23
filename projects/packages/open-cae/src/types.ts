@@ -665,6 +665,83 @@ export interface InternalForceOptions {
     readonly out?: string;
 }
 
+/** Direction of the moving unit load on an influence line. */
+export type InfluenceDirection = 'x' | 'y';
+
+/** Component of a support reaction sampled on an influence line. */
+export type ReactionComponent = 'fx' | 'fy' | 'mz';
+
+/** Component of a section force sampled on an influence line. */
+export type SectionComponent = 'axial' | 'shear' | 'moment';
+
+/** Reaction influence-line request. */
+export interface ReactionInfluenceRequest {
+    readonly kind: 'reaction';
+    /** Node carrying the support. */
+    readonly node: string;
+    /** Reaction component reported at that node. */
+    readonly component: ReactionComponent;
+}
+
+/** Section influence-line request. */
+export interface SectionInfluenceRequest {
+    readonly kind: 'section';
+    /** Element carrying the section; defaults to the track element. */
+    readonly element?: string;
+    /** Section location as a fraction of the element length in [0, 1]. */
+    readonly position: number;
+    /** Section force component reported at that position. */
+    readonly component: SectionComponent;
+}
+
+/** Quantity sampled along the track element as the unit load moves. */
+export type InfluenceQuantity = ReactionInfluenceRequest | SectionInfluenceRequest;
+
+/** Influence-line ordinate at one load position. */
+export interface InfluenceSample {
+    /** Load position as a fraction of the track length in [0, 1]. */
+    readonly position: number;
+    /** Influence ordinate at that load position. */
+    readonly value: number;
+}
+
+/** Position and value of an extreme influence ordinate. */
+export interface InfluenceExtreme {
+    readonly position: number;
+    readonly value: number;
+}
+
+/** Influence-line solution returned by `influenceLine()`. */
+export interface InfluenceLineSolution {
+    readonly format: string;
+    readonly version: number;
+    readonly units: string;
+    readonly analysis: string;
+    readonly track: string;
+    readonly length: number;
+    readonly direction: string;
+    readonly quantity: InfluenceQuantity;
+    readonly points: number;
+    readonly samples: readonly InfluenceSample[];
+    readonly min: InfluenceExtreme;
+    readonly max: InfluenceExtreme;
+    readonly governing: InfluenceExtreme;
+}
+
+/** Options of `influenceLine()`. */
+export interface InfluenceLineOptions {
+    /** Track element along which the unit load moves. */
+    readonly track: string;
+    /** Reaction or section quantity to sample. */
+    readonly quantity: InfluenceQuantity;
+    /** Direction of the moving unit load; defaults to `y`. */
+    readonly direction?: InfluenceDirection;
+    /** Number of sampled load positions including both ends; defaults to 11. */
+    readonly points?: number;
+    /** When given, the JSON report is written atomically to this path. */
+    readonly out?: string;
+}
+
 /** Section stress recovered at one station. */
 export interface StationStress {
     readonly position: number;
