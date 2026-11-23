@@ -3,14 +3,18 @@
  * Command-line assembly only.
  *
  * Every command maps options onto one session operation of `OpenCAE`; editing,
- * validation, solving and export stay in the native core. The CLI owns argument
- * parsing, localized help text, printing and exit codes, and nothing else.
+ * validation, solving and export stay in the native core. The CLI owns the
+ * command grammar, localized help text, printing and exit codes, and nothing
+ * else. Commands are declared with `@wae/commander`; the usage strings quoted
+ * in error messages, the JSON error envelope and the exit codes are the stable
+ * contract and are kept verbatim.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { createCli, type CommandContext, type ParsedOptions } from '@wae/commander';
 
 import type { CaeDocument } from './document.js';
 import { NotImplementedError, OpenCAEError, type OpenCAEErrorCode } from './errors.js';
@@ -30,1435 +34,188 @@ import type {
     Units,
 } from './types.js';
 
-interface CliLocale {
-    readonly cli: {
-        readonly intro: string;
-        readonly usage: readonly string[];
-        readonly exit: string;
-        readonly message: Readonly<Record<string, string>>;
-        readonly error: Readonly<Record<string, string>>;
-    };
-}
-
 const here = path.dirname(fileURLToPath(import.meta.url));
-const locale = JSON.parse(
-    fs.readFileSync(path.join(here, '..', 'locales', 'en-US', 'cli.json'), 'utf8'),
-) as CliLocale;
 
-/** Fills `{name}` placeholders; unknown keys are left untouched. */
-function fill(template: string, values: Readonly<Record<string, string>> = {}): string {
-    return template.replace(/\{(\w+)\}/g, (_match, key: string) => values[key] ?? `{${key}}`);
+const cli = createCli('open-cae').locales(path.join(here, '..', 'locales')).intro('cli.intro');
+
+// Exported for contract audits that import the built entry to inspect the
+// command tree. Nothing runs until the file is executed as the program entry.
+export { cli };
+
+/** A product failure carrying a localized `cli.error.*` message. */
+function failure(
+    ctx: CommandContext,
+    code: OpenCAEErrorCode,
+    key: string,
+    values?: Record<string, string>,
+): OpenCAEError {
+    return new OpenCAEError(code, ctx.t(`cli.error.${key}`, values));
 }
 
-function message(key: string, values?: Readonly<Record<string, string>>): string {
-    return fill(locale.cli.message[key] ?? key, values);
-}
-
-function failure(code: OpenCAEErrorCode, key: string, values?: Readonly<Record<string, string>>): OpenCAEError {
-    return new OpenCAEError(code, fill(locale.cli.error[key] ?? key, values));
-}
-
-function printUsage(): void {
-    process.stdout.write(`${locale.cli.intro}\n\n${locale.cli.usage.join('\n')}\n\n${locale.cli.exit}\n`);
-}
-
-interface Parsed {
-    readonly positionals: readonly string[];
-    readonly flags: ReadonlySet<string>;
-    readonly options: ReadonlyMap<string, string>;
-}
-
-function parse(args: readonly string[], valueOptions: readonly string[], flagOptions: readonly string[]): Parsed {
-    const positionals: string[] = [];
-    const flags = new Set<string>();
-    const options = new Map<string, string>();
-    let index = 0;
-    while (index < args.length) {
-        const argument = args[index] as string;
-        if (argument.startsWith('--')) {
-            if (flagOptions.includes(argument)) {
-                flags.add(argument);
-                index += 1;
-            } else if (valueOptions.includes(argument)) {
-                const value = args[index + 1];
-                if (value === undefined || value.startsWith('--')) {
-                    throw failure('cli/missing-value', 'missingValue', { option: argument });
-                }
-                options.set(argument, value);
-                index += 2;
-            } else {
-                throw failure('cli/unknown-option', 'unknownOption', { option: argument });
-            }
-        } else {
-            positionals.push(argument);
-            index += 1;
-        }
-    }
-    return { positionals, flags, options };
-}
-
-function positional(parsed: Parsed, index: number, usage: string): string {
-    const value = parsed.positionals[index];
-    if (value === undefined) {
-        throw failure('cli/missing-argument', 'missingArgument', { usage });
-    }
-    return value;
-}
-
-function required(parsed: Parsed, name: string): string {
-    const value = parsed.options.get(name);
-    if (value === undefined) {
-        throw failure('cli/missing-option', 'missingOption', { option: name });
-    }
-    return value;
-}
-
-function number(parsed: Parsed, name: string): number | undefined {
-    const raw = parsed.options.get(name);
-    if (raw === undefined) {
-        return undefined;
-    }
-    const value = Number(raw);
-    if (!Number.isFinite(value)) {
-        throw failure('cli/invalid-number', 'invalidNumber', { option: name, value: raw });
-    }
-    return value;
-}
-
-function requiredNumber(parsed: Parsed, name: string): number {
-    const value = number(parsed, name);
-    if (value === undefined) {
-        throw failure('cli/missing-option', 'missingOption', { option: name });
-    }
-    return value;
-}
-
-function unitsOption(parsed: Parsed): Units | undefined {
-    const raw = parsed.options.get('--units');
-    if (raw === undefined) {
-        return undefined;
-    }
-    if (raw === 'mm' || raw === 'm') {
-        return raw;
-    }
-    throw failure('cli/invalid-units', 'invalidUnits', { value: raw });
-}
-
-function dimensionOption(parsed: Parsed): Dimension | undefined {
-    const raw = parsed.options.get('--dimension');
-    if (raw === undefined) {
-        return undefined;
-    }
-    if (raw === '2') {
-        return 2;
-    }
-    if (raw === '3') {
-        return 3;
-    }
-    throw failure('cli/invalid-option', 'invalidDimension', { value: raw });
-}
-
-function exportFormat(value: string): ExportFormat {
-    if (value === 'csv' || value === 'vtk' || value === 'md' || value === 'svg') {
-        return value;
-    }
-    if (value === 'inp' || value === 'abaqus' || value === 'step' || value === 'stp') {
-        throw new NotImplementedError(`${value} export`);
-    }
-    throw failure('cli/unknown-format', 'unknownFormat', { format: value });
-}
-
-async function withSession<T>(work: (session: OpenCAE) => Promise<T>): Promise<T> {
-    const session = new OpenCAE();
+/**
+ * Run one command, translating thrown errors into the JSON envelope on stderr
+ * and the documented exit codes: 2 for unimplemented capabilities, 1 for any
+ * other failure, otherwise whatever the command returns.
+ */
+async function attempt(ctx: CommandContext, work: () => number | Promise<number>): Promise<number> {
     try {
-        return await work(session);
-    } finally {
-        await session.dispose();
+        return await work();
+    } catch (error) {
+        const problem =
+            error instanceof OpenCAEError
+                ? error
+                : new OpenCAEError('native/error', error instanceof Error ? error.message : String(error), {
+                      cause: error,
+                  });
+        ctx.stderr(JSON.stringify({ code: problem.code, message: problem.message }, null, 2));
+        return problem.code.startsWith('capability/') ? 2 : 1;
     }
 }
 
-async function dispatch(args: readonly string[]): Promise<number> {
-    const command: string | undefined = args[0];
-    if (command === undefined) {
-        printUsage();
-        return 0;
-    }
-    switch (command) {
-        case '-h':
-        case '--help':
-        case 'help':
-            printUsage();
-            return 0;
-        case 'capabilities':
-            return withSession(async (session) => {
-                console.log(JSON.stringify(await session.capabilities(), null, 2));
-                return 0;
-            });
-        case 'create':
-            return create(args.slice(1));
-        case 'node':
-            return nodeCommand(args.slice(1));
-        case 'element':
-            return elementCommand(args.slice(1));
-        case 'material':
-            return materialCommand(args.slice(1));
-        case 'library':
-            return libraryCommand(args.slice(1));
-        case 'section':
-            return sectionCommand(args.slice(1));
-        case 'support':
-            return supportCommand(args.slice(1));
-        case 'load':
-            return loadCommand(args.slice(1));
-        case 'model':
-            return modelCommand(args.slice(1));
-        case 'self-weight':
-            return selfWeight(args.slice(1));
-        case 'combination':
-            return combinationCommand(args.slice(1));
-        case 'combinations':
-            return combinationsCommand(args.slice(1));
-        case 'buckling-combinations':
-            return bucklingCombinationsCommand(args.slice(1));
-        case 'validate':
-            return validate(args.slice(1));
-        case 'solve':
-            return solveCommand(args.slice(1));
-        case 'modal':
-            return modalCommand(args.slice(1));
-        case 'buckling':
-            return bucklingCommand(args.slice(1));
-        case 'tension-only':
-            return tensionOnlyCommand(args.slice(1));
-        case 'heat':
-        case 'thermal':
-            return heatCommand(args.slice(1));
-        case 'forces':
-            return forcesCommand(args.slice(1));
-        case 'influence':
-            return influenceCommand(args.slice(1));
-        case 'influence-train':
-            return influenceTrainCommand(args.slice(1));
-        case 'reactions':
-            return reactionsCommand(args.slice(1));
-        case 'reaction':
-            return reactionCommand(args.slice(1));
-        case 'stresses':
-            return stressesCommand(args.slice(1));
-        case 'deflections':
-            return deflectionsCommand(args.slice(1));
-        case 'nodal-stresses':
-            return nodalStressesCommand(args.slice(1));
-        case 'load-cases':
-            return loadCasesCommand(args.slice(1));
-        case 'matrices':
-            return matricesCommand(args.slice(1));
-        case 'spectrum':
-            return spectrumCommand(args.slice(1));
-        case 'export':
-            return exportCommand(args.slice(1));
-        case 'report':
-            return report(args.slice(1));
-        case 'import':
-            throw new NotImplementedError('Abaqus .inp import');
-        case 'nonlinear':
-            throw new NotImplementedError('nonlinear analysis');
-        case 'beam':
-        case 'beam2d':
-            throw failure('cli/unknown-command', 'unknownCommand', { command });
-        case 'frame':
-        case 'frame3d':
-            throw new NotImplementedError('3D frame element');
-        case 'contact':
-            throw new NotImplementedError('contact analysis');
-        default:
-            throw failure('cli/unknown-command', 'unknownCommand', { command });
-    }
+/** The option accessors shared by every command handler. */
+interface Bound {
+    message(key: string, values?: Record<string, string>): string;
+    file(usage: string): string;
+    raw(name: string): string | undefined;
+    has(name: string): boolean;
+    required(name: string): string;
+    number(name: string): number | undefined;
+    requiredNumber(name: string): number;
+    flag(name: string): boolean;
+    units(): Units | undefined;
+    dimension(): Dimension | undefined;
+    section(): Section | undefined;
+    direction(): readonly [number, number];
 }
 
-async function nodeCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === 'add') {
-        return nodeAdd(args.slice(1));
-    }
-    if (action === 'update') {
-        return nodeUpdate(args.slice(1));
-    }
-    if (action === 'mass') {
-        return nodeMass(args.slice(1));
-    }
-    if (action === 'temperature') {
-        return nodeTemperature(args.slice(1));
-    }
-    if (action === 'heat') {
-        return nodeHeat(args.slice(1));
-    }
-    if (action === 'remove') {
-        return nodeRemove(args.slice(1));
-    }
-    if (action === 'merge') {
-        return nodeMerge(args.slice(1));
-    }
-    if (action === 'displacement') {
-        return nodeDisplacement(args.slice(1));
-    }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', {
-            group: 'node',
-            expected: 'add, update, mass, temperature, heat, remove, merge or displacement',
-        });
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', {
-        group: 'node',
-        action,
-        expected: 'add, update, mass, temperature, heat, remove, merge or displacement',
-    });
-}
-
-async function supportCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === 'add') {
-        return supportAdd(args.slice(1));
-    }
-    if (action === 'remove') {
-        return supportRemove(args.slice(1));
-    }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'support', expected: 'add or remove' });
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'support', action, expected: 'add or remove' });
-}
-
-async function loadCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === 'add') {
-        return loadAdd(args.slice(1));
-    }
-    if (action === 'remove') {
-        return loadRemove(args.slice(1));
-    }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'load', expected: 'add or remove' });
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', { group: 'load', action, expected: 'add or remove' });
-}
-
-async function create(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--dimension'], []);
-    const file = positional(parsed, 0, 'create <file.ocae> [--units mm|m] [--dimension 2|3]');
-    const units = unitsOption(parsed);
-    const dimension = dimensionOption(parsed);
-    return withSession(async (session) => {
-        const document = await session.create(file, { units, dimension });
-        console.log(
-            message('created', {
-                path: file,
-                units: document.units ?? 'mm',
-                dimension: String(document.dimension),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function openDocument(session: OpenCAE, file: string): Promise<CaeDocument> {
-    return session.open(file);
-}
-
-async function nodeAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--x', '--y', '--z'], []);
-    const file = positional(parsed, 0, 'node add <file> --id <id> --x <x> --y <y> [--z <z>]');
-    const id = required(parsed, '--id');
-    const x = requiredNumber(parsed, '--x');
-    const y = requiredNumber(parsed, '--y');
-    const z = number(parsed, '--z') ?? 0;
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.addNode({ id, x, y, z });
-        console.log(message('nodeAdded', { id, z: String(z), revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function nodeUpdate(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--x', '--y', '--z'], []);
-    const file = positional(parsed, 0, 'node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]');
-    const id = required(parsed, '--id');
-    const x = number(parsed, '--x');
-    const y = number(parsed, '--y');
-    const z = number(parsed, '--z');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.updateNode({ id, x, y, z });
-        console.log(message('nodeUpdated', { id, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function nodeMass(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--mass'], []);
-    const file = positional(parsed, 0, 'node mass <file> --id <id> --mass <mass>');
-    const id = required(parsed, '--id');
-    const mass = requiredNumber(parsed, '--mass');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setNodeMass({ id, mass });
-        console.log(message('nodeMassSet', { id, mass: String(mass), revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function nodeTemperature(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--temperature'], ['--clear']);
-    const file = positional(parsed, 0, 'node temperature <file> --id <id> [--temperature <t>] [--clear]');
-    const id = required(parsed, '--id');
-    const temperature = parsed.flags.has('--clear') ? null : requiredNumber(parsed, '--temperature');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setNodeTemperature({ id, temperature });
-        console.log(
-            message('nodeTemperatureSet', {
-                id,
-                temperature: temperature === null ? 'cleared' : String(temperature),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function nodeHeat(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--heat'], []);
-    const file = positional(parsed, 0, 'node heat <file> --id <id> --heat <w>');
-    const id = required(parsed, '--id');
-    const heat = requiredNumber(parsed, '--heat');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setNodeHeat({ id, heat });
-        console.log(message('nodeHeatSet', { id, heat: String(heat), revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function nodeMerge(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--from', '--into'], []);
-    const file = positional(parsed, 0, 'node merge <file> --from <id> --into <id>');
-    const from = required(parsed, '--from');
-    const into = required(parsed, '--into');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.mergeNodes({ from, into });
-        console.log(message('nodeMerged', { from, into, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function nodeRemove(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id'], []);
-    const file = positional(parsed, 0, 'node remove <file> --id <id>');
-    const id = required(parsed, '--id');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.removeNode(id);
-        console.log(message('nodeRemoved', { id, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function nodeDisplacement(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id'], []);
-    const file = positional(parsed, 0, 'node displacement <file> --id <id>');
-    const id = required(parsed, '--id');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        console.log(JSON.stringify(document.nodeDisplacement(id), null, 2));
-        return 0;
-    });
-}
-
-function elementKindOption(parsed: Parsed): ElementKind | undefined {
-    const raw = parsed.options.get('--kind');
-    if (raw === undefined) {
-        return undefined;
-    }
-    if (raw === 'truss' || raw === 'beam') {
-        return raw;
-    }
-    throw failure('cli/invalid-option', 'unknownElement', { value: raw });
-}
-
-async function elementAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        [
-            '--id',
-            '--from',
-            '--to',
-            '--E',
-            '--A',
-            '--kind',
-            '--I',
-            '--w',
-            '--w2',
-            '--dt',
-            '--dt-grad',
-            '--w-from',
-            '--w-to',
-            '--convection',
-            '--perimeter',
-        ],
-        ['--tension-only'],
-    );
-    const file = positional(
-        parsed,
-        0,
-        'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]',
-    );
-    const id = required(parsed, '--id');
-    const from = required(parsed, '--from');
-    const to = required(parsed, '--to');
-    const youngsModulus = number(parsed, '--E');
-    const area = number(parsed, '--A');
-    const kind = elementKindOption(parsed);
-    const inertia = number(parsed, '--I');
-    const distributedLoad = number(parsed, '--w');
-    const distributedLoadEnd = number(parsed, '--w2');
-    const temperature = number(parsed, '--dt');
-    const temperatureGradient = number(parsed, '--dt-grad');
-    const distributedLoadFrom = number(parsed, '--w-from');
-    const distributedLoadTo = number(parsed, '--w-to');
-    const convection = number(parsed, '--convection');
-    const perimeter = number(parsed, '--perimeter');
-    if ((distributedLoadFrom === undefined) !== (distributedLoadTo === undefined)) {
-        throw failure('cli/missing-option', 'missingOption', { option: '--w-from and --w-to' });
-    }
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.addElement({
-            id,
-            from,
-            to,
-            youngsModulus,
-            area,
-            kind,
-            inertia,
-            distributedLoad,
-            distributedLoadEnd,
-            distributedLoadFrom,
-            distributedLoadTo,
-            temperature,
-            temperatureGradient,
-            convection,
-            perimeter,
-            tensionOnly: parsed.flags.has('--tension-only') ? true : undefined,
-        });
-        console.log(message('elementAdded', { id, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function elementUpdate(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        [
-            '--id',
-            '--from',
-            '--to',
-            '--w',
-            '--w2',
-            '--w-from',
-            '--w-to',
-            '--dt',
-            '--dt-grad',
-            '--convection',
-            '--perimeter',
-        ],
-        ['--clear-load', '--clear-temperature'],
-    );
-    const file = positional(
-        parsed,
-        0,
-        'element update <file> --id <id> [--from <node>] [--to <node>] [--w <w>] [--w2 <w2>] [--w-from <s>] [--w-to <s>] [--dt <dT>] [--dt-grad <dT>] [--convection <h>] [--perimeter <P>] [--clear-load] [--clear-temperature]',
-    );
-    const id = required(parsed, '--id');
-    const from = parsed.options.get('--from');
-    const to = parsed.options.get('--to');
-    const distributedLoad = number(parsed, '--w');
-    const distributedLoadEnd = number(parsed, '--w2');
-    const distributedLoadFrom = number(parsed, '--w-from');
-    const distributedLoadTo = number(parsed, '--w-to');
-    const temperature = number(parsed, '--dt');
-    const temperatureGradient = number(parsed, '--dt-grad');
-    const convection = number(parsed, '--convection');
-    const perimeter = number(parsed, '--perimeter');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.updateElement({
-            id,
-            from,
-            to,
-            distributedLoad,
-            distributedLoadEnd,
-            distributedLoadFrom,
-            distributedLoadTo,
-            temperature,
-            temperatureGradient,
-            convection,
-            perimeter,
-            clearLoad: parsed.flags.has('--clear-load') ? true : undefined,
-            clearTemperature: parsed.flags.has('--clear-temperature') ? true : undefined,
-        });
-        console.log(message('elementUpdated', { id, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function elementCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === 'add') {
-        return elementAdd(args.slice(1));
-    }
-    if (action === 'update') {
-        return elementUpdate(args.slice(1));
-    }
-    if (action === 'split') {
-        return elementSplit(args.slice(1));
-    }
-    if (action === 'remove') {
-        return elementRemove(args.slice(1));
-    }
-    if (action === 'forces') {
-        return elementForces(args.slice(1));
-    }
-    if (action === 'release') {
-        return elementRelease(args.slice(1));
-    }
-    if (action === 'tension-only') {
-        return elementTensionOnly(args.slice(1));
-    }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', {
-            group: 'element',
-            expected: 'add, update, split, remove, forces, release or tension-only',
-        });
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', {
-        group: 'element',
-        action,
-        expected: 'add, update, split, remove, forces, release or tension-only',
-    });
-}
-
-async function elementSplit(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id', '--at'], []);
-    const file = positional(parsed, 0, 'element split <file> --id <id> --at <fraction>');
-    const id = required(parsed, '--id');
-    const at = number(parsed, '--at');
-    if (at === undefined) {
-        throw failure('cli/missing-option', 'missingOption', { option: '--at' });
-    }
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const report = document.splitElement({ id, at });
-        console.log(
-            message('elementSplit', {
-                id,
-                at: String(at),
-                node: report.node,
-                first: report.first,
-                second: report.second,
-                revision: String(report.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function elementRelease(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id'], ['--start', '--end']);
-    const file = positional(parsed, 0, 'element release <file> --id <id> [--start] [--end]');
-    const id = required(parsed, '--id');
-    const start = parsed.flags.has('--start');
-    const end = parsed.flags.has('--end');
-    if (!start && !end) {
-        throw failure('cli/missing-option', 'missingOption', { option: '--start or --end' });
-    }
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setElementRelease({ id, start, end });
-        console.log(message('elementReleased', { id, start: String(start), end: String(end), revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function elementTensionOnly(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id'], ['--clear']);
-    const file = positional(parsed, 0, 'element tension-only <file> --id <id> [--clear]');
-    const id = required(parsed, '--id');
-    const tensionOnly = !parsed.flags.has('--clear');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setElementTensionOnly({ id, tensionOnly });
-        console.log(
-            message('elementTensionOnly', {
-                id,
-                tensionOnly: String(tensionOnly),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function elementRemove(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id'], []);
-    const file = positional(parsed, 0, 'element remove <file> --id <id>');
-    const id = required(parsed, '--id');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.removeElement(id);
-        console.log(message('elementRemoved', { id, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function elementForces(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--id'], []);
-    const file = positional(parsed, 0, 'element forces <file> --id <id>');
-    const id = required(parsed, '--id');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        console.log(JSON.stringify(document.elementResult(id), null, 2));
-        return 0;
-    });
-}
-
-async function materialCommand(args: readonly string[]): Promise<number> {
-    if (args[0] === 'set') {
-        return materialSet(args.slice(1));
-    }
-    if (args[0] === 'preset') {
-        return materialPreset(args.slice(1));
-    }
-    if (args[0] === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'material', expected: 'set or preset' });
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', {
-        group: 'material',
-        action: args[0],
-        expected: 'set or preset',
-    });
-}
-
-async function materialSet(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        [
-            '--E',
-            '--A',
-            '--density',
-            '--name',
-            '--allowable',
-            '--alpha',
-            '--conductivity',
-            '--section',
-            '--width',
-            '--height',
-            '--diameter',
-            '--depth',
-            '--flange-width',
-            '--flange-thickness',
-            '--web-thickness',
-            '--wall',
-            '--outer-diameter',
-            '--inner-diameter',
-        ],
-        [],
-    );
-    const file = positional(parsed, 0, 'material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]');
-    const youngsModulus = requiredNumber(parsed, '--E');
-    const area = requiredNumber(parsed, '--A');
-    const density = number(parsed, '--density');
-    const name = parsed.options.get('--name');
-    const allowableStress = number(parsed, '--allowable');
-    const alpha = number(parsed, '--alpha');
-    const conductivity = number(parsed, '--conductivity');
-    const section = sectionOption(parsed);
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setMaterial({
-            youngsModulus,
-            area,
-            density,
-            name,
-            allowableStress,
-            alpha,
-            conductivity,
-            section,
-        });
-        console.log(
-            message('materialSet', {
-                youngsModulus: String(summary.material.youngsModulus),
-                area: String(summary.material.area),
-                density: String(summary.material.density),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function materialPreset(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        [
-            '--preset',
-            '--area',
-            '--allowable',
-            '--section',
-            '--width',
-            '--height',
-            '--diameter',
-            '--depth',
-            '--flange-width',
-            '--flange-thickness',
-            '--web-thickness',
-            '--wall',
-            '--outer-diameter',
-            '--inner-diameter',
-        ],
-        [],
-    );
-    const file = positional(
-        parsed,
-        0,
-        'material preset <file> --preset <name> [--section rectangle|circle|i|box|tube|channel] [--area A] [--allowable S]',
-    );
-    const preset = required(parsed, '--preset');
-    const area = number(parsed, '--area');
-    const allowableStress = number(parsed, '--allowable');
-    const section = sectionOption(parsed);
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.applyMaterialPreset({ preset, area, allowableStress, section });
-        console.log(
-            message('materialPreset', {
-                preset,
-                youngsModulus: String(summary.material.youngsModulus),
-                area: String(summary.material.area),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-function sectionOption(parsed: Parsed): Section | undefined {
-    const shape = parsed.options.get('--section');
-    if (shape === undefined) {
-        const geometry = [
-            '--width',
-            '--height',
-            '--diameter',
-            '--depth',
-            '--flange-width',
-            '--flange-thickness',
-            '--web-thickness',
-            '--wall',
-            '--outer-diameter',
-            '--inner-diameter',
-        ];
-        if (geometry.some((option) => parsed.options.has(option))) {
-            throw failure('cli/missing-option', 'sectionShape');
+function bind(ctx: CommandContext, options: ParsedOptions): Bound {
+    const raw = (name: string): string | undefined => {
+        const value = options[name.slice(2)];
+        return typeof value === 'string' ? value : undefined;
+    };
+    const has = (name: string): boolean => options[name.slice(2)] !== undefined;
+    const required = (name: string): string => {
+        const value = raw(name);
+        if (value === undefined) throw failure(ctx, 'cli/missing-option', 'missingOption', { option: name });
+        return value;
+    };
+    const number = (name: string): number | undefined => {
+        const value = raw(name);
+        if (value === undefined) return undefined;
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+            throw failure(ctx, 'cli/invalid-number', 'invalidNumber', { option: name, value });
         }
-        return undefined;
-    }
-    if (shape === 'rectangle') {
-        return {
-            shape: 'rectangle',
-            width: requiredNumber(parsed, '--width'),
-            height: requiredNumber(parsed, '--height'),
-        };
-    }
-    if (shape === 'circle') {
-        return { shape: 'circle', diameter: requiredNumber(parsed, '--diameter') };
-    }
-    if (shape === 'i' || shape === 'i-section') {
-        return {
-            shape: 'i',
-            depth: requiredNumber(parsed, '--depth'),
-            flangeWidth: requiredNumber(parsed, '--flange-width'),
-            flangeThickness: requiredNumber(parsed, '--flange-thickness'),
-            webThickness: requiredNumber(parsed, '--web-thickness'),
-        };
-    }
-    if (shape === 'box') {
-        return {
-            shape: 'box',
-            width: requiredNumber(parsed, '--width'),
-            height: requiredNumber(parsed, '--height'),
-            wall: requiredNumber(parsed, '--wall'),
-        };
-    }
-    if (shape === 'tube') {
-        return {
-            shape: 'tube',
-            outerDiameter: requiredNumber(parsed, '--outer-diameter'),
-            innerDiameter: requiredNumber(parsed, '--inner-diameter'),
-        };
-    }
-    if (shape === 'channel') {
-        return {
-            shape: 'channel',
-            depth: requiredNumber(parsed, '--depth'),
-            flangeWidth: requiredNumber(parsed, '--flange-width'),
-            flangeThickness: requiredNumber(parsed, '--flange-thickness'),
-            webThickness: requiredNumber(parsed, '--web-thickness'),
-        };
-    }
-    throw failure('cli/invalid-option', 'unknownSection', { value: shape });
-}
-
-async function libraryCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units'], []);
-    const units = unitsOption(parsed);
-    return withSession(async (session) => {
-        const library = await session.library(units);
-        console.log(JSON.stringify(library, null, 2));
-        return 0;
-    });
-}
-
-async function sectionCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === 'properties') {
-        return sectionPropertiesCommand(args.slice(1));
-    }
-    if (action === 'polygon') {
-        return sectionPolygonCommand(args.slice(1));
-    }
-    if (action === 'i') {
-        return sectionICommand(args.slice(1));
-    }
-    if (action === 'tube') {
-        return sectionTubeCommand(args.slice(1));
-    }
-    if (action === 'channel') {
-        return sectionChannelCommand(args.slice(1));
-    }
-    if (action === 'angle') {
-        return sectionAngleCommand(args.slice(1));
-    }
-    if (action === 't') {
-        return sectionTCommand(args.slice(1));
-    }
-    if (action === 'ellipse') {
-        return sectionEllipseCommand(args.slice(1));
-    }
-    if (action === 'triangle') {
-        return sectionTriangleCommand(args.slice(1));
-    }
-    if (action === 'z') {
-        return sectionZCommand(args.slice(1));
-    }
-    if (action === 'principal') {
-        return sectionPrincipalCommand(args.slice(1));
-    }
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', {
-            group: 'section',
-            expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle, z or principal',
-        });
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', {
-        group: 'section',
-        action,
-        expected: 'properties, polygon, i, tube, channel, angle, t, ellipse, triangle, z or principal',
-    });
-}
-
-async function sectionPropertiesCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        [
-            '--units',
-            '--section',
-            '--width',
-            '--height',
-            '--diameter',
-            '--depth',
-            '--flange-width',
-            '--flange-thickness',
-            '--web-thickness',
-            '--wall',
-            '--outer-diameter',
-            '--inner-diameter',
-        ],
-        [],
-    );
-    const units = unitsOption(parsed) ?? 'mm';
-    const section = sectionOption(parsed);
-    if (section === undefined) {
-        throw failure('cli/missing-option', 'missingSection', {});
-    }
-    return withSession(async (session) => {
-        const report = await session.sectionProperties(section, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionPolygonCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--points'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const points = parsePolygonPoints(required(parsed, '--points'));
-    return withSession(async (session) => {
-        const report = await session.sectionPolygon(points, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionICommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--height', '--width', '--web-thickness', '--flange-thickness'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        height: requiredNumber(parsed, '--height'),
-        width: requiredNumber(parsed, '--width'),
-        webThickness: requiredNumber(parsed, '--web-thickness'),
-        flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+        return parsed;
     };
-    return withSession(async (session) => {
-        const report = await session.sectionI(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionTubeCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--height', '--width', '--thickness'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        height: requiredNumber(parsed, '--height'),
-        width: requiredNumber(parsed, '--width'),
-        thickness: requiredNumber(parsed, '--thickness'),
+    const requiredNumber = (name: string): number => {
+        const value = number(name);
+        if (value === undefined) throw failure(ctx, 'cli/missing-option', 'missingOption', { option: name });
+        return value;
     };
-    return withSession(async (session) => {
-        const report = await session.sectionTube(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionChannelCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--height', '--width', '--web-thickness', '--flange-thickness'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        height: requiredNumber(parsed, '--height'),
-        width: requiredNumber(parsed, '--width'),
-        webThickness: requiredNumber(parsed, '--web-thickness'),
-        flangeThickness: requiredNumber(parsed, '--flange-thickness'),
+    const units = (): Units | undefined => {
+        const value = raw('--units');
+        if (value === undefined) return undefined;
+        if (value === 'mm' || value === 'm') return value;
+        throw failure(ctx, 'cli/invalid-units', 'invalidUnits', { value });
     };
-    return withSession(async (session) => {
-        const report = await session.sectionChannel(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionAngleCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--height', '--width', '--thickness'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        height: requiredNumber(parsed, '--height'),
-        width: requiredNumber(parsed, '--width'),
-        thickness: requiredNumber(parsed, '--thickness'),
+    const dimension = (): Dimension | undefined => {
+        const value = raw('--dimension');
+        if (value === undefined) return undefined;
+        if (value === '2') return 2;
+        if (value === '3') return 3;
+        throw failure(ctx, 'cli/invalid-option', 'invalidDimension', { value });
     };
-    return withSession(async (session) => {
-        const report = await session.sectionAngle(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionTCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--height', '--width', '--web-thickness', '--flange-thickness'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        height: requiredNumber(parsed, '--height'),
-        width: requiredNumber(parsed, '--width'),
-        webThickness: requiredNumber(parsed, '--web-thickness'),
-        flangeThickness: requiredNumber(parsed, '--flange-thickness'),
-    };
-    return withSession(async (session) => {
-        const report = await session.sectionT(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionEllipseCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--width', '--height'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        width: requiredNumber(parsed, '--width'),
-        height: requiredNumber(parsed, '--height'),
-    };
-    return withSession(async (session) => {
-        const report = await session.sectionEllipse(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionTriangleCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--side'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        side: requiredNumber(parsed, '--side'),
-    };
-    return withSession(async (session) => {
-        const report = await session.sectionTriangle(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionZCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--height', '--width', '--thickness'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const geometry = {
-        height: requiredNumber(parsed, '--height'),
-        width: requiredNumber(parsed, '--width'),
-        thickness: requiredNumber(parsed, '--thickness'),
-    };
-    return withSession(async (session) => {
-        const report = await session.sectionZ(geometry, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-async function sectionPrincipalCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--units', '--ix', '--iy', '--ixy'], []);
-    const units = unitsOption(parsed) ?? 'mm';
-    const input = {
-        ix: requiredNumber(parsed, '--ix'),
-        iy: requiredNumber(parsed, '--iy'),
-        ixy: requiredNumber(parsed, '--ixy'),
-    };
-    return withSession(async (session) => {
-        const report = await session.sectionPrincipal(input, units);
-        console.log(JSON.stringify(report, null, 2));
-        return 0;
-    });
-}
-
-function parsePolygonPoints(value: string): readonly PolygonPoint[] {
-    return value
-        .split(';')
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0)
-        .map((entry) => {
-            const parts = entry.split(',').map((part) => Number(part.trim()));
-            if (parts.length !== 2 || !parts.every((part) => Number.isFinite(part))) {
-                throw failure('cli/invalid-option', 'invalidPoint', { value: entry });
+    const section = (): Section | undefined => {
+        const shape = raw('--section');
+        if (shape === undefined) {
+            const geometry = [
+                '--width',
+                '--height',
+                '--diameter',
+                '--depth',
+                '--flange-width',
+                '--flange-thickness',
+                '--web-thickness',
+                '--wall',
+                '--outer-diameter',
+                '--inner-diameter',
+            ];
+            if (geometry.some((option) => has(option))) {
+                throw failure(ctx, 'cli/missing-option', 'sectionShape');
             }
-            return [parts[0] as number, parts[1] as number] as const;
-        });
+            return undefined;
+        }
+        if (shape === 'rectangle') {
+            return { shape: 'rectangle', width: requiredNumber('--width'), height: requiredNumber('--height') };
+        }
+        if (shape === 'circle') {
+            return { shape: 'circle', diameter: requiredNumber('--diameter') };
+        }
+        if (shape === 'i' || shape === 'i-section') {
+            return {
+                shape: 'i',
+                depth: requiredNumber('--depth'),
+                flangeWidth: requiredNumber('--flange-width'),
+                flangeThickness: requiredNumber('--flange-thickness'),
+                webThickness: requiredNumber('--web-thickness'),
+            };
+        }
+        if (shape === 'box') {
+            return {
+                shape: 'box',
+                width: requiredNumber('--width'),
+                height: requiredNumber('--height'),
+                wall: requiredNumber('--wall'),
+            };
+        }
+        if (shape === 'tube') {
+            return {
+                shape: 'tube',
+                outerDiameter: requiredNumber('--outer-diameter'),
+                innerDiameter: requiredNumber('--inner-diameter'),
+            };
+        }
+        if (shape === 'channel') {
+            return {
+                shape: 'channel',
+                depth: requiredNumber('--depth'),
+                flangeWidth: requiredNumber('--flange-width'),
+                flangeThickness: requiredNumber('--flange-thickness'),
+                webThickness: requiredNumber('--web-thickness'),
+            };
+        }
+        throw failure(ctx, 'cli/invalid-option', 'unknownSection', { value: shape });
+    };
+    return {
+        message: (key, values) => ctx.t(`cli.message.${key}`, values),
+        file: (usage) => {
+            const value = options._[0];
+            if (value === undefined) throw failure(ctx, 'cli/missing-argument', 'missingArgument', { usage });
+            return value;
+        },
+        raw,
+        has,
+        required,
+        number,
+        requiredNumber,
+        flag: (name) => options[name.slice(2)] === true,
+        units,
+        dimension,
+        section,
+        direction: () => {
+            const value = raw('--direction') ?? '';
+            const parts = value.split(',').map((entry) => Number(entry.trim()));
+            if (parts.length !== 2 || !parts.every((axis) => Number.isFinite(axis))) {
+                throw failure(ctx, 'cli/invalid-option', 'invalidDirection', { value });
+            }
+            return [parts[0] as number, parts[1] as number];
+        },
+    };
 }
 
-function directionOption(parsed: Parsed): readonly [number, number] {
-    const raw = parsed.options.get('--direction') ?? '';
-    const parts = raw.split(',').map((entry) => Number(entry.trim()));
-    if (parts.length !== 2 || !parts.every((value) => Number.isFinite(value))) {
-        throw failure('cli/invalid-option', 'invalidDirection', { value: raw });
-    }
-    return [parts[0], parts[1]];
-}
-
-async function supportAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        ['--node', '--ux', '--uy', '--uz', '--rotation', '--kx', '--ky', '--kz', '--kr', '--direction'],
-        ['--dx', '--dy', '--dz', '--rz'],
-    );
-    const file = positional(
-        parsed,
-        0,
-        'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
-    );
-    const node = required(parsed, '--node');
-    const dx = parsed.flags.has('--dx');
-    const dy = parsed.flags.has('--dy');
-    const dz = parsed.flags.has('--dz');
-    const rz = parsed.flags.has('--rz');
-    const ux = number(parsed, '--ux');
-    const uy = number(parsed, '--uy');
-    const uz = number(parsed, '--uz');
-    const rotation = number(parsed, '--rotation');
-    const kx = number(parsed, '--kx');
-    const ky = number(parsed, '--ky');
-    const kz = number(parsed, '--kz');
-    const kr = number(parsed, '--kr');
-    const direction = parsed.options.get('--direction') === undefined ? undefined : directionOption(parsed);
-    const spring = kx !== undefined || ky !== undefined || kz !== undefined || kr !== undefined;
-    if (
-        direction !== undefined &&
-        (dx || dy || dz || rz || ux !== undefined || uy !== undefined || uz !== undefined || rotation !== undefined || spring)
-    ) {
-        throw failure('cli/direction-conflict', 'directionConflict', {});
-    }
-    if (
-        direction === undefined &&
-        !dx &&
-        !dy &&
-        !dz &&
-        !rz &&
-        ux === undefined &&
-        uy === undefined &&
-        uz === undefined &&
-        rotation === undefined &&
-        !spring
-    ) {
-        throw failure('cli/missing-option', 'noFreedom');
-    }
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.addSupport({ node, dx, dy, dz, rz, ux, uy, uz, rotation, kx, ky, kz, kr, direction });
-        console.log(
-            message('supportAdded', {
-                node,
-                dx: String(dx),
-                dy: String(dy),
-                dz: String(dz),
-                rz: String(rz),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function supportRemove(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--node'], []);
-    const file = positional(parsed, 0, 'support remove <file> --node <node>');
-    const node = required(parsed, '--node');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.removeSupport(node);
-        console.log(message('supportRemoved', { node, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function loadAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--node', '--fx', '--fy', '--fz', '--mz'], []);
-    const file = positional(parsed, 0, 'load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]');
-    const node = required(parsed, '--node');
-    const fx = number(parsed, '--fx');
-    const fy = number(parsed, '--fy');
-    const fz = number(parsed, '--fz');
-    const mz = number(parsed, '--mz');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.addLoad({ node, fx, fy, fz, mz });
-        console.log(message('loadAdded', { node, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function loadRemove(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--node'], []);
-    const file = positional(parsed, 0, 'load remove <file> --node <node>');
-    const node = required(parsed, '--node');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.removeLoad(node);
-        console.log(message('loadRemoved', { node, revision: String(summary.revision) }));
-        return 0;
-    });
-}
-
-async function modelCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', {
-            group: 'model',
-            expected: 'gravity or ambient',
-        });
-    }
-    if (action === 'gravity') {
-        return gravity(args.slice(1));
-    }
-    if (action === 'ambient') {
-        return ambient(args.slice(1));
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', {
-        group: 'model',
-        action,
-        expected: 'gravity or ambient',
-    });
-}
-
-async function ambient(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--temperature'], ['--clear']);
-    const file = positional(parsed, 0, 'model ambient <file> [--temperature <Ta>] [--clear]');
-    const temperature = parsed.flags.has('--clear') ? null : requiredNumber(parsed, '--temperature');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setAmbientTemperature({ temperature });
-        console.log(
-            message('ambientTemperatureSet', {
-                temperature: temperature === null ? 'cleared' : String(temperature),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function gravity(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--gx', '--gy', '--gz'], []);
-    const file = positional(parsed, 0, 'model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]');
-    const gx = number(parsed, '--gx') ?? 0;
-    const gy = number(parsed, '--gy') ?? 0;
-    const gz = number(parsed, '--gz') ?? 0;
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setGravity({ gx, gy, gz });
-        console.log(
-            message('gravitySet', {
-                gx: String(gx),
-                gy: String(gy),
-                gz: String(gz),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function selfWeight(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--g', '--axis'], []);
-    const file = positional(parsed, 0, 'self-weight <file> --g <g> [--axis x|y|z]');
-    const value = requiredNumber(parsed, '--g');
-    const axis = parsed.options.get('--axis') ?? 'y';
-    const vector =
-        axis === 'x'
-            ? { gx: value, gy: 0, gz: 0 }
-            : axis === 'y'
-              ? { gx: 0, gy: value, gz: 0 }
-              : axis === 'z'
-                ? { gx: 0, gy: 0, gz: value }
-                : undefined;
-    if (vector === undefined) {
-        throw failure('cli/invalid-option', 'unknownAxis', { value: axis });
-    }
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.setGravity(vector);
-        console.log(
-            message('gravitySet', {
-                gx: String(vector.gx),
-                gy: String(vector.gy),
-                gz: String(vector.gz),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function combinationCommand(args: readonly string[]): Promise<number> {
-    const action = args[0];
-    if (action === undefined) {
-        throw failure('cli/missing-argument', 'missingSubcommand', { group: 'combination', expected: 'add' });
-    }
-    if (action === 'add') {
-        return combinationAdd(args.slice(1));
-    }
-    if (action === 'remove') {
-        return combinationRemove(args.slice(1));
-    }
-    throw failure('cli/unknown-command', 'unknownSubcommand', {
-        group: 'combination',
-        action,
-        expected: 'add',
-    });
-}
-
-async function combinationAdd(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--name', '--loads', '--gravity'], []);
-    const file = positional(parsed, 0, 'combination add <file> --name <name> [--loads <f>] [--gravity <f>]');
-    const name = required(parsed, '--name');
-    const loads = number(parsed, '--loads') ?? 1;
-    const gravity = number(parsed, '--gravity') ?? 0;
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const summary = document.addCombination({ name, loads, gravity });
-        console.log(
-            message('combinationSet', {
-                name,
-                loads: String(loads),
-                gravity: String(gravity),
-                revision: String(summary.revision),
-            }),
-        );
-        return 0;
-    });
-}
-
-async function combinationRemove(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--name'], []);
-    const file = positional(parsed, 0, 'combination remove <file> --name <name>');
-    const name = required(parsed, '--name');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        document.removeCombination(name);
-        console.log(message('combinationRemoved', { name }));
-        return 0;
-    });
-}
-
-async function combinationsCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--out'], []);
-    const file = positional(parsed, 0, 'combinations <file> [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.solveCombinations({ out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function bucklingCombinationsCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--modes', '--out'], []);
-    const file = positional(parsed, 0, 'buckling-combinations <file> [--modes N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.solveBucklingCombinations({
-            modes: modesOption(parsed),
-            out: parsed.options.get('--out'),
-        });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function validate(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, [], []);
-    const file = positional(parsed, 0, 'validate <file>');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const report = document.validate();
-        console.log(JSON.stringify(report, null, 2));
-        return report.ok ? 0 : 1;
-    });
-}
-
-function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
-    const analysis = parsed.options.get('--analysis');
+function analysisOption(ctx: CommandContext, b: Bound, dimension: Dimension): Analysis {
+    const analysis = b.raw('--analysis');
     switch (analysis) {
         case undefined:
         case 'static':
@@ -1473,9 +230,9 @@ function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
         case 'thermal':
             throw new NotImplementedError('thermal analysis');
         default:
-            throw failure('cli/invalid-option', 'unknownAnalysis', { value: analysis });
+            throw failure(ctx, 'cli/invalid-option', 'unknownAnalysis', { value: analysis });
     }
-    const element = parsed.options.get('--element');
+    const element = b.raw('--element');
     if (element !== undefined) {
         switch (element) {
             case 'truss':
@@ -1484,12 +241,12 @@ function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
             case 'frame':
                 throw new NotImplementedError('3D frame element');
             default:
-                throw failure('cli/invalid-option', 'unknownElement', { value: element });
+                throw failure(ctx, 'cli/invalid-option', 'unknownElement', { value: element });
         }
     }
-    const requested = dimensionOption(parsed);
+    const requested = b.dimension();
     if (requested !== undefined && requested !== dimension) {
-        throw failure('cli/dimension-mismatch', 'dimensionMismatch', {
+        throw failure(ctx, 'cli/dimension-mismatch', 'dimensionMismatch', {
             requested: String(requested),
             dimension: String(dimension),
         });
@@ -1497,468 +254,1887 @@ function analysisOption(parsed: Parsed, dimension: Dimension): Analysis {
     return analysis === 'modal' || analysis === 'buckling' ? analysis : 'static';
 }
 
-function modesOption(parsed: Parsed): number {
-    const raw = parsed.options.get('--modes');
-    if (raw === undefined) {
+function modesOption(ctx: CommandContext, b: Bound): number {
+    const value = b.raw('--modes');
+    if (value === undefined) {
         return 5;
     }
-    const modes = Number(raw);
+    const modes = Number(value);
     if (!Number.isInteger(modes) || modes < 1) {
-        throw failure('cli/invalid-number', 'invalidModes', { value: raw });
+        throw failure(ctx, 'cli/invalid-number', 'invalidModes', { value });
     }
     return modes;
 }
 
-function iterationsOption(parsed: Parsed): number | undefined {
-    const raw = parsed.options.get('--iterations');
-    if (raw === undefined) {
+function iterationsOption(ctx: CommandContext, b: Bound): number | undefined {
+    const value = b.raw('--iterations');
+    if (value === undefined) {
         return undefined;
     }
-    const iterations = Number(raw);
+    const iterations = Number(value);
     if (!Number.isInteger(iterations) || iterations < 1) {
-        throw failure('cli/invalid-number', 'invalidIterations', { value: raw });
+        throw failure(ctx, 'cli/invalid-number', 'invalidIterations', { value });
     }
     return iterations;
 }
 
-async function solveCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        ['--out', '--analysis', '--element', '--dimension', '--modes', '--iterations', '--tolerance'],
-        [],
-    );
-    const file = positional(
-        parsed,
-        0,
-        'solve <file> [--out report.json] [--analysis static|modal|buckling|tension-only] [--modes N] [--iterations N] [--tolerance t] [--element truss|beam] [--dimension 2|3]',
-    );
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const analysis = analysisOption(parsed, document.dimension);
-        const out = parsed.options.get('--out');
-        if (analysis === 'modal') {
-            const result = document.solve({ analysis: 'modal', modes: modesOption(parsed), out });
-            console.log(JSON.stringify(result, null, 2));
-        } else if (analysis === 'buckling') {
-            const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out });
-            console.log(JSON.stringify(result, null, 2));
-        } else if (analysis === 'tensionOnly') {
-            const result = document.tensionOnly({
-                iterations: iterationsOption(parsed),
-                tolerance: number(parsed, '--tolerance'),
-                out,
-            });
-            console.log(JSON.stringify(result, null, 2));
-        } else {
-            if (parsed.options.has('--modes')) {
-                throw failure('cli/invalid-option', 'modesRequireModal');
-            }
-            if (parsed.options.has('--iterations') || parsed.options.has('--tolerance')) {
-                throw failure('cli/invalid-option', 'tensionOnlyOptionsRequireAnalysis');
-            }
-            const result = document.solve({ out });
-            console.log(JSON.stringify(result, null, 2));
-        }
-        return 0;
-    });
-}
-
-async function modalCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--modes', '--out'], []);
-    const file = positional(parsed, 0, 'modal <file> [--modes N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.solve({ analysis: 'modal', modes: modesOption(parsed), out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function bucklingCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--modes', '--out'], []);
-    const file = positional(parsed, 0, 'buckling <file> [--modes N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.solve({ analysis: 'buckling', modes: modesOption(parsed), out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function tensionOnlyCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--iterations', '--tolerance', '--out'], []);
-    const file = positional(
-        parsed,
-        0,
-        'tension-only <file> [--iterations N] [--tolerance t] [--out report.json]',
-    );
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.tensionOnly({
-            iterations: iterationsOption(parsed),
-            tolerance: number(parsed, '--tolerance'),
-            out: parsed.options.get('--out'),
-        });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function heatCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--out'], []);
-    const file = positional(parsed, 0, 'heat <file> [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.heat({ out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-function stationsOption(parsed: Parsed): number {
-    const raw = parsed.options.get('--stations');
-    if (raw === undefined) {
+function stationsOption(ctx: CommandContext, b: Bound): number {
+    const value = b.raw('--stations');
+    if (value === undefined) {
         return 11;
     }
-    const stations = Number(raw);
+    const stations = Number(value);
     if (!Number.isInteger(stations) || stations < 2) {
-        throw failure('cli/invalid-number', 'invalidStations', { value: raw });
+        throw failure(ctx, 'cli/invalid-number', 'invalidStations', { value });
     }
     return stations;
 }
 
-async function forcesCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--stations', '--out'], []);
-    const file = positional(parsed, 0, 'forces <file> [--stations N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.internalForces({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function influenceCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        ['--track', '--quantity', '--node', '--component', '--element', '--position', '--direction', '--points', '--out'],
-        [],
-    );
-    const usage =
-        'influence <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] [--points N] [--out report.json]';
-    const file = positional(parsed, 0, usage);
-    const track = required(parsed, '--track');
-    const quantityKind = required(parsed, '--quantity');
-    if (quantityKind !== 'reaction' && quantityKind !== 'section') {
-        throw failure('cli/invalid-option', 'unknownInfluenceQuantity', { value: quantityKind });
-    }
-    const direction = influenceDirectionOption(parsed);
-    const points = stationsOption(parsed);
-    const component = influenceComponentOption(quantityKind, parsed);
-    const quantity: InfluenceQuantity =
-        quantityKind === 'reaction'
-            ? { kind: 'reaction', node: required(parsed, '--node'), component: component as ReactionComponent }
-            : {
-                  kind: 'section',
-                  element: parsed.options.get('--element'),
-                  position: requiredNumber(parsed, '--position'),
-                  component: component as SectionComponent,
-              };
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.influenceLine({ track, quantity, direction, points, out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-function influenceDirectionOption(parsed: Parsed): 'x' | 'y' {
-    const raw = parsed.options.get('--direction') ?? 'y';
-    if (raw === 'x' || raw === 'y') {
-        return raw;
-    }
-    throw failure('cli/invalid-option', 'unknownInfluenceDirection', { value: raw });
-}
-
-function influenceComponentOption(quantityKind: string, parsed: Parsed): string {
-    const raw = required(parsed, '--component');
-    if (quantityKind === 'reaction') {
-        if (raw === 'fx' || raw === 'fy' || raw === 'mz') {
-            return raw;
-        }
-        throw failure('cli/invalid-option', 'unknownReactionComponent', { value: raw });
-    }
-    if (raw === 'axial' || raw === 'shear' || raw === 'moment') {
-        return raw;
-    }
-    throw failure('cli/invalid-option', 'unknownSectionComponent', { value: raw });
-}
-
-async function influenceTrainCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(
-        args,
-        [
-            '--track',
-            '--quantity',
-            '--node',
-            '--component',
-            '--element',
-            '--position',
-            '--direction',
-            '--axles',
-            '--spacings',
-            '--points',
-            '--step',
-            '--out',
-        ],
-        [],
-    );
-    const usage =
-        'influence-train <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] --axles <P,...> --spacings <d,...> [--points N] [--step f] [--out report.json]';
-    const file = positional(parsed, 0, usage);
-    const track = required(parsed, '--track');
-    const quantityKind = required(parsed, '--quantity');
-    if (quantityKind !== 'reaction' && quantityKind !== 'section') {
-        throw failure('cli/invalid-option', 'unknownInfluenceQuantity', { value: quantityKind });
-    }
-    const direction = influenceDirectionOption(parsed);
-    const points = pointsOption(parsed);
-    const step = number(parsed, '--step');
-    const component = influenceComponentOption(quantityKind, parsed);
-    const quantity: InfluenceQuantity =
-        quantityKind === 'reaction'
-            ? { kind: 'reaction', node: required(parsed, '--node'), component: component as ReactionComponent }
-            : {
-                  kind: 'section',
-                  element: parsed.options.get('--element'),
-                  position: requiredNumber(parsed, '--position'),
-                  component: component as SectionComponent,
-              };
-    const axles = numberListOption(parsed, '--axles');
-    const spacings = numberListOption(parsed, '--spacings');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.influenceLineTrain({
-            track,
-            quantity,
-            direction,
-            axles,
-            spacings,
-            points,
-            step,
-            out: parsed.options.get('--out'),
-        });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-function pointsOption(parsed: Parsed): number | undefined {
-    const raw = parsed.options.get('--points');
-    if (raw === undefined) {
+function pointsOption(ctx: CommandContext, b: Bound): number | undefined {
+    const value = b.raw('--points');
+    if (value === undefined) {
         return undefined;
     }
-    const points = Number(raw);
+    const points = Number(value);
     if (!Number.isInteger(points) || points < 2) {
-        throw failure('cli/invalid-number', 'invalidPoints', { value: raw });
+        throw failure(ctx, 'cli/invalid-number', 'invalidPoints', { value });
     }
     return points;
 }
 
-function numberListOption(parsed: Parsed, name: string): number[] {
-    const raw = required(parsed, name);
+function numberListOption(ctx: CommandContext, b: Bound, name: string): number[] {
+    const raw = b.required(name);
     const values = raw
         .split(',')
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0)
         .map((entry) => Number(entry));
     if (values.length === 0 || !values.every((value) => Number.isFinite(value))) {
-        throw failure('cli/invalid-number', 'invalidNumberList', { option: name, value: raw });
+        throw failure(ctx, 'cli/invalid-number', 'invalidNumberList', { option: name, value: raw });
     }
     return values;
 }
 
-async function reactionsCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--out'], []);
-    const file = positional(parsed, 0, 'reactions <file> [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.reactions({ out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
+function exportFormat(ctx: CommandContext, value: string): ExportFormat {
+    if (value === 'csv' || value === 'vtk' || value === 'md' || value === 'svg') {
+        return value;
+    }
+    if (value === 'inp' || value === 'abaqus' || value === 'step' || value === 'stp') {
+        throw new NotImplementedError(`${value} export`);
+    }
+    throw failure(ctx, 'cli/unknown-format', 'unknownFormat', { format: value });
 }
 
-async function reactionCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--node'], []);
-    const file = positional(parsed, 0, 'reaction <file> --node <node>');
-    const node = required(parsed, '--node');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        console.log(JSON.stringify(document.nodeReaction(node), null, 2));
-        return 0;
-    });
+function parsePolygonPoints(ctx: CommandContext, value: string): readonly PolygonPoint[] {
+    return value
+        .split(';')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .map((entry) => {
+            const parts = entry.split(',').map((part) => Number(part.trim()));
+            if (parts.length !== 2 || !parts.every((part) => Number.isFinite(part))) {
+                throw failure(ctx, 'cli/invalid-option', 'invalidPoint', { value: entry });
+            }
+            return [parts[0] as number, parts[1] as number] as const;
+        });
 }
 
-async function stressesCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--stations', '--out'], []);
-    const file = positional(parsed, 0, 'stresses <file> [--stations N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.stresses({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function deflectionsCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--stations', '--out'], []);
-    const file = positional(parsed, 0, 'deflections <file> [--stations N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.deflections({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function nodalStressesCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--stations', '--out'], []);
-    const file = positional(parsed, 0, 'nodal-stresses <file> [--stations N] [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.nodalStresses({ stations: stationsOption(parsed), out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function loadCasesCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--out'], []);
-    const file = positional(parsed, 0, 'load-cases <file> [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.loadCases({ out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-async function matricesCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--out'], []);
-    const file = positional(parsed, 0, 'matrices <file> [--out report.json]');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.matrices({ out: parsed.options.get('--out') });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
-}
-
-function parseSpectrum(value: string): readonly SpectrumPoint[] {
+function parseSpectrum(ctx: CommandContext, value: string): readonly SpectrumPoint[] {
     const points: SpectrumPoint[] = [];
-    for (const item of value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0)) {
+    for (const item of value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)) {
         const separator = item.indexOf(':');
         if (separator < 0) {
-            throw failure('cli/invalid-spectrum', 'invalidSpectrumPoint', { point: item });
+            throw failure(ctx, 'cli/invalid-spectrum', 'invalidSpectrumPoint', { point: item });
         }
         const period = Number(item.slice(0, separator).trim());
         const acceleration = Number(item.slice(separator + 1).trim());
         if (!Number.isFinite(period) || !Number.isFinite(acceleration)) {
-            throw failure('cli/invalid-spectrum', 'invalidSpectrumPoint', { point: item });
+            throw failure(ctx, 'cli/invalid-spectrum', 'invalidSpectrumPoint', { point: item });
         }
         points.push({ period, acceleration });
     }
     if (points.length === 0) {
-        throw failure('cli/invalid-spectrum', 'emptySpectrum', {});
+        throw failure(ctx, 'cli/invalid-spectrum', 'emptySpectrum', {});
     }
     return points;
 }
 
-function spectrumAxisOption(parsed: Parsed): 'x' | 'y' | 'z' {
-    const raw = parsed.options.get('--axis') ?? 'x';
-    if (raw === 'x' || raw === 'y' || raw === 'z') {
-        return raw;
+function influenceDirectionOption(ctx: CommandContext, b: Bound): 'x' | 'y' {
+    const value = b.raw('--direction') ?? 'y';
+    if (value === 'x' || value === 'y') {
+        return value;
     }
-    throw failure('cli/invalid-option', 'unknownSpectrumAxis', { value: raw });
+    throw failure(ctx, 'cli/invalid-option', 'unknownInfluenceDirection', { value });
 }
 
-function spectrumCombinationOption(parsed: Parsed): SpectrumCombination {
-    const raw = parsed.options.get('--combination') ?? 'srss';
-    if (raw === 'srss' || raw === 'cqc') {
-        return raw;
+function influenceComponentOption(ctx: CommandContext, quantityKind: string, b: Bound): string {
+    const value = b.required('--component');
+    if (quantityKind === 'reaction') {
+        if (value === 'fx' || value === 'fy' || value === 'mz') {
+            return value;
+        }
+        throw failure(ctx, 'cli/invalid-option', 'unknownReactionComponent', { value });
     }
-    throw failure('spectrum/invalid-combination', 'unknownSpectrumCombination', { value: raw });
+    if (value === 'axial' || value === 'shear' || value === 'moment') {
+        return value;
+    }
+    throw failure(ctx, 'cli/invalid-option', 'unknownSectionComponent', { value });
 }
 
-async function spectrumCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--modes', '--axis', '--combination', '--damping', '--spectrum', '--out'], []);
-    const file = positional(
-        parsed,
-        0,
-        'spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]',
-    );
-    const spectrum = parseSpectrum(required(parsed, '--spectrum'));
-    const axis = spectrumAxisOption(parsed);
-    const combination = spectrumCombinationOption(parsed);
-    const damping = number(parsed, '--damping');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.responseSpectrum({
-            modes: modesOption(parsed),
-            axis,
-            combination,
-            damping,
-            spectrum,
-            out: parsed.options.get('--out'),
-        });
-        console.log(JSON.stringify(result, null, 2));
-        return 0;
-    });
+function spectrumAxisOption(ctx: CommandContext, b: Bound): 'x' | 'y' | 'z' {
+    const value = b.raw('--axis') ?? 'x';
+    if (value === 'x' || value === 'y' || value === 'z') {
+        return value;
+    }
+    throw failure(ctx, 'cli/invalid-option', 'unknownSpectrumAxis', { value });
 }
 
-async function report(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, [], []);
-    const file = positional(parsed, 0, 'report <file>');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        console.log(JSON.stringify(document.report(), null, 2));
-        return 0;
-    });
+function spectrumCombinationOption(ctx: CommandContext, b: Bound): SpectrumCombination {
+    const value = b.raw('--combination') ?? 'srss';
+    if (value === 'srss' || value === 'cqc') {
+        return value;
+    }
+    throw failure(ctx, 'spectrum/invalid-combination', 'unknownSpectrumCombination', { value });
 }
 
-async function exportCommand(args: readonly string[]): Promise<number> {
-    const parsed = parse(args, ['--format', '--out', '--scale'], []);
-    const file = positional(parsed, 0, 'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N]');
-    const format = exportFormat(required(parsed, '--format'));
-    const out = required(parsed, '--out');
-    const scale = number(parsed, '--scale');
-    return withSession(async (session) => {
-        const document = await openDocument(session, file);
-        const result = document.export(format, out, scale === undefined ? {} : { scale });
-        console.log(message('exported', { format: result.format, path: result.path }));
-        return 0;
-    });
-}
-
-function exitCodeOf(error: OpenCAEError): number {
-    return error.code.startsWith('capability/') ? 2 : 1;
-}
-
-async function main(): Promise<void> {
-    const args = process.argv.slice(2);
+/** One short-lived session per command, mirroring the process lifetime. */
+async function withSession(work: (session: OpenCAE) => Promise<number>): Promise<number> {
+    const session = new OpenCAE();
     try {
-        process.exitCode = await dispatch(args);
-    } catch (error) {
-        const failure =
-            error instanceof OpenCAEError
-                ? error
-                : new OpenCAEError('native/error', error instanceof Error ? error.message : String(error), {
-                      cause: error,
-                  });
-        process.stderr.write(`${JSON.stringify({ code: failure.code, message: failure.message }, null, 2)}\n`);
-        process.exitCode = exitCodeOf(failure);
+        return await work(session);
+    } finally {
+        await session.dispose();
     }
 }
 
-await main();
+async function openDocument(session: OpenCAE, file: string): Promise<CaeDocument> {
+    return session.open(file);
+}
+
+/** Group commands keep the old subcommand diagnostics as their action. */
+function groupAction(group: string, expected: string) {
+    return async (options: ParsedOptions, _args: string[], ctx: CommandContext): Promise<number> =>
+        attempt(ctx, () => {
+            const action = options._[0];
+            if (action === undefined) {
+                throw failure(ctx, 'cli/missing-argument', 'missingSubcommand', { group, expected });
+            }
+            throw failure(ctx, 'cli/unknown-command', 'unknownSubcommand', { group, action, expected });
+        });
+}
+
+/**
+ * The old grammar treated only `--long` tokens as options, so a negative value
+ * like `--fy -10` was accepted as the option value. `@wae/commander` treats
+ * every token starting with `-` as an option marker, so join such pairs into
+ * `--fy=-10` before parsing.
+ */
+function joinNegativeValues(argv: string[]): string[] {
+    const joined: string[] = [];
+    for (let index = 0; index < argv.length; index += 1) {
+        const token = argv[index] as string;
+        const next = argv[index + 1];
+        if (
+            token.startsWith('--') &&
+            token !== '--' &&
+            !token.includes('=') &&
+            next !== undefined &&
+            /^-\d/.test(next)
+        ) {
+            joined.push(`${token}=${next}`);
+            index += 1;
+        } else {
+            joined.push(token);
+        }
+    }
+    return joined;
+}
+
+cli
+    .command('capabilities', 'cli.cmd.capabilities')
+    .actionCtx(async (_options, _args, ctx) =>
+        attempt(ctx, async () =>
+            withSession(async (session) => {
+                ctx.stdout(JSON.stringify(await session.capabilities(), null, 2));
+                return 0;
+            }),
+        ),
+    );
+
+cli
+    .command('create', 'cli.cmd.create')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--dimension <n>', 'cli.opt.dimension')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('create <file.ocae> [--units mm|m] [--dimension 2|3]');
+            const units = b.units();
+            const dimension = b.dimension();
+            return withSession(async (session) => {
+                const document = await session.create(file, { units, dimension });
+                ctx.stdout(
+                    b.message('created', {
+                        path: file,
+                        units: document.units ?? 'mm',
+                        dimension: String(document.dimension),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+
+const nodeCommand = cli
+    .command('node', 'cli.cmd.node')
+    .actionCtx(groupAction('node', 'add, update, mass, temperature, heat, remove, merge or displacement'));
+nodeCommand
+    .command('add', 'cli.cmd.node-add')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--x <x>', 'cli.opt.x')
+    .option('--y <y>', 'cli.opt.y')
+    .option('--z <z>', 'cli.opt.z')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node add <file> --id <id> --x <x> --y <y> [--z <z>]');
+            const id = b.required('--id');
+            const x = b.requiredNumber('--x');
+            const y = b.requiredNumber('--y');
+            const z = b.number('--z') ?? 0;
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.addNode({ id, x, y, z });
+                ctx.stdout(b.message('nodeAdded', { id, z: String(z), revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('update', 'cli.cmd.node-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--x <x>', 'cli.opt.x')
+    .option('--y <y>', 'cli.opt.y')
+    .option('--z <z>', 'cli.opt.z')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node update <file> --id <id> [--x <x>] [--y <y>] [--z <z>]');
+            const id = b.required('--id');
+            const x = b.number('--x');
+            const y = b.number('--y');
+            const z = b.number('--z');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.updateNode({ id, x, y, z });
+                ctx.stdout(b.message('nodeUpdated', { id, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('mass', 'cli.cmd.node-mass')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--mass <mass>', 'cli.opt.mass')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node mass <file> --id <id> --mass <mass>');
+            const id = b.required('--id');
+            const mass = b.requiredNumber('--mass');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setNodeMass({ id, mass });
+                ctx.stdout(b.message('nodeMassSet', { id, mass: String(mass), revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('temperature', 'cli.cmd.node-temperature')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--temperature <t>', 'cli.opt.temperature')
+    .option('--clear', 'cli.opt.clear')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node temperature <file> --id <id> [--temperature <t>] [--clear]');
+            const id = b.required('--id');
+            const temperature = b.flag('--clear') ? null : b.requiredNumber('--temperature');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setNodeTemperature({ id, temperature });
+                ctx.stdout(
+                    b.message('nodeTemperatureSet', {
+                        id,
+                        temperature: temperature === null ? 'cleared' : String(temperature),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('heat', 'cli.cmd.node-heat')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--heat <w>', 'cli.opt.heat')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node heat <file> --id <id> --heat <w>');
+            const id = b.required('--id');
+            const heat = b.requiredNumber('--heat');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setNodeHeat({ id, heat });
+                ctx.stdout(b.message('nodeHeatSet', { id, heat: String(heat), revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('remove', 'cli.cmd.node-remove')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node remove <file> --id <id>');
+            const id = b.required('--id');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.removeNode(id);
+                ctx.stdout(b.message('nodeRemoved', { id, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('merge', 'cli.cmd.node-merge')
+    .option('--from <id>', 'cli.opt.from')
+    .option('--into <id>', 'cli.opt.into')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node merge <file> --from <id> --into <id>');
+            const from = b.required('--from');
+            const into = b.required('--into');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.mergeNodes({ from, into });
+                ctx.stdout(b.message('nodeMerged', { from, into, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+nodeCommand
+    .command('displacement', 'cli.cmd.node-displacement')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('node displacement <file> --id <id>');
+            const id = b.required('--id');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                ctx.stdout(JSON.stringify(document.nodeDisplacement(id), null, 2));
+                return 0;
+            });
+        }),
+    );
+
+const elementCommand = cli
+    .command('element', 'cli.cmd.element')
+    .actionCtx(groupAction('element', 'add, update, split, remove, forces, release, tension-only, gradient or span'));
+elementCommand
+    .command('add', 'cli.cmd.element-add')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--from <node>', 'cli.opt.from')
+    .option('--to <node>', 'cli.opt.to')
+    .option('--E <E>', 'cli.opt.E')
+    .option('--A <A>', 'cli.opt.A')
+    .option('--kind <kind>', 'cli.opt.kind')
+    .option('--I <I>', 'cli.opt.I')
+    .option('--w <w>', 'cli.opt.w')
+    .option('--w2 <w2>', 'cli.opt.w2')
+    .option('--dt <dT>', 'cli.opt.dt')
+    .option('--dt-grad <dT>', 'cli.opt.dt-grad')
+    .option('--w-from <s>', 'cli.opt.w-from')
+    .option('--w-to <s>', 'cli.opt.w-to')
+    .option('--convection <h>', 'cli.opt.convection')
+    .option('--perimeter <P>', 'cli.opt.perimeter')
+    .option('--tension-only', 'cli.opt.tension-only')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]',
+            );
+            const id = b.required('--id');
+            const from = b.required('--from');
+            const to = b.required('--to');
+            const youngsModulus = b.number('--E');
+            const area = b.number('--A');
+            const kind = elementKindOption(ctx, b);
+            const inertia = b.number('--I');
+            const distributedLoad = b.number('--w');
+            const distributedLoadEnd = b.number('--w2');
+            const temperature = b.number('--dt');
+            const temperatureGradient = b.number('--dt-grad');
+            const distributedLoadFrom = b.number('--w-from');
+            const distributedLoadTo = b.number('--w-to');
+            const convection = b.number('--convection');
+            const perimeter = b.number('--perimeter');
+            if ((distributedLoadFrom === undefined) !== (distributedLoadTo === undefined)) {
+                throw failure(ctx, 'cli/missing-option', 'missingOption', { option: '--w-from and --w-to' });
+            }
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.addElement({
+                    id,
+                    from,
+                    to,
+                    youngsModulus,
+                    area,
+                    kind,
+                    inertia,
+                    distributedLoad,
+                    distributedLoadEnd,
+                    distributedLoadFrom,
+                    distributedLoadTo,
+                    temperature,
+                    temperatureGradient,
+                    convection,
+                    perimeter,
+                    tensionOnly: b.flag('--tension-only') ? true : undefined,
+                });
+                ctx.stdout(b.message('elementAdded', { id, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('update', 'cli.cmd.element-update')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--from <node>', 'cli.opt.from')
+    .option('--to <node>', 'cli.opt.to')
+    .option('--w <w>', 'cli.opt.w')
+    .option('--w2 <w2>', 'cli.opt.w2')
+    .option('--w-from <s>', 'cli.opt.w-from')
+    .option('--w-to <s>', 'cli.opt.w-to')
+    .option('--dt <dT>', 'cli.opt.dt')
+    .option('--dt-grad <dT>', 'cli.opt.dt-grad')
+    .option('--convection <h>', 'cli.opt.convection')
+    .option('--perimeter <P>', 'cli.opt.perimeter')
+    .option('--clear-load', 'cli.opt.clear-load')
+    .option('--clear-temperature', 'cli.opt.clear-temperature')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'element update <file> --id <id> [--from <node>] [--to <node>] [--w <w>] [--w2 <w2>] [--w-from <s>] [--w-to <s>] [--dt <dT>] [--dt-grad <dT>] [--convection <h>] [--perimeter <P>] [--clear-load] [--clear-temperature]',
+            );
+            const id = b.required('--id');
+            const from = b.raw('--from');
+            const to = b.raw('--to');
+            const distributedLoad = b.number('--w');
+            const distributedLoadEnd = b.number('--w2');
+            const distributedLoadFrom = b.number('--w-from');
+            const distributedLoadTo = b.number('--w-to');
+            const temperature = b.number('--dt');
+            const temperatureGradient = b.number('--dt-grad');
+            const convection = b.number('--convection');
+            const perimeter = b.number('--perimeter');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.updateElement({
+                    id,
+                    from,
+                    to,
+                    distributedLoad,
+                    distributedLoadEnd,
+                    distributedLoadFrom,
+                    distributedLoadTo,
+                    temperature,
+                    temperatureGradient,
+                    convection,
+                    perimeter,
+                    clearLoad: b.flag('--clear-load') ? true : undefined,
+                    clearTemperature: b.flag('--clear-temperature') ? true : undefined,
+                });
+                ctx.stdout(b.message('elementUpdated', { id, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('split', 'cli.cmd.element-split')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--at <fraction>', 'cli.opt.at')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element split <file> --id <id> --at <fraction>');
+            const id = b.required('--id');
+            const at = b.number('--at');
+            if (at === undefined) {
+                throw failure(ctx, 'cli/missing-option', 'missingOption', { option: '--at' });
+            }
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const report = document.splitElement({ id, at });
+                ctx.stdout(
+                    b.message('elementSplit', {
+                        id,
+                        at: String(at),
+                        node: report.node,
+                        first: report.first,
+                        second: report.second,
+                        revision: String(report.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('remove', 'cli.cmd.element-remove')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element remove <file> --id <id>');
+            const id = b.required('--id');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.removeElement(id);
+                ctx.stdout(b.message('elementRemoved', { id, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('forces', 'cli.cmd.element-forces')
+    .option('--id <id>', 'cli.opt.id')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element forces <file> --id <id>');
+            const id = b.required('--id');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                ctx.stdout(JSON.stringify(document.elementResult(id), null, 2));
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('release', 'cli.cmd.element-release')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--start', 'cli.opt.start')
+    .option('--end', 'cli.opt.end')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element release <file> --id <id> [--start] [--end]');
+            const id = b.required('--id');
+            const start = b.flag('--start');
+            const end = b.flag('--end');
+            if (!start && !end) {
+                throw failure(ctx, 'cli/missing-option', 'missingOption', { option: '--start or --end' });
+            }
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setElementRelease({ id, start, end });
+                ctx.stdout(
+                    b.message('elementReleased', {
+                        id,
+                        start: String(start),
+                        end: String(end),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('tension-only', 'cli.cmd.element-tension-only')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--clear', 'cli.opt.clear')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element tension-only <file> --id <id> [--clear]');
+            const id = b.required('--id');
+            const tensionOnly = !b.flag('--clear');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setElementTensionOnly({ id, tensionOnly });
+                ctx.stdout(
+                    b.message('elementTensionOnly', {
+                        id,
+                        tensionOnly: String(tensionOnly),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('gradient', 'cli.cmd.element-gradient')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--value <dT>', 'cli.opt.value')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element gradient <file> --id <id> [--value <dT>]');
+            const id = b.required('--id');
+            const gradient = b.number('--value');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setElementTemperatureGradient({ id, gradient: gradient ?? null });
+                ctx.stdout(
+                    gradient === undefined
+                        ? b.message('elementGradientCleared', { id, revision: String(summary.revision) })
+                        : b.message('elementGradientSet', {
+                              id,
+                              value: String(gradient),
+                              revision: String(summary.revision),
+                          }),
+                );
+                return 0;
+            });
+        }),
+    );
+elementCommand
+    .command('span', 'cli.cmd.element-span')
+    .option('--id <id>', 'cli.opt.id')
+    .option('--start <s>', 'cli.opt.start')
+    .option('--end <s>', 'cli.opt.end')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('element span <file> --id <id> [--start <s>] [--end <s>]');
+            const id = b.required('--id');
+            const start = b.number('--start');
+            const end = b.number('--end');
+            if ((start === undefined) !== (end === undefined)) {
+                throw failure(ctx, 'cli/missing-option', 'spanPair');
+            }
+            const span = start === undefined || end === undefined ? null : ([start, end] as const);
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setElementLoadSpan({ id, span });
+                ctx.stdout(
+                    span === null
+                        ? b.message('elementSpanCleared', { id, revision: String(summary.revision) })
+                        : b.message('elementSpanSet', {
+                              id,
+                              start: String(start),
+                              end: String(end),
+                              revision: String(summary.revision),
+                          }),
+                );
+                return 0;
+            });
+        }),
+    );
+
+function elementKindOption(ctx: CommandContext, b: Bound): ElementKind | undefined {
+    const value = b.raw('--kind');
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === 'truss' || value === 'beam') {
+        return value;
+    }
+    throw failure(ctx, 'cli/invalid-option', 'unknownElement', { value });
+}
+
+const materialCommand = cli.command('material', 'cli.cmd.material').actionCtx(groupAction('material', 'set or preset'));
+materialCommand
+    .command('set', 'cli.cmd.material-set')
+    .option('--E <E>', 'cli.opt.E')
+    .option('--A <A>', 'cli.opt.A')
+    .option('--density <rho>', 'cli.opt.density')
+    .option('--name <name>', 'cli.opt.material-name')
+    .option('--allowable <s>', 'cli.opt.allowable')
+    .option('--alpha <a>', 'cli.opt.alpha')
+    .option('--conductivity <k>', 'cli.opt.conductivity')
+    .option('--section <shape>', 'cli.opt.section')
+    .option('--width <w>', 'cli.opt.width')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--diameter <d>', 'cli.opt.diameter')
+    .option('--depth <d>', 'cli.opt.depth')
+    .option('--flange-width <b>', 'cli.opt.flange-width')
+    .option('--flange-thickness <t>', 'cli.opt.flange-thickness')
+    .option('--web-thickness <t>', 'cli.opt.web-thickness')
+    .option('--wall <t>', 'cli.opt.wall')
+    .option('--outer-diameter <D>', 'cli.opt.outer-diameter')
+    .option('--inner-diameter <d>', 'cli.opt.inner-diameter')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]');
+            const youngsModulus = b.requiredNumber('--E');
+            const area = b.requiredNumber('--A');
+            const density = b.number('--density');
+            const name = b.raw('--name');
+            const allowableStress = b.number('--allowable');
+            const alpha = b.number('--alpha');
+            const conductivity = b.number('--conductivity');
+            const section = b.section();
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setMaterial({
+                    youngsModulus,
+                    area,
+                    density,
+                    name,
+                    allowableStress,
+                    alpha,
+                    conductivity,
+                    section,
+                });
+                ctx.stdout(
+                    b.message('materialSet', {
+                        youngsModulus: String(summary.material.youngsModulus),
+                        area: String(summary.material.area),
+                        density: String(summary.material.density),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+materialCommand
+    .command('preset', 'cli.cmd.material-preset')
+    .option('--preset <name>', 'cli.opt.preset')
+    .option('--area <A>', 'cli.opt.area')
+    .option('--allowable <s>', 'cli.opt.allowable')
+    .option('--section <shape>', 'cli.opt.section')
+    .option('--width <w>', 'cli.opt.width')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--diameter <d>', 'cli.opt.diameter')
+    .option('--depth <d>', 'cli.opt.depth')
+    .option('--flange-width <b>', 'cli.opt.flange-width')
+    .option('--flange-thickness <t>', 'cli.opt.flange-thickness')
+    .option('--web-thickness <t>', 'cli.opt.web-thickness')
+    .option('--wall <t>', 'cli.opt.wall')
+    .option('--outer-diameter <D>', 'cli.opt.outer-diameter')
+    .option('--inner-diameter <d>', 'cli.opt.inner-diameter')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'material preset <file> --preset <name> [--section rectangle|circle|i|box|tube|channel] [--area A] [--allowable S]',
+            );
+            const preset = b.required('--preset');
+            const area = b.number('--area');
+            const allowableStress = b.number('--allowable');
+            const section = b.section();
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.applyMaterialPreset({ preset, area, allowableStress, section });
+                ctx.stdout(
+                    b.message('materialPreset', {
+                        preset,
+                        youngsModulus: String(summary.material.youngsModulus),
+                        area: String(summary.material.area),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('library', 'cli.cmd.library')
+    .option('--units <u>', 'cli.opt.units')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units();
+            return withSession(async (session) => {
+                const library = await session.library(units);
+                ctx.stdout(JSON.stringify(library, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+const sectionCommand = cli
+    .command('section', 'cli.cmd.section')
+    .actionCtx(
+        groupAction(
+            'section',
+            'properties, polygon, i, tube, channel, angle, t, ellipse, triangle, z or principal',
+        ),
+    );
+sectionCommand
+    .command('properties', 'cli.cmd.section-properties')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--section <shape>', 'cli.opt.section')
+    .option('--width <w>', 'cli.opt.width')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--diameter <d>', 'cli.opt.diameter')
+    .option('--depth <d>', 'cli.opt.depth')
+    .option('--flange-width <b>', 'cli.opt.flange-width')
+    .option('--flange-thickness <t>', 'cli.opt.flange-thickness')
+    .option('--web-thickness <t>', 'cli.opt.web-thickness')
+    .option('--wall <t>', 'cli.opt.wall')
+    .option('--outer-diameter <D>', 'cli.opt.outer-diameter')
+    .option('--inner-diameter <d>', 'cli.opt.inner-diameter')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const section = b.section();
+            if (section === undefined) {
+                throw failure(ctx, 'cli/missing-option', 'missingSection', {});
+            }
+            return withSession(async (session) => {
+                const report = await session.sectionProperties(section, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('polygon', 'cli.cmd.section-polygon')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--points <x,y;...>', 'cli.opt.polygon-points')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const points = parsePolygonPoints(ctx, b.required('--points'));
+            return withSession(async (session) => {
+                const report = await session.sectionPolygon(points, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('i', 'cli.cmd.section-i')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--width <b>', 'cli.opt.width')
+    .option('--web-thickness <tw>', 'cli.opt.web-thickness')
+    .option('--flange-thickness <tf>', 'cli.opt.flange-thickness')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                height: b.requiredNumber('--height'),
+                width: b.requiredNumber('--width'),
+                webThickness: b.requiredNumber('--web-thickness'),
+                flangeThickness: b.requiredNumber('--flange-thickness'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionI(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('tube', 'cli.cmd.section-tube')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--width <b>', 'cli.opt.width')
+    .option('--thickness <t>', 'cli.opt.thickness')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                height: b.requiredNumber('--height'),
+                width: b.requiredNumber('--width'),
+                thickness: b.requiredNumber('--thickness'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionTube(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('channel', 'cli.cmd.section-channel')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--width <b>', 'cli.opt.width')
+    .option('--web-thickness <tw>', 'cli.opt.web-thickness')
+    .option('--flange-thickness <tf>', 'cli.opt.flange-thickness')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                height: b.requiredNumber('--height'),
+                width: b.requiredNumber('--width'),
+                webThickness: b.requiredNumber('--web-thickness'),
+                flangeThickness: b.requiredNumber('--flange-thickness'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionChannel(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('angle', 'cli.cmd.section-angle')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--width <w>', 'cli.opt.width')
+    .option('--thickness <t>', 'cli.opt.thickness')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                height: b.requiredNumber('--height'),
+                width: b.requiredNumber('--width'),
+                thickness: b.requiredNumber('--thickness'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionAngle(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('t', 'cli.cmd.section-t')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--width <b>', 'cli.opt.width')
+    .option('--web-thickness <tw>', 'cli.opt.web-thickness')
+    .option('--flange-thickness <tf>', 'cli.opt.flange-thickness')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                height: b.requiredNumber('--height'),
+                width: b.requiredNumber('--width'),
+                webThickness: b.requiredNumber('--web-thickness'),
+                flangeThickness: b.requiredNumber('--flange-thickness'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionT(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('ellipse', 'cli.cmd.section-ellipse')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--width <w>', 'cli.opt.width')
+    .option('--height <h>', 'cli.opt.height')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                width: b.requiredNumber('--width'),
+                height: b.requiredNumber('--height'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionEllipse(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('triangle', 'cli.cmd.section-triangle')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--side <a>', 'cli.opt.side')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                side: b.requiredNumber('--side'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionTriangle(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('z', 'cli.cmd.section-z')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--height <h>', 'cli.opt.height')
+    .option('--width <w>', 'cli.opt.width')
+    .option('--thickness <t>', 'cli.opt.thickness')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const geometry = {
+                height: b.requiredNumber('--height'),
+                width: b.requiredNumber('--width'),
+                thickness: b.requiredNumber('--thickness'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionZ(geometry, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+sectionCommand
+    .command('principal', 'cli.cmd.section-principal')
+    .option('--units <u>', 'cli.opt.units')
+    .option('--ix <Ix>', 'cli.opt.ix')
+    .option('--iy <Iy>', 'cli.opt.iy')
+    .option('--ixy <Ixy>', 'cli.opt.ixy')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const units = b.units() ?? 'mm';
+            const input = {
+                ix: b.requiredNumber('--ix'),
+                iy: b.requiredNumber('--iy'),
+                ixy: b.requiredNumber('--ixy'),
+            };
+            return withSession(async (session) => {
+                const report = await session.sectionPrincipal(input, units);
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+const supportCommand = cli.command('support', 'cli.cmd.support').actionCtx(groupAction('support', 'add or remove'));
+supportCommand
+    .command('add', 'cli.cmd.support-add')
+    .option('--node <node>', 'cli.opt.node')
+    .option('--ux <v>', 'cli.opt.ux')
+    .option('--uy <v>', 'cli.opt.uy')
+    .option('--uz <v>', 'cli.opt.uz')
+    .option('--rotation <v>', 'cli.opt.rotation')
+    .option('--kx <k>', 'cli.opt.kx')
+    .option('--ky <k>', 'cli.opt.ky')
+    .option('--kz <k>', 'cli.opt.kz')
+    .option('--kr <k>', 'cli.opt.kr')
+    .option('--direction <nx,ny>', 'cli.opt.support-direction')
+    .option('--dx', 'cli.opt.dx')
+    .option('--dy', 'cli.opt.dy')
+    .option('--dz', 'cli.opt.dz')
+    .option('--rz', 'cli.opt.rz')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
+            );
+            const node = b.required('--node');
+            const dx = b.flag('--dx');
+            const dy = b.flag('--dy');
+            const dz = b.flag('--dz');
+            const rz = b.flag('--rz');
+            const ux = b.number('--ux');
+            const uy = b.number('--uy');
+            const uz = b.number('--uz');
+            const rotation = b.number('--rotation');
+            const kx = b.number('--kx');
+            const ky = b.number('--ky');
+            const kz = b.number('--kz');
+            const kr = b.number('--kr');
+            const direction = b.raw('--direction') === undefined ? undefined : b.direction();
+            const spring = kx !== undefined || ky !== undefined || kz !== undefined || kr !== undefined;
+            if (
+                direction !== undefined &&
+                (dx ||
+                    dy ||
+                    dz ||
+                    rz ||
+                    ux !== undefined ||
+                    uy !== undefined ||
+                    uz !== undefined ||
+                    rotation !== undefined ||
+                    spring)
+            ) {
+                throw failure(ctx, 'cli/direction-conflict', 'directionConflict', {});
+            }
+            if (
+                direction === undefined &&
+                !dx &&
+                !dy &&
+                !dz &&
+                !rz &&
+                ux === undefined &&
+                uy === undefined &&
+                uz === undefined &&
+                rotation === undefined &&
+                !spring
+            ) {
+                throw failure(ctx, 'cli/missing-option', 'noFreedom');
+            }
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.addSupport({
+                    node,
+                    dx,
+                    dy,
+                    dz,
+                    rz,
+                    ux,
+                    uy,
+                    uz,
+                    rotation,
+                    kx,
+                    ky,
+                    kz,
+                    kr,
+                    direction,
+                });
+                ctx.stdout(
+                    b.message('supportAdded', {
+                        node,
+                        dx: String(dx),
+                        dy: String(dy),
+                        dz: String(dz),
+                        rz: String(rz),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+supportCommand
+    .command('remove', 'cli.cmd.support-remove')
+    .option('--node <node>', 'cli.opt.node')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('support remove <file> --node <node>');
+            const node = b.required('--node');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.removeSupport(node);
+                ctx.stdout(b.message('supportRemoved', { node, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+
+const loadCommand = cli.command('load', 'cli.cmd.load').actionCtx(groupAction('load', 'add or remove'));
+loadCommand
+    .command('add', 'cli.cmd.load-add')
+    .option('--node <node>', 'cli.opt.node')
+    .option('--fx <fx>', 'cli.opt.fx')
+    .option('--fy <fy>', 'cli.opt.fy')
+    .option('--fz <fz>', 'cli.opt.fz')
+    .option('--mz <mz>', 'cli.opt.mz')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]');
+            const node = b.required('--node');
+            const fx = b.number('--fx');
+            const fy = b.number('--fy');
+            const fz = b.number('--fz');
+            const mz = b.number('--mz');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.addLoad({ node, fx, fy, fz, mz });
+                ctx.stdout(b.message('loadAdded', { node, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+loadCommand
+    .command('remove', 'cli.cmd.load-remove')
+    .option('--node <node>', 'cli.opt.node')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('load remove <file> --node <node>');
+            const node = b.required('--node');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.removeLoad(node);
+                ctx.stdout(b.message('loadRemoved', { node, revision: String(summary.revision) }));
+                return 0;
+            });
+        }),
+    );
+
+const modelCommand = cli.command('model', 'cli.cmd.model').actionCtx(groupAction('model', 'gravity or ambient'));
+modelCommand
+    .command('gravity', 'cli.cmd.model-gravity')
+    .option('--gx <gx>', 'cli.opt.gx')
+    .option('--gy <gy>', 'cli.opt.gy')
+    .option('--gz <gz>', 'cli.opt.gz')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('model gravity <file> [--gx <gx>] [--gy <gy>] [--gz <gz>]');
+            const gx = b.number('--gx') ?? 0;
+            const gy = b.number('--gy') ?? 0;
+            const gz = b.number('--gz') ?? 0;
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setGravity({ gx, gy, gz });
+                ctx.stdout(
+                    b.message('gravitySet', {
+                        gx: String(gx),
+                        gy: String(gy),
+                        gz: String(gz),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+modelCommand
+    .command('ambient', 'cli.cmd.model-ambient')
+    .option('--temperature <Ta>', 'cli.opt.temperature')
+    .option('--clear', 'cli.opt.clear')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('model ambient <file> [--temperature <Ta>] [--clear]');
+            const temperature = b.flag('--clear') ? null : b.requiredNumber('--temperature');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setAmbientTemperature({ temperature });
+                ctx.stdout(
+                    b.message('ambientTemperatureSet', {
+                        temperature: temperature === null ? 'cleared' : String(temperature),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('self-weight', 'cli.cmd.self-weight')
+    .option('--g <g>', 'cli.opt.g')
+    .option('--axis <axis>', 'cli.opt.axis')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('self-weight <file> --g <g> [--axis x|y|z]');
+            const value = b.requiredNumber('--g');
+            const axis = b.raw('--axis') ?? 'y';
+            const vector =
+                axis === 'x'
+                    ? { gx: value, gy: 0, gz: 0 }
+                    : axis === 'y'
+                      ? { gx: 0, gy: value, gz: 0 }
+                      : axis === 'z'
+                        ? { gx: 0, gy: 0, gz: value }
+                        : undefined;
+            if (vector === undefined) {
+                throw failure(ctx, 'cli/invalid-option', 'unknownAxis', { value: axis });
+            }
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.setGravity(vector);
+                ctx.stdout(
+                    b.message('gravitySet', {
+                        gx: String(vector.gx),
+                        gy: String(vector.gy),
+                        gz: String(vector.gz),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+
+const combinationCommand = cli.command('combination', 'cli.cmd.combination').actionCtx(groupAction('combination', 'add'));
+combinationCommand
+    .command('add', 'cli.cmd.combination-add')
+    .option('--name <name>', 'cli.opt.name')
+    .option('--loads <f>', 'cli.opt.loads')
+    .option('--gravity <f>', 'cli.opt.gravity')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('combination add <file> --name <name> [--loads <f>] [--gravity <f>]');
+            const name = b.required('--name');
+            const loads = b.number('--loads') ?? 1;
+            const gravity = b.number('--gravity') ?? 0;
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const summary = document.addCombination({ name, loads, gravity });
+                ctx.stdout(
+                    b.message('combinationSet', {
+                        name,
+                        loads: String(loads),
+                        gravity: String(gravity),
+                        revision: String(summary.revision),
+                    }),
+                );
+                return 0;
+            });
+        }),
+    );
+combinationCommand
+    .command('remove', 'cli.cmd.combination-remove')
+    .option('--name <name>', 'cli.opt.name')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('combination remove <file> --name <name>');
+            const name = b.required('--name');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                document.removeCombination(name);
+                ctx.stdout(b.message('combinationRemoved', { name }));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('combinations', 'cli.cmd.combinations')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('combinations <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.solveCombinations({ out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('buckling-combinations', 'cli.cmd.buckling-combinations')
+    .option('--modes <n>', 'cli.opt.modes')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('buckling-combinations <file> [--modes N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.solveBucklingCombinations({
+                    modes: modesOption(ctx, b),
+                    out: b.raw('--out'),
+                });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('validate', 'cli.cmd.validate')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('validate <file>');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const report = document.validate();
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return report.ok ? 0 : 1;
+            });
+        }),
+    );
+
+cli
+    .command('solve', 'cli.cmd.solve')
+    .option('--out <file>', 'cli.opt.out')
+    .option('--analysis <kind>', 'cli.opt.analysis')
+    .option('--element <kind>', 'cli.opt.element-kind')
+    .option('--dimension <n>', 'cli.opt.dimension')
+    .option('--modes <n>', 'cli.opt.modes')
+    .option('--iterations <n>', 'cli.opt.iterations')
+    .option('--tolerance <t>', 'cli.opt.tolerance')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'solve <file> [--out report.json] [--analysis static|modal|buckling|tension-only] [--modes N] [--iterations N] [--tolerance t] [--element truss|beam] [--dimension 2|3]',
+            );
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const analysis = analysisOption(ctx, b, document.dimension);
+                const out = b.raw('--out');
+                if (analysis === 'modal') {
+                    const result = document.solve({ analysis: 'modal', modes: modesOption(ctx, b), out });
+                    ctx.stdout(JSON.stringify(result, null, 2));
+                } else if (analysis === 'buckling') {
+                    const result = document.solve({ analysis: 'buckling', modes: modesOption(ctx, b), out });
+                    ctx.stdout(JSON.stringify(result, null, 2));
+                } else if (analysis === 'tensionOnly') {
+                    const result = document.tensionOnly({
+                        iterations: iterationsOption(ctx, b),
+                        tolerance: b.number('--tolerance'),
+                        out,
+                    });
+                    ctx.stdout(JSON.stringify(result, null, 2));
+                } else {
+                    if (b.has('--modes')) {
+                        throw failure(ctx, 'cli/invalid-option', 'modesRequireModal');
+                    }
+                    if (b.has('--iterations') || b.has('--tolerance')) {
+                        throw failure(ctx, 'cli/invalid-option', 'tensionOnlyOptionsRequireAnalysis');
+                    }
+                    const result = document.solve({ out });
+                    ctx.stdout(JSON.stringify(result, null, 2));
+                }
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('modal', 'cli.cmd.modal')
+    .option('--modes <n>', 'cli.opt.modes')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('modal <file> [--modes N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.solve({
+                    analysis: 'modal',
+                    modes: modesOption(ctx, b),
+                    out: b.raw('--out'),
+                });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('buckling', 'cli.cmd.buckling')
+    .option('--modes <n>', 'cli.opt.modes')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('buckling <file> [--modes N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.solve({
+                    analysis: 'buckling',
+                    modes: modesOption(ctx, b),
+                    out: b.raw('--out'),
+                });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('tension-only', 'cli.cmd.tension-only')
+    .option('--iterations <n>', 'cli.opt.iterations')
+    .option('--tolerance <t>', 'cli.opt.tolerance')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('tension-only <file> [--iterations N] [--tolerance t] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.tensionOnly({
+                    iterations: iterationsOption(ctx, b),
+                    tolerance: b.number('--tolerance'),
+                    out: b.raw('--out'),
+                });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('heat|thermal', 'cli.cmd.heat')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('heat <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.heat({ out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('forces', 'cli.cmd.forces')
+    .option('--stations <n>', 'cli.opt.stations')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('forces <file> [--stations N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.internalForces({ stations: stationsOption(ctx, b), out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('influence', 'cli.cmd.influence')
+    .option('--track <element>', 'cli.opt.track')
+    .option('--quantity <kind>', 'cli.opt.quantity')
+    .option('--node <node>', 'cli.opt.node')
+    .option('--component <c>', 'cli.opt.component')
+    .option('--element <id>', 'cli.opt.element')
+    .option('--position <f>', 'cli.opt.position')
+    .option('--direction <d>', 'cli.opt.direction')
+    .option('--points <n>', 'cli.opt.points')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'influence <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] [--points N] [--out report.json]',
+            );
+            const track = b.required('--track');
+            const quantityKind = b.required('--quantity');
+            if (quantityKind !== 'reaction' && quantityKind !== 'section') {
+                throw failure(ctx, 'cli/invalid-option', 'unknownInfluenceQuantity', { value: quantityKind });
+            }
+            const direction = influenceDirectionOption(ctx, b);
+            const points = stationsOption(ctx, b);
+            const component = influenceComponentOption(ctx, quantityKind, b);
+            const quantity: InfluenceQuantity =
+                quantityKind === 'reaction'
+                    ? { kind: 'reaction', node: b.required('--node'), component: component as ReactionComponent }
+                    : {
+                          kind: 'section',
+                          element: b.raw('--element'),
+                          position: b.requiredNumber('--position'),
+                          component: component as SectionComponent,
+                      };
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.influenceLine({ track, quantity, direction, points, out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('influence-train', 'cli.cmd.influence-train')
+    .option('--track <element>', 'cli.opt.track')
+    .option('--quantity <kind>', 'cli.opt.quantity')
+    .option('--node <node>', 'cli.opt.node')
+    .option('--component <c>', 'cli.opt.component')
+    .option('--element <id>', 'cli.opt.element')
+    .option('--position <f>', 'cli.opt.position')
+    .option('--direction <d>', 'cli.opt.direction')
+    .option('--axles <p,...>', 'cli.opt.axles')
+    .option('--spacings <d,...>', 'cli.opt.spacings')
+    .option('--points <n>', 'cli.opt.points')
+    .option('--step <f>', 'cli.opt.step')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'influence-train <file> --track <element> --quantity reaction|section [--node <node>] [--component <c>] [--element <id>] [--position <f>] [--direction x|y] --axles <P,...> --spacings <d,...> [--points N] [--step f] [--out report.json]',
+            );
+            const track = b.required('--track');
+            const quantityKind = b.required('--quantity');
+            if (quantityKind !== 'reaction' && quantityKind !== 'section') {
+                throw failure(ctx, 'cli/invalid-option', 'unknownInfluenceQuantity', { value: quantityKind });
+            }
+            const direction = influenceDirectionOption(ctx, b);
+            const points = pointsOption(ctx, b);
+            const step = b.number('--step');
+            const component = influenceComponentOption(ctx, quantityKind, b);
+            const quantity: InfluenceQuantity =
+                quantityKind === 'reaction'
+                    ? { kind: 'reaction', node: b.required('--node'), component: component as ReactionComponent }
+                    : {
+                          kind: 'section',
+                          element: b.raw('--element'),
+                          position: b.requiredNumber('--position'),
+                          component: component as SectionComponent,
+                      };
+            const axles = numberListOption(ctx, b, '--axles');
+            const spacings = numberListOption(ctx, b, '--spacings');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.influenceLineTrain({
+                    track,
+                    quantity,
+                    direction,
+                    axles,
+                    spacings,
+                    points,
+                    step,
+                    out: b.raw('--out'),
+                });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('reactions', 'cli.cmd.reactions')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('reactions <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.reactions({ out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('reaction', 'cli.cmd.reaction')
+    .option('--node <node>', 'cli.opt.node')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('reaction <file> --node <node>');
+            const node = b.required('--node');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                ctx.stdout(JSON.stringify(document.nodeReaction(node), null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('stresses', 'cli.cmd.stresses')
+    .option('--stations <n>', 'cli.opt.stations')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('stresses <file> [--stations N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.stresses({ stations: stationsOption(ctx, b), out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('deflections', 'cli.cmd.deflections')
+    .option('--stations <n>', 'cli.opt.stations')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('deflections <file> [--stations N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.deflections({ stations: stationsOption(ctx, b), out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('nodal-stresses', 'cli.cmd.nodal-stresses')
+    .option('--stations <n>', 'cli.opt.stations')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('nodal-stresses <file> [--stations N] [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.nodalStresses({ stations: stationsOption(ctx, b), out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('load-cases', 'cli.cmd.load-cases')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('load-cases <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.loadCases({ out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('matrices', 'cli.cmd.matrices')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('matrices <file> [--out report.json]');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.matrices({ out: b.raw('--out') });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('spectrum', 'cli.cmd.spectrum')
+    .option('--modes <n>', 'cli.opt.modes')
+    .option('--axis <axis>', 'cli.opt.axis')
+    .option('--combination <kind>', 'cli.opt.combination')
+    .option('--damping <z>', 'cli.opt.damping')
+    .option('--spectrum <t:sa,...>', 'cli.opt.spectrum')
+    .option('--out <file>', 'cli.opt.out')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file(
+                'spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]',
+            );
+            const spectrum = parseSpectrum(ctx, b.required('--spectrum'));
+            const axis = spectrumAxisOption(ctx, b);
+            const combination = spectrumCombinationOption(ctx, b);
+            const damping = b.number('--damping');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.responseSpectrum({
+                    modes: modesOption(ctx, b),
+                    axis,
+                    combination,
+                    damping,
+                    spectrum,
+                    out: b.raw('--out'),
+                });
+                ctx.stdout(JSON.stringify(result, null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('export', 'cli.cmd.export')
+    .option('--format <format>', 'cli.opt.format')
+    .option('--out <path>', 'cli.opt.out')
+    .option('--scale <n>', 'cli.opt.scale')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N]');
+            const format = exportFormat(ctx, b.required('--format'));
+            const out = b.required('--out');
+            const scale = b.number('--scale');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                const result = document.export(format, out, scale === undefined ? {} : { scale });
+                ctx.stdout(b.message('exported', { format: result.format, path: result.path }));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('report', 'cli.cmd.report')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const file = b.file('report <file>');
+            return withSession(async (session) => {
+                const document = await openDocument(session, file);
+                ctx.stdout(JSON.stringify(document.report(), null, 2));
+                return 0;
+            });
+        }),
+    );
+
+cli
+    .command('import', 'cli.cmd.import')
+    .actionCtx(async (_options, _args, ctx) =>
+        attempt(ctx, () => {
+            throw new NotImplementedError('Abaqus .inp import');
+        }),
+    );
+
+cli
+    .command('nonlinear', 'cli.cmd.nonlinear')
+    .actionCtx(async (_options, _args, ctx) =>
+        attempt(ctx, () => {
+            throw new NotImplementedError('nonlinear analysis');
+        }),
+    );
+
+cli
+    .command('beam|beam2d', 'cli.cmd.beam')
+    .actionCtx(async (_options, _args, ctx) =>
+        attempt(ctx, () => {
+            throw failure(ctx, 'cli/unknown-command', 'unknownCommand', {
+                command: ctx.commandPath[1] ?? 'beam',
+            });
+        }),
+    );
+
+cli
+    .command('frame|frame3d', 'cli.cmd.frame')
+    .actionCtx(async (_options, _args, ctx) =>
+        attempt(ctx, () => {
+            throw new NotImplementedError('3D frame element');
+        }),
+    );
+
+cli
+    .command('contact', 'cli.cmd.contact')
+    .actionCtx(async (_options, _args, ctx) =>
+        attempt(ctx, () => {
+            throw new NotImplementedError('contact analysis');
+        }),
+    );
+
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+    process.exitCode = await cli.parse(joinNegativeValues(process.argv));
+}

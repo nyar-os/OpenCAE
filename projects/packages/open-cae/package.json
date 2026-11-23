@@ -44,6 +44,9 @@
         "@types/node": "^22.20.4",
         "typescript": "^5.9.2"
     },
+    "dependencies": {
+        "@wae/commander": "0.0.7"
+    },
     "optionalDependencies": {
         "@wae/open-cae-darwin-arm64": "workspace:*",
         "@wae/open-cae-darwin-x64": "workspace:*",

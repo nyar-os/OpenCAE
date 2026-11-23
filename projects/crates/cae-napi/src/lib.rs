@@ -405,6 +405,46 @@ fn element_tension_only(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Sets or clears the linear temperature gradient of a beam element.
+///
+/// The request accepts a required `id` and an optional `gradient` number;
+/// `null` or an omitted field removes the gradient and keeps the uniform
+/// temperature.
+#[function]
+fn element_gradient(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let gradient = number_field(&request, "gradient")?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_element_temperature_gradient(&id, gradient).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
+/// Sets or clears the loaded segment of a beam element's distributed load.
+///
+/// The request accepts a required `id` and the fractions `spanStart` and
+/// `spanEnd`; both must be supplied together, and omitting both (or sending
+/// `null`) restores a load over the whole member.
+#[function]
+fn element_span(ctx: CallContext) -> Result<JsValue> {
+    let path = text(&ctx, 0)?;
+    let request = object(&ctx, 1)?;
+    let id = text_field(&request, "id")?;
+    let start = number_field(&request, "spanStart")?;
+    let end = number_field(&request, "spanEnd")?;
+    let span = match (start, end) {
+        (Some(start), Some(end)) => Some((start, end)),
+        (None, None) => None,
+        _ => return Err(argument_error("specify both `spanStart` and `spanEnd`, or neither to restore a full-span load")),
+    };
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.open(Path::new(&path)).map_err(fail)?;
+    let summary = session.set_element_load_span(&id, span).map_err(fail)?;
+    respond(&ctx, &summary)
+}
+
 /// Removes an element from a document and saves it.
 #[function]
 fn element_remove(ctx: CallContext) -> Result<JsValue> {
@@ -1407,6 +1447,8 @@ register_module![
     element_remove,
     element_release,
     element_tension_only,
+    element_gradient,
+    element_span,
     material_set,
     material_preset,
     library,

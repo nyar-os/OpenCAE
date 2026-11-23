@@ -1573,6 +1573,23 @@ export interface ElementTensionOnlyRequest {
 }
 
 /**
+ * Request of `setElementTemperatureGradient()`; `null` removes the gradient
+ * and keeps the uniform temperature change.
+ */
+export interface ElementTemperatureGradientRequest {
+    readonly id: string;
+    /** Temperature difference between the local extreme fibres, or `null`. */
+    readonly gradient: number | null;
+}
+
+/** Request of `setElementLoadSpan()`; `null` restores a full-span load. */
+export interface ElementLoadSpanRequest {
+    readonly id: string;
+    /** Start and end fractions of the loaded segment, or `null`. */
+    readonly span: readonly [number, number] | null;
+}
+
+/**
  * Request of `updateElement()`. Only the named fields change; every other
  * endpoint, material, load, temperature, release and convection value is
  * preserved. The call causes exactly one revision.

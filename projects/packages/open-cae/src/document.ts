@@ -25,10 +25,12 @@ import type {
     Dimension,
     DocumentSummary,
     ElementAddRequest,
+    ElementLoadSpanRequest,
     ElementReleaseRequest,
     ElementResult,
     ElementSplitReport,
     ElementSplitRequest,
+    ElementTemperatureGradientRequest,
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
@@ -264,6 +266,25 @@ export class CaeDocument {
     setElementTensionOnly(request: ElementTensionOnlyRequest): DocumentSummary {
         this.assertOpen();
         return this.adopt(service.elementTensionOnly(this.path, request));
+    }
+
+    /**
+     * Sets or clears the linear temperature gradient of a beam element and
+     * saves the file. `gradient: null` removes it and keeps the uniform
+     * temperature.
+     */
+    setElementTemperatureGradient(request: ElementTemperatureGradientRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.elementGradient(this.path, request));
+    }
+
+    /**
+     * Sets or clears the loaded segment of a beam element's distributed load
+     * and saves the file. `span: null` restores a load over the whole member.
+     */
+    setElementLoadSpan(request: ElementLoadSpanRequest): DocumentSummary {
+        this.assertOpen();
+        return this.adopt(service.elementSpan(this.path, request));
     }
 
     /** Replaces the global material and saves the file. */

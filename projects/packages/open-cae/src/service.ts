@@ -25,10 +25,12 @@ import type {
     DeflectionSolution,
     DocumentSummary,
     ElementAddRequest,
+    ElementLoadSpanRequest,
     ElementReleaseRequest,
     ElementResult,
     ElementSplitReport,
     ElementSplitRequest,
+    ElementTemperatureGradientRequest,
     ElementTensionOnlyRequest,
     ElementUpdateRequest,
     ExportFormat,
@@ -233,6 +235,19 @@ export function elementRelease(path: string, request: ElementReleaseRequest): Do
 export function elementTensionOnly(path: string, request: ElementTensionOnlyRequest): DocumentSummary {
     return decode<DocumentSummary>(() =>
         binding('element.tensionOnly').element_tension_only(path, JSON.stringify(request)),
+    );
+}
+
+/** Sets or clears the linear temperature gradient of a beam element. */
+export function elementGradient(path: string, request: ElementTemperatureGradientRequest): DocumentSummary {
+    return decode<DocumentSummary>(() => binding('element.gradient').element_gradient(path, JSON.stringify(request)));
+}
+
+/** Sets or clears the loaded segment of a beam element's distributed load. */
+export function elementSpan(path: string, request: ElementLoadSpanRequest): DocumentSummary {
+    const [spanStart, spanEnd] = request.span ?? [];
+    return decode<DocumentSummary>(() =>
+        binding('element.span').element_span(path, JSON.stringify({ id: request.id, spanStart, spanEnd })),
     );
 }
 
