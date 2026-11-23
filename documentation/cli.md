@@ -124,6 +124,7 @@ Section shapes and their geometry flags:
 | `open-cae combination add <file>` | `--name <name> [--loads <f>] [--gravity <f>] [--thermal <f>] [--patterns <list>]` | Adds or replaces a combination; `--loads`, `--gravity` and `--thermal` default to `1`, `0` and `1`. `--thermal` scales every element temperature change and through-depth gradient (`0` removes the thermal actions). `--patterns` replaces the whole pattern list with `name=factor` entries such as `live=1.0,wind=1.5`; an empty or malformed list reports `cli/invalid-option`, and a pattern missing from the document reports `combination/unknown-pattern` at solve time. |
 | `open-cae combination remove <file>` | `--name <name>` | Removes a combination. |
 | `open-cae combinations <file>` | `[--out <file>]` | Solves every combination and prints solutions plus the envelope. |
+| `open-cae envelope <file>` | `[--out <file>]` | Solves the unfactored `base` case and every combination, then prints per-node displacement, per-element axial/shear/moment and per-support reaction minima and maxima with the governing combination. |
 | `open-cae buckling-combinations <file>` | `[--modes <N>] [--out <file>]` | Buckling factors per combination and the governing combination. |
 
 Named load patterns are stored in the document as a list of concentrated nodal
@@ -133,6 +134,16 @@ applied case. The CLI can mix existing patterns but does not create them; create
 pattern entries with `document.addPatternLoad()` in the SDK, then reference them
 here. Patterns only carry nodal forces and moments, not element loads,
 temperatures or gravity.
+
+`open-cae envelope` always includes the unfactored `base` case first and then
+every declared combination, so a document without combinations still reports
+the base case. Each node reports `ux`, `uy` (and `uz` in 3D), each element
+reports `axial`, `shear` and `moment`, and each supported node reports `fx`,
+`fy` (and `fz` in 3D); every entry carries `min` and `max` with
+`minCombination`/`maxCombination`. Shear and moment use the signed end force
+with the larger absolute value, so a truss reports zero. Ties keep the earlier
+case, values stay in the document units and a failing combination returns its
+solver code instead of a partial report.
 
 ### Analysis
 

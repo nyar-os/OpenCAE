@@ -33,6 +33,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | moving load train envelopes (`influenceLineTrain`, axle loads at fixed spacings over the influence line polyline; unloaded model required) | ✅ supported |
 | averaged nodal stress and extremes (`nodalStresses`) | ✅ supported |
 | load-case summary table (`loadCases`, `base` plus every combination) | ✅ supported |
+| load-combination envelope (`combinationEnvelope`, `base` plus every combination; per-component minimum/maximum with the governing combination) | ✅ supported |
 | model quantity and DOF summary (`modelSummary`, member length/volume/mass/centroid plus translational, rotational, constrained and free DOF counts) | ✅ supported |
 | support reaction summary and equilibrium check (`reactions`) | ✅ supported |
 | linear elastic spring supports (`elasticSupports`, translational and rotational stiffness) | ✅ supported |
@@ -64,7 +65,8 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
 `constructionStages`, `geometricNonlinear`, `tensionOnly`, `deflections`,
 `nodalStress`, `loadCases`, `influenceLine`, `influenceLineTrain`,
-`loadPatterns`, `loadCombinations` and `modelSummary` are available through the
+`loadPatterns`, `loadCombinations`, `combinationEnvelope` and `modelSummary`
+are available through the
 Rust API, the
 native addon and the TypeScript SDK. SVG contours are exposed as
 `export_svg_with_contour()` with `ContourQuantity` in Rust, the `contour`
@@ -322,7 +324,20 @@ to 11.
     displacement and its node, the extreme axial force and bending moment with
     their elements, the strain energy and the equilibrium flag, giving a
     compact table for reports without superseding the per-element diagrams.
-20. **Partial-span loads**: `distributed_load_from`/`distributed_load_to`
+20. **Load-combination envelope**: `solve_envelope(model)` (CLI
+    `open-cae envelope`) solves the unfactored `base` case and every stored
+    combination through the same combination path as `solve_combinations()`,
+    including the `loads`/`gravity`/`thermal`/pattern scaling and its stable
+    error codes, and returns one row per node (`ux`, `uy`, and `uz` in 3D),
+    element (`axial`, `shear`, `moment`) and support (`fx`, `fy`, and `fz` in
+    3D) with the signed minimum and maximum and the combination that produced
+    each extreme. Shear and moment use the signed end force with the larger
+    absolute value, so a truss reports zero shear and moment. A document
+    without combinations reports the base case only; `combinationCount` counts
+    declared combinations while `cases` always lists `base` first. Values stay
+    in the document unit system, ties keep the earlier case, and a failing
+    combination returns its solver code instead of a partial envelope.
+21. **Partial-span loads**: `distributed_load_from`/`distributed_load_to`
     limit a beam transverse load to the fractions `[a, b]` of the length, with
     the intensity varying linearly from the start to the end of that segment
     (CLI `element add --w-from` / `--w-to`). The consistent nodal vector is
@@ -332,7 +347,7 @@ to 11.
     superposes its own fixed-end particular solution, so a simply supported
     beam loaded over its middle half reproduces `R = |q|L/4`,
     `M_mid = 3|q|L²/32` and `δ_mid = 19|q|L⁴/(2048EI)`.
-21. **Inclined supports**: a `direction: [nx, ny]` support rotates the node's
+22. **Inclined supports**: a `direction: [nx, ny]` support rotates the node's
     two translational degrees of freedom into the local frame
     `Q = [[nx, −ny], [ny, nx]]` with `K ← Qᵀ·K·Q` and `F ← Qᵀ·F`, constrains
     the local first component (`u·n = 0`) and rotates displacements, reactions
@@ -340,14 +355,14 @@ to 11.
     stiffness). A 45° bar with a roller perpendicular to its axis therefore
     extends by `PL/EA` along the bar, carries no roller reaction, and its
     exported global stiffness is the standard `k·[[c², cs], …]` bar matrix.
-22. **Matrix export**: `solve_matrices(model)` assembles the same
+23. **Matrix export**: `solve_matrices(model)` assembles the same
     active-degree-of-freedom system the solver uses, exposes the dense global
     `K` (with the inclined-support rotation undone) and the diagonal lumped
     `M`, and labels every row with its node and component (`ux`, `uy`, `uz` or
     `rz`) plus whether a support constrains it. A bar's axial `EA/L` terms, a
     cantilever's `12EI/L³`, `6EI/L²`, `4EI/L` and `2EI/L` terms and the
     `ρAL/2` / `ρIL/2` masses are asserted directly.
-23. **Response spectrum**: `solve_response_spectrum(model, modes, axis, spectrum,
+24. **Response spectrum**: `solve_response_spectrum(model, modes, axis, spectrum,
     combination, damping)` reuses the mass-normalised modal solution, reads
     `Sa(T)` by linear interpolation (constant beyond the first and last point),
     converts it to `Sd = Sa/ω²`, scales each mode by the signed participation
@@ -362,7 +377,7 @@ to 11.
     one-mode CQC equals SRSS. An unknown combination reports
     `spectrum/invalid-combination`; CQC without a finite damping ratio in
     `(0, 1]` reports `spectrum/invalid-damping`.
-24. **Harmonic frequency response**: `solve_frequency_response(model, modes,
+25. **Harmonic frequency response**: `solve_frequency_response(model, modes,
     axis, damping, start_hz, end_hz, points)` treats the document's static
     load vector as the harmonic excitation `f(t) = f·sin(ωt)` of the requested
     direction. With the mass-normalised shapes of the modal solver the modal
@@ -376,7 +391,7 @@ to 11.
     peak as a **sampled** value, so a finer sweep resolves it better. A single
     free degree of freedom reproduces the static `F/k` at 0 Hz and the resonant
     `(F/k)/(2ζ)` exactly.
-25. **Construction stages**: `solve_construction_stages(model, stages)` clones
+26. **Construction stages**: `solve_construction_stages(model, stages)` clones
     the model per stage, keeps only the elements listed in that stage (omitting
     the list keeps every element), scales nodal/element loads and gravity with
     `loads`/`gravity` exactly like a load combination, validates and solves the
@@ -387,7 +402,7 @@ to 11.
     stage-by-stage linear analysis of the active topology: internal forces are
     **not** locked in from earlier stages, so erection screens are supported
     but stress-history/creep-transfer analysis is not.
-26. **Geometric-nonlinear truss**: `solve_nonlinear(model, increments,
+27. **Geometric-nonlinear truss**: `solve_nonlinear(model, increments,
     max_iterations, tolerance)` supports large displacement of truss members
     only (a beam element returns `capability/not-implemented`). Each bar is
     treated as a corotational bar with axial force `N = E·A·(L − L₀)/L₀` from
@@ -399,14 +414,14 @@ to 11.
     includes geometric stiffening/softening (a shallow two-bar truss settles
     onto its nonlinear equilibrium), but excludes material plasticity, member
     buckling, beam bending and inclined supports.
-27. **Tension-only cables**: `solve_tension_only(model, iterations,
+28. **Tension-only cables**: `solve_tension_only(model, iterations,
     tolerance)` starts with every cable active, solves, removes compressed
     cables, reassembles stiffness, self-weight and thermal loads without them,
     and repeats until the active set stops changing or the iteration budget is
     spent. The report contains `iterations`, `converged`, each cable's `active`
     state and axial force, and the final `solution`. A slack set that leaves a
     mechanism fails with `model/mechanism`.
-28. **Steady-state heat conduction**: `solve_heat(model)` (CLI `open-cae heat`,
+29. **Steady-state heat conduction**: `solve_heat(model)` (CLI `open-cae heat`,
     SDK `document.heat()`) assembles one scalar temperature degree of freedom
     per node with the 1D member matrix `k·A/L·[[1, −1], [−1, 1]]`, where `k` is
     the material `conductivity` (`W/(m·K)`) and `A` is the element area
@@ -446,7 +461,7 @@ to 11.
     singular component. Units are never converted, so a millimetre document
     must supply a length-consistent conductivity and perimeter.
 
-29. **Parametric element splitting**: `split_element(id, at)` (CLI
+30. **Parametric element splitting**: `split_element(id, at)` (CLI
     `open-cae element split --id <id> --at <fraction>`, SDK
     `splitElement()`) inserts an interior node at
     `from + at · (to − from)`. The fraction must be finite and strictly inside
@@ -464,7 +479,7 @@ to 11.
     distributed loads and through-depth temperature gradients report
     `element/split-unsupported-load`. Nodal loads, supports and masses are
     untouched, and the edit bumps `revision` exactly once.
-30. **Polygon section properties**: `polygon_section_report(vertices, units)`
+31. **Polygon section properties**: `polygon_section_report(vertices, units)`
     (CLI `open-cae section polygon --points "x,y;x,y;..."`, SDK
     `sectionPolygon()`) integrates a closed polygon with Green's theorem:
     `A = ½Σ(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)`, the centroid
@@ -485,7 +500,7 @@ to 11.
     `section/invalid-polygon`. This is a standalone section calculator: the
     properties are not stored in documents and are not consumed by the beam
     solver (which still uses the global parametric `Section`).
-31. **Standard section properties**: `i_standard_section_report(h, b, tw, tf)`,
+32. **Standard section properties**: `i_standard_section_report(h, b, tw, tf)`,
     `tube_standard_section_report(h, b, t)`,
     `channel_standard_section_report(h, b, tw, tf)`, `angle_section_report(h,
     w, t)`, `t_section_report(h, b, tw, tf)`, `ellipse_section_report(w, h)`
@@ -574,7 +589,7 @@ to 11.
     report `section/invalid-dimensions`. Results are deterministic and, like the
     polygon calculator, are not stored in documents or consumed by the beam
     solver.
-32. **Principal section axes**: `principal_section_report(ix, iy, ixy, units)`
+33. **Principal section axes**: `principal_section_report(ix, iy, ixy, units)`
     (CLI `open-cae section principal --ix <Ix> --iy <Iy> --ixy <Ixy>`, SDK
     `sectionPrincipal()`) treats `Ix`, `Iy` and `Ixy` as a centroidal
     second-moment matrix and reports its principal values. With
@@ -590,7 +605,7 @@ to 11.
     negative, non-finite or impossible combinations report
     `section/invalid-second-moments`. The calculator is standalone and its
     output is neither stored in documents nor consumed by the solver.
-33. **Influence lines**: `solve_influence_line(model, track, quantity,
+34. **Influence lines**: `solve_influence_line(model, track, quantity,
     direction, points)` (CLI `open-cae influence`, SDK
     `document.influenceLine`) moves a unit load along a track beam element.
     `points` equally spaced load positions including both track ends are
@@ -613,10 +628,10 @@ to 11.
     supported and cantilever beams reproduce the closed-form ordinates, e.g.
     the midspan bending-moment line of a simply supported beam peaks at
     `−L/4`.
-34. **Moving load trains**: `solve_influence_line_train(model, request)`
+35. **Moving load trains**: `solve_influence_line_train(model, request)`
     (CLI `open-cae influence-train`, SDK `document.influenceLineTrain`)
     envelopes an axle-load train — `axles` forces kept at fixed `spacings`,
-    first entry leading — over the influence line of item 33. The line is
+    first entry leading — over the influence line of item 34. The line is
     sampled once as a piecewise-linear polyline and reused for every train
     position; the structure is never re-solved. Candidate positions are a
     uniform grid (`step`, a fraction of the track length, default `0.01`)
@@ -630,7 +645,7 @@ to 11.
     `influence/negative-spacing`, non-finite axle loads report
     `influence/invalid-axle-load` and an out-of-range `step` reports
     `influence/invalid-step`; the underlying line keeps the validation of
-    item 33.
+    item 34.
 
 ## Validation and tests
 ```shell
