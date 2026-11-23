@@ -42,7 +42,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | construction stages / element birth–death summaries (`constructionStages`, active element subsets + stage factors) | ✅ supported |
 | geometric-nonlinear truss analysis (`geometricNonlinear`, corotational Newton iteration with load increments) | ✅ supported |
 | tension-only cable trusses (`tensionOnly`, active-set iteration with slack members removed) | ✅ supported |
-| load combinations (`loadCombinations`, linear factors + envelope; named load pattern factors mixed in) | ✅ supported |
+| load combinations (`loadCombinations`, load, gravity and temperature factors + envelope; named load pattern factors mixed in) | ✅ supported |
 | named load patterns (`loadPatterns`, concentrated nodal load layouts referenced by combinations) | ✅ supported |
 | material presets and section library (`materialLibrary`, rectangle/circle/I-section/box/tube/channel properties) | ✅ supported |
 | custom polygon section properties (`polygonSection`, closed vertex list; area, centroid, Ix/Iy/Ixy, polar moment and radii of gyration) | ✅ supported |
@@ -66,9 +66,10 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 native addon and the TypeScript SDK. Load patterns are `add_pattern_load()`
 nodal loads grouped by name in Rust, `pattern_add`/`pattern_remove` in the
 addon and `addPatternLoad()`/`removePattern()` in the SDK. A combination mixes
-them through `add_combination_with_patterns()` in Rust, `combination_add` with
-a `patterns` array in the addon and `document.addCombination({ patterns })` in
-the SDK and the CLI (`combination add --patterns`). Custom polygon section properties
+them through `add_combination_with_patterns()`/`add_combination_full()` in
+Rust, `combination_add` with `thermal` and `patterns` fields in the addon and
+`document.addCombination({ thermal, patterns })` in the SDK and the CLI
+(`combination add --thermal ... --patterns ...`). Custom polygon section properties
 (`polygonSection`) are exposed as `polygon_section_report()` in Rust,
 `section_polygon` in the addon and `sectionPolygon()` in the SDK/CLI.
 Parametric standard sections (`standardSection`) are exposed as
@@ -203,9 +204,11 @@ be finite and positive and a model without nodes is rejected with
    as possible.
 10. **Load combinations**: each combination clones the model, multiplies every
     nodal load and element distributed load by `loads`, multiplies the gravity
-    vector by `gravity` (clearing it when the result is the zero vector), then
-    adds every referenced named pattern's nodal loads multiplied by its factor.
-    The scaled model is solved and the full static solution kept. The envelope
+    vector by `gravity` (clearing it when the result is the zero vector),
+    multiplies every element temperature change and through-depth gradient by
+    `thermal` (default `1`), then adds every referenced named pattern's nodal
+    loads multiplied by its factor. The scaled model is solved and the full
+    static solution kept. The envelope
     reports the governing nodal displacement, signed axial force/moment maxima
     and per-node/per-element extremes with the combination names that produced
     them. Prescribed displacements and element temperature changes are not
@@ -734,6 +737,10 @@ stable codes.
   solutions, including the fixed-end reaction moment (`1e-12`);
 - the envelope selects `D+L`, reports the governing node/element and matches
   the individual solutions;
+- a restrained thermal bar reports `N = −EAαΔT` at `thermal = 1`, exactly half
+  that force at `thermal = 0.5` and zero at `thermal = 0`, and the factor
+  round-trips through `.ocae` while a document without the field defaults to
+  `1`;
 - empty lists (`combination/none`), non-finite factors
   (`combination/invalid-factor`), empty and duplicate names are rejected,
   combinations round-trip through `.ocae`, and the session writes the JSON
@@ -988,7 +995,9 @@ threshold of `1e-9`.
   temperature-dependent `h`/`k`, transient/time stepping, contact conductance
   and coupled thermo-mechanical fields — is not supported,
   and arbitrary curved distributed loads and loads in a global direction are
-  also not supported; load combinations do not scale temperature changes.
+  also not supported. A load combination scales element temperature actions
+  through its `thermal` factor, but fixed nodal temperatures are heat-analysis
+  boundary conditions and are never part of a structural combination.
 - Named load patterns hold **concentrated nodal forces and moments only**. They
   can be mixed into any combination by name and factor, but element distributed
   loads, temperatures, gravity and supports are not pattern members, so two

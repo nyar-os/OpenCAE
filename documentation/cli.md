@@ -120,7 +120,7 @@ Section shapes and their geometry flags:
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae combination add <file>` | `--name <name> [--loads <f>] [--gravity <f>] [--patterns <list>]` | Adds or replaces a combination; `--loads` and `--gravity` default to `1` and `0`. `--patterns` replaces the whole pattern list with `name=factor` entries such as `live=1.0,wind=1.5`; an empty or malformed list reports `cli/invalid-option`, and a pattern missing from the document reports `combination/unknown-pattern` at solve time. |
+| `open-cae combination add <file>` | `--name <name> [--loads <f>] [--gravity <f>] [--thermal <f>] [--patterns <list>]` | Adds or replaces a combination; `--loads`, `--gravity` and `--thermal` default to `1`, `0` and `1`. `--thermal` scales every element temperature change and through-depth gradient (`0` removes the thermal actions). `--patterns` replaces the whole pattern list with `name=factor` entries such as `live=1.0,wind=1.5`; an empty or malformed list reports `cli/invalid-option`, and a pattern missing from the document reports `combination/unknown-pattern` at solve time. |
 | `open-cae combination remove <file>` | `--name <name>` | Removes a combination. |
 | `open-cae combinations <file>` | `[--out <file>]` | Solves every combination and prints solutions plus the envelope. |
 | `open-cae buckling-combinations <file>` | `[--modes <N>] [--out <file>]` | Buckling factors per combination and the governing combination. |
@@ -271,6 +271,14 @@ define `live` and `wind` through the SDK's `addPatternLoad()`):
 ```shell
 open-cae combination add demo.ocae --name wind+live --loads 1 --patterns live=1.0,wind=1.5
 open-cae combinations demo.ocae --out combinations.json
+```
+
+Scale member temperature actions inside a combination: `--thermal 0.5` applies
+half of every element temperature change and gradient, while the default `1`
+keeps them unscaled and `--thermal 0` drops them:
+
+```shell
+open-cae combination add thermal.ocae --name service --thermal 0.5
 ```
 
 Tension-only cable: mark the member, then run the active-set solve.
