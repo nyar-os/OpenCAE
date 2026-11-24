@@ -885,9 +885,15 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
         quantity.unit(units)
     );
     let width = (BAR_RIGHT - BAR_LEFT) / STEPS as f64;
+    // The bar must show the colours the members actually carry across the
+    // sampled value range. A fixed `-limit..+limit` bar would label, for
+    // example, a red `+707` swatch as `-707` whenever the data is uniform
+    // compression, so the gradient is mapped over `minimum..maximum` and
+    // coloured with the same normalisation used for the members.
+    let span = maximum - minimum;
     for step in 0..STEPS {
-        let ratio = -1.0 + 2.0 * step as f64 / (STEPS - 1) as f64;
-        let color = contour_color(ratio * limit, limit);
+        let value = if span > 0.0 { minimum + span * step as f64 / (STEPS - 1) as f64 } else { minimum };
+        let color = contour_color(value, limit);
         let x = BAR_LEFT + step as f64 * width;
         let _ = writeln!(
             text,
@@ -896,11 +902,8 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
     }
     let _ = writeln!(text, "<text x=\"{BAR_LEFT}\" y=\"676\" font-size=\"11\">{}</text>", format_contour_value(minimum));
     if minimum < 0.0 && maximum > 0.0 {
-        let _ = writeln!(
-            text,
-            "<text x=\"{:.2}\" y=\"676\" font-size=\"11\" text-anchor=\"middle\">0</text>",
-            (BAR_LEFT + BAR_RIGHT) / 2.0
-        );
+        let zero_x = BAR_LEFT + (0.0 - minimum) / span * (BAR_RIGHT - BAR_LEFT);
+        let _ = writeln!(text, "<text x=\"{zero_x:.2}\" y=\"676\" font-size=\"11\" text-anchor=\"middle\">0</text>");
     }
     let _ = writeln!(
         text,
