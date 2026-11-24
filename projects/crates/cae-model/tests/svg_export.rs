@@ -110,6 +110,24 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
 }
 
 #[test]
+fn svg_export_annotates_each_node_id() {
+    let directory = temporary_dir("node-labels");
+    let path = directory.join("demo.ocae");
+    let session = two_bar_truss(&path);
+    let target = directory.join("labels.svg");
+
+    session.export(ExportFormat::Svg, &target).expect("svg export");
+    let text = fs::read_to_string(&target).expect("labels.svg");
+    assert!(text.contains(">n1</text>"), "missing node label n1: {text}");
+    assert!(text.contains(">n2</text>"), "missing node label n2: {text}");
+    assert!(text.contains(">n3</text>"), "missing node label n3: {text}");
+
+    session.export(ExportFormat::Svg, &target).expect("repeat export");
+    let repeated = fs::read_to_string(&target).expect("repeated labels.svg");
+    assert_eq!(text, repeated, "repeated exports with node labels must be byte-identical");
+}
+
+#[test]
 fn svg_export_projects_three_dimensional_models_onto_xy() {
     let directory = temporary_dir("projection");
     let path = directory.join("space.ocae");

@@ -441,8 +441,9 @@ impl FromStr for ContourQuantity {
 /// Every node is projected onto the global X–Y plane, so a three-dimensional
 /// model is drawn as its XY projection with Z ignored. The undeformed members
 /// are thin grey lines, the deformed shape after a static solve is a blue
-/// polyline scaled by `scale`, nodes are black dots, supported nodes are green
-/// triangles and nodal loads are red arrows. The `viewBox` is fixed at
+/// polyline scaled by `scale`, nodes are black dots annotated with their node
+/// id at the upper right, supported nodes are green triangles and nodal loads
+/// are red arrows. The `viewBox` is fixed at
 /// 960 × 720 and fitted to the projected model with padding; a title and a
 /// legend naming the scale frame the drawing. The file contains no timestamps,
 /// so repeated exports of the same model are byte-identical.
@@ -654,6 +655,17 @@ pub fn export_svg_with_contour(
             text,
             "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{cx:.2}\" y2=\"{cy:.2}\" stroke=\"#dc2626\" \
              stroke-width=\"2\" marker-end=\"url(#ocae-load-arrow)\"/>"
+        );
+    }
+    for node in &model.nodes {
+        let (cx, cy) = project(node.x, node.y);
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" \
+             fill=\"#374151\">{}</text>",
+            cx + 6.0,
+            cy - 6.0,
+            xml_escape(&node.id)
         );
     }
     text.push_str("</g>\n");
@@ -914,6 +926,22 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
 
 fn missing_svg_node(element: &str, node: &str) -> CaeError {
     CaeError::new("export/invalid-model", format!("SVG export cannot find node `{node}` for element `{element}`"))
+}
+
+/// Escapes the five predefined XML entities in text drawn into the SVG.
+fn xml_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Writes a self-contained, deterministic HTML analysis report.
