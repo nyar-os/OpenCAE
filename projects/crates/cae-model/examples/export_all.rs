@@ -29,7 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (ExportFormat::Md, out.join("demo.md"), ExportOptions::default()),
         (ExportFormat::Html, out.join("demo.html"), ExportOptions::default()),
         (ExportFormat::Svg, out.join("truss.svg"), ExportOptions { scale: 1.5, ..Default::default() }),
-        (ExportFormat::Svg, out.join("truss-axial.svg"), ExportOptions { scale: 1.5, contour: Some(ContourQuantity::Axial), ..Default::default() }),
+        (
+            ExportFormat::Svg,
+            out.join("truss-axial.svg"),
+            ExportOptions { scale: 1.5, contour: Some(ContourQuantity::Axial), ..Default::default() },
+        ),
     ];
     for (format, target, options) in targets {
         match session.export_with_options(format, &target, options) {
