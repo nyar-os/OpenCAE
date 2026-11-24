@@ -44,6 +44,7 @@
 
 #![deny(missing_docs)]
 
+mod abaqus;
 mod envelope;
 mod error;
 mod export;
@@ -54,6 +55,10 @@ mod solver;
 mod validate;
 
 pub use crate::{
+    abaqus::{
+        ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, AbaqusImport, ImportLoss, import_abaqus,
+        import_abaqus_file,
+    },
     envelope::{
         ENVELOPE_REPORT_FORMAT, ENVELOPE_REPORT_VERSION, EnvelopeElement, EnvelopeExtreme, EnvelopeNode, EnvelopeReaction,
         EnvelopeReport, envelope_csv, solve_envelope,
@@ -75,8 +80,8 @@ pub use crate::{
         VERSION,
     },
     session::{
-        DocumentSummary, ElementSplitReport, ExportFormat, ExportOptions, ExportReport, OpenCae, OpenCaeOptions, Report,
-        ValidationReport, not_implemented,
+        DocumentSummary, ElementSplitReport, ExportFormat, ExportOptions, ExportReport, ImportReport, OpenCae, OpenCaeOptions,
+        Report, ValidationReport, not_implemented,
     },
     solver::{
         BUCKLING_COMBINATION_REPORT_FORMAT, BUCKLING_COMBINATION_REPORT_VERSION, BUCKLING_REPORT_FORMAT,

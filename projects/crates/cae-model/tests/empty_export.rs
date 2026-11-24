@@ -1,12 +1,12 @@
 //! Empty-document behaviour of every export format.
 
-use std::{fs, path::PathBuf};
+use std::fs;
 
 use cae_model::{ExportFormat, ExportOptions, OpenCae, OpenCaeOptions, Units};
 
 #[test]
 fn empty_model_exports_report_clean_errors_or_write_content() {
-    let directory = PathBuf::from(std::env::temp_dir()).join(format!("open-cae-empty-{}", std::process::id()));
+    let directory = std::env::temp_dir().join(format!("open-cae-empty-{}", std::process::id()));
     let _ = fs::remove_dir_all(&directory);
     fs::create_dir_all(&directory).expect("the temp directory exists");
     let mut session = OpenCae::new(OpenCaeOptions::default());

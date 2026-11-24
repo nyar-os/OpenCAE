@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::{
     CAPABILITIES_JSON, CaeError,
+    abaqus::{ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, ImportLoss, import_abaqus_file},
     envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
         ContourQuantity, export_csv_with_stations, export_html, export_md, export_svg_with_contour, export_vtk, write_atomic,
@@ -214,6 +215,24 @@ pub struct Report {
     pub modal: Option<ModalSolution>,
 }
 
+/// Result of [`OpenCae::import_abaqus`].
+///
+/// `format` is always [`ABAQUS_IMPORT_REPORT_FORMAT`]. `losses` lists every
+/// Abaqus feature that was recognised but not represented in the new document;
+/// an empty list means the whole input was mapped.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReport {
+    /// Report format tag, always `open-cae-abaqus-import`.
+    pub format: String,
+    /// Report version.
+    pub version: u32,
+    /// Document that was created.
+    pub document: DocumentSummary,
+    /// Features of the input that were not represented.
+    pub losses: Vec<ImportLoss>,
+}
+
 /// One open `.ocae` document.
 #[derive(Debug, Clone)]
 struct Document {
@@ -308,6 +327,34 @@ impl OpenCae {
         let summary = document.summary();
         self.document = Some(document);
         Ok(summary)
+    }
+
+    /// Imports the documented Abaqus `.inp` subset from `source` into a new
+    /// document at `target`, refusing to replace an existing file.
+    ///
+    /// `units` labels the numerical values in the input; Abaqus does not
+    /// declare a unit system, so `None` falls back to the session default and
+    /// then to millimetres. The import report lists every recognised but
+    /// unrepresented feature; an error carries the input line number.
+    pub fn import_abaqus(&mut self, source: &Path, target: &Path, units: Option<Units>) -> Result<ImportReport, CaeError> {
+        if target.exists() {
+            return Err(CaeError::new(
+                "file/exists",
+                format!("file `{}` already exists; delete it or choose another path", target.display()),
+            ));
+        }
+        let units = units.or(self.defaults.units).unwrap_or(Units::Millimeter);
+        let imported = import_abaqus_file(source, units)?;
+        imported.model.save_atomic(target)?;
+        let document = Document::new(target, imported.model);
+        let summary = document.summary();
+        self.document = Some(document);
+        Ok(ImportReport {
+            format: ABAQUS_IMPORT_REPORT_FORMAT.to_string(),
+            version: ABAQUS_IMPORT_REPORT_VERSION,
+            document: summary,
+            losses: imported.losses,
+        })
     }
 
     /// Writes the open document to `target`, or back to its own path when

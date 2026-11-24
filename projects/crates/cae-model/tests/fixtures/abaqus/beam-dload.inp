@@ -1,0 +1,16 @@
+*Node
+1, 0., 0.
+2, 1000., 0.
+*Element, type=B31, elset=BEAM
+1, 1, 2
+*Material, name=Steel
+*Elastic
+210000., 0.3
+*Beam Section, elset=BEAM, material=Steel, section=RECT
+50., 100.
+*Boundary
+1, 1, 1
+1, 2, 2
+1, 6, 6
+*Dload
+1, PY, -2.

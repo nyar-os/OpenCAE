@@ -1,0 +1,16 @@
+** Comments and keyword case are ignored / folded.
+*NODE
+1, 0., 0.
+2, 1000., 0.
+*ElEmEnT, TyPe=T3d2, ELSET=All
+10, 1, 2
+*MATERIAL, NAME=Steel
+*ELASTIC
+210000., 0.0
+*TRUSS SECTION, ELSET=ALL, MATERIAL=Steel
+100.
+*BOUNDARY
+1, 1, 2
+2, 2, 2
+*CLOAD
+2, 1, 1000.
