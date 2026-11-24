@@ -1581,6 +1581,40 @@ export interface ExportReport {
     readonly files: readonly string[];
 }
 
+/** Options of `importAbaqus()`. */
+export interface AbaqusImportOptions {
+    /**
+     * Unit system of the numeric values in the input. Abaqus input files do not
+     * declare units; defaults to the session units.
+     */
+    readonly units?: Units;
+}
+
+/** One Abaqus feature that was recognised but not represented in a document. */
+export interface AbaqusImportLoss {
+    /** Stable loss code, for example `import/abaqus-unsupported-keyword`. */
+    readonly code: string;
+    /** Keyword that produced the loss, without the leading `*`. */
+    readonly keyword: string;
+    /** One-based input line number of the first occurrence. */
+    readonly line: number;
+    /** Human readable explanation of what was ignored. */
+    readonly detail: string;
+}
+
+/**
+ * Result of `importAbaqus()`. The new document is written to the target path;
+ * open it with `open()` before editing it.
+ */
+export interface AbaqusImportReport {
+    /** Report format tag, always `open-cae-abaqus-import`. */
+    readonly format: string;
+    readonly version: number;
+    readonly document: DocumentSummary;
+    /** Recognised but unrepresented features, ordered by first occurrence. */
+    readonly losses: readonly AbaqusImportLoss[];
+}
+
 /** Entry of the capability matrix. */
 export interface OpenCAECapabilities {
     readonly engine: { readonly package: string; readonly version: string };

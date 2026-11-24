@@ -10,6 +10,8 @@
 import { NotImplementedError, OpenCAEError, errorCodes, type OpenCAEErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    AbaqusImportOptions,
+    AbaqusImportReport,
     AmbientTemperatureRequest,
     BucklingCombinationOptions,
     BucklingCombinationSolution,
@@ -165,6 +167,16 @@ export function create(path: string, options: Required<CreateOptions>): Document
 /** Opens a document and returns its summary. */
 export function open(path: string): DocumentSummary {
     return decode<DocumentSummary>(() => binding('open').open(path));
+}
+
+/** Imports an Abaqus `.inp` file into a new document. */
+export function importAbaqus(source: string, target: string, options: AbaqusImportOptions = {}): AbaqusImportReport {
+    const request = options.units === undefined ? undefined : JSON.stringify({ units: options.units });
+    return decode<AbaqusImportReport>(() =>
+        request === undefined
+            ? binding('import.abaqus').import_abaqus(source, target)
+            : binding('import.abaqus').import_abaqus(source, target, request),
+    );
 }
 
 /** Writes a document to `target`, or in place when `target` is undefined. */

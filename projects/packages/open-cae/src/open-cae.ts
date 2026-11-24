@@ -14,6 +14,8 @@ import { CaeDocument } from './document.js';
 import { OpenCAEError } from './errors.js';
 import * as service from './service.js';
 import type {
+    AbaqusImportOptions,
+    AbaqusImportReport,
     AngleSectionGeometry,
     ChannelSectionGeometry,
     CreateOptions,
@@ -263,6 +265,23 @@ export class OpenCAE {
         const document = new CaeDocument(service.open(path));
         this.documents.add(document);
         return document;
+    }
+
+    /**
+     * Imports the documented Abaqus `.inp` subset from `source` into a new
+     * document at `target` and returns the import report.
+     *
+     * Abaqus inputs do not declare a unit system; `options.units` labels the
+     * numeric values and defaults to the session units. Every recognised but
+     * unrepresented feature is listed in `losses`. The new document is not
+     * opened by the session; call {@link open} with `target` to edit it.
+     */
+    async importAbaqus(source: string, target: string, options: AbaqusImportOptions = {}): Promise<AbaqusImportReport> {
+        this.assertActive();
+        assertPath(source);
+        assertPath(target);
+        assertUnits(options.units);
+        return service.importAbaqus(source, target, { units: options.units ?? this.units });
     }
 
     /** Closes every document the session still owns. Idempotent. */

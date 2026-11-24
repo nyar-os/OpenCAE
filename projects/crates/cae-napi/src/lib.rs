@@ -155,6 +155,21 @@ fn open(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
+/// Imports a documented Abaqus `.inp` subset into a new document.
+///
+/// `source` is the input file, `target` the new `.ocae` path and the optional
+/// third argument accepts a `units` string (`mm` or `m`). The reply lists every
+/// Abaqus feature that was recognised but not represented.
+#[function]
+fn import_abaqus(ctx: CallContext) -> Result<JsValue> {
+    let source = text(&ctx, 0)?;
+    let target = text(&ctx, 1)?;
+    let options = options_from(optional_object(&ctx, 2)?.as_ref())?;
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    let report = session.import_abaqus(Path::new(&source), Path::new(&target), options.units).map_err(fail)?;
+    respond(&ctx, &report)
+}
+
 /// Writes a document to `target` (or in place) and returns the new summary.
 #[function]
 fn save(ctx: CallContext) -> Result<JsValue> {
@@ -1547,6 +1562,7 @@ register_module![
     capabilities,
     create,
     open,
+    import_abaqus,
     save,
     node_add,
     node_update,

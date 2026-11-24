@@ -326,6 +326,21 @@ function exportFormat(ctx: CommandContext, value: string): ExportFormat {
     throw failure(ctx, 'cli/unknown-format', 'unknownFormat', { format: value });
 }
 
+function importFormat(ctx: CommandContext, value: string | undefined, file: string): void {
+    if (value !== undefined) {
+        if (value === 'abaqus' || value === 'inp') {
+            return;
+        }
+        if (value === 'step' || value === 'stp') {
+            throw new NotImplementedError('STEP import');
+        }
+        throw failure(ctx, 'cli/unknown-format', 'unknownImportFormat', { format: value });
+    }
+    if (path.extname(file).toLowerCase() !== '.inp') {
+        throw failure(ctx, 'import/abaqus-unsupported-format', 'unsupportedImportFormat', { file });
+    }
+}
+
 function contourOption(ctx: CommandContext, b: Bound): ContourQuantity | undefined {
     const value = b.raw('--contour');
     if (value === undefined) {
@@ -2180,9 +2195,22 @@ cli
 
 cli
     .command('import', 'cli.cmd.import')
-    .actionCtx(async (_options, _args, ctx) =>
-        attempt(ctx, () => {
-            throw new NotImplementedError('Abaqus .inp import');
+    .option('--format <format>', 'cli.opt.importFormat')
+    .option('--units <u>', 'cli.opt.units')
+    .actionCtx(async (options, _args, ctx) =>
+        attempt(ctx, async () => {
+            const b = bind(ctx, options);
+            const usage = 'import <input.inp> <output.ocae> [--format abaqus|inp] [--units mm|m]';
+            const source = b.file(usage);
+            const target = options._[1];
+            if (target === undefined) throw failure(ctx, 'cli/missing-argument', 'missingArgument', { usage });
+            importFormat(ctx, b.raw('--format'), source);
+            const units = b.units();
+            return withSession(async (session) => {
+                const report = await session.importAbaqus(source, target, { units });
+                ctx.stdout(JSON.stringify(report, null, 2));
+                return 0;
+            });
         }),
     );
 

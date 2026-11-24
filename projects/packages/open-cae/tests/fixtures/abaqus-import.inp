@@ -1,0 +1,18 @@
+** Abaqus import smoke fixture used by the SDK and CLI tests.
+*Heading
+import smoke test
+*Node
+1, 0., 0., 0.
+2, 1000., 0., 0.
+*Element, type=T3D2, elset=ALL
+1, 1, 2
+*Material, name=Steel
+*Elastic
+210000., 0.3
+*Truss Section, elset=ALL, material=Steel
+100.
+*Boundary
+1, 1, 2
+2, 2, 2
+*Cload
+2, 1, 1000.

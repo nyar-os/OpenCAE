@@ -175,7 +175,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "html": "supported",
     "svg": "supported",
     "svgContour": "supported",
-    "inp": "unsupported",
+    "inp": "supported",
     "step": "unsupported"
   }
 }"#;

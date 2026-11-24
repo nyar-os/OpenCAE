@@ -17,6 +17,7 @@ export interface NativeBinding {
     capabilities(): string;
     create(path: string, optionsJson: string): string;
     open(path: string): string;
+    import_abaqus(source: string, target: string, optionsJson?: string): string;
     save(path: string, target?: string): string;
     node_add(path: string, requestJson: string): string;
     node_update(path: string, requestJson: string): string;
