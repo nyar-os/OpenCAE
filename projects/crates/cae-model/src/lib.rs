@@ -38,9 +38,11 @@
 //!
 //! Three-dimensional beams, frames, material nonlinearity, transient heat
 //! transfer (radiation and time stepping), contact and solver-specific import
-//! formats (Abaqus `.inp`, STEP, ...) are **not** implemented. See
-//! [`CAPABILITIES_JSON`] for the machine-readable capability matrix and the
-//! repository Readme for the user facing description.
+//! and export formats (STEP, Nastran, ...) are **not** implemented. A documented
+//! subset of Abaqus `.inp` files can be imported with [`import_abaqus_file`];
+//! every recognised but unrepresented feature is reported as an
+//! [`ImportLoss`]. See [`CAPABILITIES_JSON`] for the machine-readable
+//! capability matrix and the repository Readme for the user facing description.
 
 #![deny(missing_docs)]
 

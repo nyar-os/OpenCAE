@@ -32,7 +32,22 @@ stdout, and `--out <file>` also writes that JSON report to the path.
 | `open-cae create <file.ocae>` | `[--units mm\|m] [--dimension 2\|3]` | Creates a document; defaults are `mm` and 2D. Refuses to replace an existing file. |
 | `open-cae validate <file>` | — | Prints validation issues; exit code 1 when errors exist. Warnings and notices never change the exit code, including `units/density-scale`, `units/gravity-scale`, `pattern/unused` and `combination/empty`. |
 | `open-cae report <file>` | — | Solves and prints the document summary, issues and solution. |
+| `open-cae import <input.inp> <output.ocae>` | `[--format abaqus\|inp] [--units mm\|m]` | Imports the documented Abaqus subset into a new document and prints the report. The format is inferred from the `.inp` extension unless `--format` is given; an existing target is refused. |
 | `open-cae capabilities` | — | Prints the machine-readable capability matrix. |
+
+`open-cae import` maps `*Node`, `*Element` (`T3D2`, `B31`, `C3D4`, `C3D8`,
+`C3D8R`), `*Nset`/`*Elset`, `*Material`/`*Elastic`, the section keywords,
+`*Boundary`, `*Cload` and the beam-local `*Dload PY`. Solid elements are
+skipped with an `import/abaqus-solid-element` loss. Abaqus does not declare
+units, so `--units` (default `mm`) only labels the values and never converts
+them. The JSON report contains the new `document` summary plus a `losses`
+array with `code`, `keyword`, `line` and `detail` for every recognised but
+unrepresented feature. `*Include` is rejected with
+`import/abaqus-unsupported-include`; malformed values, unknown nodes and
+unsupported element types or beam sections fail with an `import/abaqus-*`
+error that names the input line. See
+[capabilities](capabilities.md#abaqus-inp-import) for the full subset and the
+loss/error lists.
 
 ### Nodes
 
@@ -210,9 +225,9 @@ negative convection coefficient or a non-positive perimeter reports
 
 ### Rejected commands
 
-`open-cae import`, `nonlinear`, `frame`, `frame3d` and `contact`
-return `capability/not-implemented` with exit code `2`. `beam` and `beam2d`
-are unknown commands (exit code `1`).
+`open-cae nonlinear`, `frame`, `frame3d` and `contact` return
+`capability/not-implemented` with exit code `2`; `import --format step` does
+the same. `beam` and `beam2d` are unknown commands (exit code `1`).
 
 ## Examples
 

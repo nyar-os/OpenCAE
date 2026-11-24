@@ -56,7 +56,8 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | 3D beam (`beam3d`) | ❌ not implemented |
 | 3D frame (`frame3d`) | ❌ not implemented |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
-| Abaqus `.inp` import, STEP export | ❌ not implemented |
+| Abaqus `.inp` import (documented subset; see [Abaqus `.inp` import](#abaqus-inp-import)) | ✅ supported |
+| STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
 `beam3d`/`frame3d`/`nonlinear` are rejected at every entry point, while
@@ -1031,6 +1032,54 @@ the analytical displacement is `0.0476190476 mm` and the stress is `10 MPa`;
 the tests assert against the analytical expressions with a relative error
 threshold of `1e-9`.
 
+## Abaqus `.inp` import
+
+`open-cae import <input.inp> <output.ocae>` (SDK `OpenCAE.importAbaqus()`,
+native `import_abaqus`) reads a documented subset into a **new** document and
+prints a report. Its `losses` array lists every recognised but unrepresented
+feature with `code`, `keyword`, `line` and `detail`, ordered by first
+occurrence and deduplicated; the output is deterministic. Units are never
+converted: `--units mm|m` (default `mm`) only labels the input numbers because
+Abaqus inputs do not declare a unit system.
+
+Supported:
+
+- `*Node` with 2 or 3 coordinates. The dimension is inferred: any non-zero `z`
+  produces a 3D document, otherwise 2D.
+- `*Element` with `T3D2` (truss), `B31` (2D beam), and the solid types `C3D4`,
+  `C3D8` and `C3D8R`. Solid elements cannot be represented by this product and
+  are skipped with one `import/abaqus-solid-element` loss per block; any other
+  element type is an error.
+- `*Nset`/`*Elset` (including `generate` ranges) and the `elset=` option of
+  `*Element`, `*Solid Section`, `*Beam Section` and `*Truss Section`.
+- `*Material` with isotropic `*Elastic` (E; Poisson's ratio is reported as an
+  ignored property). Multiple materials are allowed: the first supplies the
+  global material and each section supplies the per-element E and area.
+- `*Truss Section` (area), `*Beam Section` (`RECT` width/height or `CIRC`
+  radius, from which area and inertia are derived) and `*Solid Section` (no
+  area; a truss using one fails with `import/abaqus-element-without-section`).
+- `*Boundary` with numeric DOFs 1..6 or the `ENCASTRE`/`PINNED` presets, an
+  optional prescribed value, and node-id or `*Nset` targets. DOFs 4/5 are
+  always losses, DOF 3 is a loss in a 2D document, and DOF 6 applies only at
+  nodes connected to a beam.
+- `*Cload` with DOFs 1, 2, 3 (3D) and 6 (beam nodes); other DOFs are
+  `import/abaqus-unsupported-load` losses.
+- `*Dload` with the beam-local `PY` label on beams, mapped to the uniform
+  distributed load; other labels and truss targets are losses.
+
+`*Part`, `*End Part`, `*Assembly` and `*End Assembly` are structural no-ops.
+`*Instance` is a loss because transforms are not applied, and `*Include` fails
+with `import/abaqus-unsupported-include` instead of reading another file.
+Every other keyword or option becomes `import/abaqus-unsupported-keyword` or
+`import/abaqus-ignored-option`. Errors are
+`import/abaqus-malformed-line`, `import/abaqus-unknown-node`,
+`import/abaqus-unknown-element`, `import/abaqus-unknown-material`,
+`import/abaqus-duplicate-node`, `import/abaqus-duplicate-element`,
+`import/abaqus-unsupported-element-type`,
+`import/abaqus-unsupported-beam-section`, `import/abaqus-unsupported-beam`,
+`import/abaqus-element-without-section` and `import/abaqus-no-nodes`; every
+message names the one-based input line.
+
 ## Limitations
 
 - Beams are **2D Euler-Bernoulli only** (no shear deformation, no
@@ -1144,5 +1193,4 @@ threshold of `1e-9`.
   so a contour of a Z-direction quantity is not geometrically visible, and the
   colour scale is always relative to the extremes of the exported model, not a
   fixed engineering scale.
-- External formats such as Abaqus `.inp`, Nastran and STEP are neither
-  imported nor exported.
+- Other external formats (STEP, Nastran) are neither imported nor exported.
