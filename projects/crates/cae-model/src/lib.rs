@@ -58,8 +58,7 @@ mod validate;
 
 pub use crate::{
     abaqus::{
-        ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, AbaqusImport, ImportLoss, import_abaqus,
-        import_abaqus_file,
+        ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, AbaqusImport, ImportLoss, import_abaqus, import_abaqus_file,
     },
     envelope::{
         ENVELOPE_REPORT_FORMAT, ENVELOPE_REPORT_VERSION, EnvelopeElement, EnvelopeExtreme, EnvelopeNode, EnvelopeReaction,

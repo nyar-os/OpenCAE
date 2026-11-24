@@ -19,8 +19,10 @@
 //! as structural markers, while `*Instance` is a loss because instance
 //! transforms are not applied.
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use serde::Serialize;
 
@@ -261,7 +263,8 @@ pub fn import_abaqus(text: &str, units: Units) -> Result<AbaqusImport, CaeError>
         let a_override = (area != model.material.area).then_some(area);
         let material = if e_override.is_some() || a_override.is_some() {
             Some(ElementMaterial { youngs_modulus: e_override, area: a_override })
-        } else {
+        }
+        else {
             None
         };
         model
@@ -277,9 +280,11 @@ pub fn import_abaqus(text: &str, units: Units) -> Result<AbaqusImport, CaeError>
     for dload in &dloads {
         let targets = if let Some(ids) = elsets.get(&dload.target.to_ascii_lowercase()) {
             ids.clone()
-        } else if created.iter().any(|element| element.id == dload.target) {
+        }
+        else if created.iter().any(|element| element.id == dload.target) {
             vec![dload.target.clone()]
-        } else {
+        }
+        else {
             return Err(CaeError::new(
                 "import/abaqus-unknown-element",
                 format!("line {}: `*Dload` references unknown element or elset `{}`", dload.line, dload.target),
@@ -287,7 +292,8 @@ pub fn import_abaqus(text: &str, units: Units) -> Result<AbaqusImport, CaeError>
         };
         let mut matched = false;
         for id in targets {
-            let Some(element) = created.iter().find(|element| element.id == id) else {
+            let Some(element) = created.iter().find(|element| element.id == id)
+            else {
                 continue;
             };
             matched = true;
@@ -543,7 +549,8 @@ fn tokenize(text: &str) -> Result<Vec<Block>, CaeError> {
                 }
             }
             blocks.push(Block { keyword: display.to_ascii_lowercase(), display, line, params, data: Vec::new() });
-        } else {
+        }
+        else {
             let block = blocks.last_mut().ok_or_else(|| malformed(line, "a data line appears before any keyword"))?;
             block.data.push((line, trimmed.to_string()));
         }
@@ -596,7 +603,8 @@ fn read_set(
     losses: &mut LossLog,
 ) -> Result<(), CaeError> {
     let name_key = if block.keyword == "nset" { "nset" } else { "elset" };
-    let Some(name) = param(block, name_key) else {
+    let Some(name) = param(block, name_key)
+    else {
         return Err(malformed(block.line, format!("`*{}` requires `{name_key}=name`", block.display)));
     };
     check_params(block, &[name_key, "generate"], losses);
@@ -632,7 +640,8 @@ fn read_set(
                 ids.push(value.to_string());
                 value += step;
             }
-        } else {
+        }
+        else {
             ids.extend(split_fields(data).into_iter().map(str::to_string));
         }
     }
@@ -651,7 +660,8 @@ fn read_elements(
     losses: &mut LossLog,
 ) -> Result<(), CaeError> {
     check_params(block, &["type", "elset"], losses);
-    let Some(raw_type) = param(block, "type") else {
+    let Some(raw_type) = param(block, "type")
+    else {
         return Err(malformed(block.line, "`*Element` requires `type=`"));
     };
     let kind = raw_type.to_ascii_uppercase();
@@ -678,7 +688,8 @@ fn read_elements(
     let mut solid_count = 0usize;
     for (line, data) in &block.data {
         let fields = split_fields(data);
-        let Some(id) = fields.first() else {
+        let Some(id) = fields.first()
+        else {
             continue;
         };
         let id = id.to_string();
@@ -742,7 +753,8 @@ fn read_elastic(
     losses: &mut LossLog,
 ) -> Result<(), CaeError> {
     check_params(block, &["type"], losses);
-    let Some(current) = current_material.as_deref() else {
+    let Some(current) = current_material.as_deref()
+    else {
         return Err(malformed(block.line, "`*Elastic` appears before any `*Material`"));
     };
     let elastic_type = param(block, "type").unwrap_or("iso").to_ascii_lowercase();
@@ -755,7 +767,8 @@ fn read_elastic(
         );
         return Ok(());
     }
-    let Some((line, data)) = block.data.first() else {
+    let Some((line, data)) = block.data.first()
+    else {
         return Err(malformed(block.line, "`*Elastic` requires a data line with E and Poisson's ratio"));
     };
     let fields = split_fields(data);
@@ -806,11 +819,13 @@ fn read_section(block: &Block, losses: &mut LossLog) -> Result<SectionDef, CaeEr
             Ok(SectionDef { kind: SectionKind::Solid, elset, material, area: None, inertia: None, line: block.line })
         }
         "truss section" => {
-            let Some((line, data)) = block.data.first() else {
+            let Some((line, data)) = block.data.first()
+            else {
                 return Err(malformed(block.line, "`*Truss Section` requires an area data line"));
             };
             let fields = split_fields(data);
-            let Some(token) = fields.first() else {
+            let Some(token) = fields.first()
+            else {
                 return Err(malformed(*line, "`*Truss Section` needs a cross-sectional area"));
             };
             let area = number(*line, token, "the truss area")?;
@@ -828,11 +843,13 @@ fn read_section(block: &Block, losses: &mut LossLog) -> Result<SectionDef, CaeEr
             Ok(SectionDef { kind: SectionKind::Truss, elset, material, area: Some(area), inertia: None, line: block.line })
         }
         _ => {
-            let Some(section_type) = param(block, "section") else {
+            let Some(section_type) = param(block, "section")
+            else {
                 return Err(malformed(block.line, "`*Beam Section` requires `section=RECT` or `section=CIRC`"));
             };
             let section_type = section_type.to_ascii_lowercase();
-            let Some((line, data)) = block.data.first() else {
+            let Some((line, data)) = block.data.first()
+            else {
                 return Err(malformed(block.line, "`*Beam Section` requires a cross-section data line"));
             };
             let fields = split_fields(data);
@@ -849,7 +866,8 @@ fn read_section(block: &Block, losses: &mut LossLog) -> Result<SectionDef, CaeEr
                     (width * height, width * height.powi(3) / 12.0)
                 }
                 "circ" => {
-                    let Some(token) = fields.first() else {
+                    let Some(token) = fields.first()
+                    else {
                         return Err(malformed(*line, "a CIRC beam section needs a radius"));
                     };
                     let radius = number(*line, token, "the CIRC radius")?;
@@ -914,7 +932,8 @@ fn read_boundary(block: &Block, boundaries: &mut Vec<BoundaryDef>, losses: &mut 
                 return Err(malformed(*line, format!("degree-of-freedom range {first}..{last} is outside 1..6")));
             }
             boundaries.push(BoundaryDef { target, first, last, value, line: *line });
-        } else {
+        }
+        else {
             if fields.len() > 2 {
                 return Err(malformed(*line, "a `*Boundary` preset line takes one field after the node/set"));
             }
@@ -987,9 +1006,11 @@ fn resolve_target(
 ) -> Result<Vec<String>, CaeError> {
     let ids = if let Some(ids) = nsets.get(&target.to_ascii_lowercase()) {
         ids.clone()
-    } else if node_ids.contains(target) {
+    }
+    else if node_ids.contains(target) {
         vec![target.to_string()]
-    } else {
+    }
+    else {
         return Err(CaeError::new(
             "import/abaqus-unknown-node",
             format!("line {line}: `*{keyword}` references unknown node or node set `{target}`"),

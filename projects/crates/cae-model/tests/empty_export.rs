@@ -11,10 +11,7 @@ fn empty_model_exports_report_clean_errors_or_write_content() {
     fs::create_dir_all(&directory).expect("the temp directory exists");
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session
-        .create(
-            &directory.join("empty.ocae"),
-            OpenCaeOptions { units: Some(Units::Millimeter), dimension: Some(2) },
-        )
+        .create(&directory.join("empty.ocae"), OpenCaeOptions { units: Some(Units::Millimeter), dimension: Some(2) })
         .expect("an empty model is created");
     for (format, name) in [
         (ExportFormat::Csv, "csv"),
