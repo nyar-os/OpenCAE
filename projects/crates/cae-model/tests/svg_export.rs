@@ -93,6 +93,10 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
     assert!(text.contains("<svg"), "missing <svg>: {text}");
     assert!(text.contains("<line "), "missing undeformed <line>: {text}");
     assert!(text.contains("<polyline"), "missing deformed <polyline>: {text}");
+    assert!(
+        text.contains("stroke=\"#9ca3af\" stroke-width=\"1.2\" stroke-dasharray=\"4 3\""),
+        "the undeformed members must be dashed so they stay visible under the deformed shape: {text}"
+    );
     assert!(text.contains("OpenCAE model and deformed shape"), "missing title: {text}");
     assert!(text.contains("scale 1.50"), "missing scale: {text}");
     assert!(text.contains("<polygon"), "missing support marker: {text}");
@@ -184,7 +188,11 @@ fn svg_moment_contour_reports_the_fixed_end_moment() {
     // The fixed-end moment of a 1000 N tip load on a 1000 mm cantilever is
     // P·L = 1e6 N·mm; the legend prints the sampled extreme.
     assert!(text.contains("1000000.000"), "missing P·L extreme: {text}");
-    assert!(text.contains("<rect"), "missing colour bar: {text}");
+    // A varying field keeps the gradient bar: the white page background plus
+    // twelve colour steps.
+    assert_eq!(text.matches("<rect").count(), 13, "a varying contour keeps the twelve-step bar: {text}");
+    assert!(text.contains("font-size=\"11\">-1000000.000</text>"), "missing sampled minimum label: {text}");
+    assert!(text.contains("text-anchor=\"end\">0</text>"), "missing sampled maximum label: {text}");
     assert!(text.contains("stroke=\"#1d4ed8\"") || text.contains("stroke=\"#b91c1c\""), "missing contour colour: {text}");
     assert!(!text.contains("<polyline"), "a contour drawing replaces the blue deformed polyline");
 
@@ -204,8 +212,26 @@ fn svg_axial_contour_of_a_tension_bar_is_uniform_red() {
     session.export_with_options(ExportFormat::Svg, &target, options).expect("contour export");
     let text = fs::read_to_string(&target).expect("axial.svg");
     assert!(text.contains("contour: axial force (N)"), "missing axial legend: {text}");
-    assert!(text.contains("1000.000"), "missing 1000 N axial force: {text}");
+    assert!(text.contains("uniform 1000.000"), "a constant field must be labelled uniform: {text}");
+    assert_eq!(text.matches("1000.000").count(), 1, "the uniform value must be printed once: {text}");
+    // The page background plus one solid swatch; a uniform field has no gradient.
+    assert_eq!(text.matches("<rect").count(), 2, "a uniform contour needs a single swatch: {text}");
     assert!(text.contains("stroke=\"#b91c1c\""), "the maximum must be drawn red: {text}");
+}
+
+#[test]
+fn svg_uniform_axial_contour_labels_the_compression_once() {
+    let directory = temporary_dir("contour-uniform");
+    let path = directory.join("truss.ocae");
+    let session = two_bar_truss(&path);
+    let target = directory.join("axial.svg");
+    let options = ExportOptions { contour: Some(ContourQuantity::Axial), ..ExportOptions::default() };
+
+    session.export_with_options(ExportFormat::Svg, &target, options).expect("contour export");
+    let text = fs::read_to_string(&target).expect("axial.svg");
+    assert!(text.contains("uniform -707.107"), "missing uniform compression label: {text}");
+    assert_eq!(text.matches("-707.107").count(), 1, "the two endpoints must not repeat the same value: {text}");
+    assert_eq!(text.matches("<rect").count(), 2, "a uniform contour needs a single swatch: {text}");
 }
 
 #[test]

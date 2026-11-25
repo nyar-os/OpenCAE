@@ -577,14 +577,6 @@ pub fn export_svg_with_contour(
             .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
         endpoints.push((from, to));
     }
-    for &(from, to) in &endpoints {
-        let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
-        let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
-        let _ = writeln!(
-            text,
-            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1\"/>"
-        );
-    }
     if let Some(series) = &series {
         let limit = series.min.abs().max(series.max.abs());
         for segment in &series.segments {
@@ -606,6 +598,17 @@ pub fn export_svg_with_contour(
                 "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
             );
         }
+    }
+    // The undeformed outline is drawn after the deformed/coloured members as a
+    // dashed grey line so it stays visible where the two shapes coincide.
+    for &(from, to) in &endpoints {
+        let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
+        let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
+        let _ = writeln!(
+            text,
+            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" \
+             stroke-width=\"1.2\" stroke-dasharray=\"4 3\"/>"
+        );
     }
     for &(x, y) in &undeformed {
         let (cx, cy) = project(x, y);
@@ -678,7 +681,8 @@ pub fn export_svg_with_contour(
     text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"13\" fill=\"#111827\">\n");
     let _ = writeln!(
         text,
-        "<line x1=\"40\" y1=\"{legend_y}\" x2=\"70\" y2=\"{legend_y}\" stroke=\"#9ca3af\" stroke-width=\"1\"/>\n\
+        "<line x1=\"40\" y1=\"{legend_y}\" x2=\"70\" y2=\"{legend_y}\" stroke=\"#9ca3af\" stroke-width=\"1.2\" \
+         stroke-dasharray=\"4 3\"/>\n\
          <text x=\"78\" y=\"{legend_text_y}\">undeformed</text>"
     );
     let deformed_label = if contour.is_some() { "contour" } else { "deformed" };
@@ -896,15 +900,31 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
         quantity.label(),
         quantity.unit(units)
     );
+    let span = maximum - minimum;
+    // A uniform field has no gradient to show. Drawing twelve identical swatches
+    // would print the same endpoint twice, so use one solid swatch and a single
+    // `uniform <value>` label instead. The tolerance is relative to the largest
+    // sampled magnitude, so solver round-off does not fake a gradient.
+    if span.abs() <= limit.abs() * 1.0e-9 {
+        let color = contour_color(minimum, limit);
+        let _ = writeln!(
+            text,
+            "<rect x=\"{BAR_LEFT}\" y=\"{BAR_TOP}\" width=\"120\" height=\"{BAR_HEIGHT}\" fill=\"{color}\"/>\n\
+             <text x=\"{}\" y=\"{}\" font-size=\"12\">uniform {}</text>\n</g>",
+            BAR_LEFT + 128.0,
+            BAR_TOP + BAR_HEIGHT - 2.0,
+            format_contour_value(minimum)
+        );
+        return;
+    }
     let width = (BAR_RIGHT - BAR_LEFT) / STEPS as f64;
     // The bar must show the colours the members actually carry across the
     // sampled value range. A fixed `-limit..+limit` bar would label, for
     // example, a red `+707` swatch as `-707` whenever the data is uniform
     // compression, so the gradient is mapped over `minimum..maximum` and
     // coloured with the same normalisation used for the members.
-    let span = maximum - minimum;
     for step in 0..STEPS {
-        let value = if span > 0.0 { minimum + span * step as f64 / (STEPS - 1) as f64 } else { minimum };
+        let value = minimum + span * step as f64 / (STEPS - 1) as f64;
         let color = contour_color(value, limit);
         let x = BAR_LEFT + step as f64 * width;
         let _ = writeln!(
