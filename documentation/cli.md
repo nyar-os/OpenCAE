@@ -66,7 +66,7 @@ loss/error lists.
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae element add <file>` | `--id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]` | `beam` is 2D-only and needs positive `--I` or a material section. `--w`/`--w2` are local `+y` intensities at the start/end node. `--w-from`/`--w-to` limit the load to a length fraction (both or neither). `--dt` needs material `alpha`; `--dt-grad` also needs a section depth. `--convection` is the surface coefficient `h` in `W/(m²·K)` and `--perimeter` the exposed perimeter `P`; both feed `heat` only and need a model ambient temperature. `--tension-only` marks a truss as a cable. |
+| `open-cae element add <file>` | `--id <id> --from <n> --to <n> [--E <E>] [--A <A>] [--kind truss\|beam\|beam3d] [--I <I>] [--inertia-weak <Iy>] [--torsion <J>] [--orientation-vector <x,y,z>] [--orientation-angle <theta>] [--w <w>] [--w2 <w2>] [--distributed-load-z <wz>] [--distributed-load-z-end <wz2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]` | `beam` is 2D-only and needs positive `--I` or a material section. `beam3d` is a spatial 6-DOF frame member and needs a `--dimension 3` document, a positive `--I` (strong axis) or material section, and a positive `--torsion <J>` (or a section that provides one); `--inertia-weak` defaults to `--I`. `--orientation-vector` (default `(0,0,1)`, `(0,1,0)` for vertical members) and `--orientation-angle` (radians) set the local axes. `--w`/`--w2` are local `+y` intensities and `--distributed-load-z`/`--distributed-load-z-end` local `+z` intensities at the start/end node. `--w-from`/`--w-to` limit the load to a length fraction (both or neither). `--dt` needs material `alpha`; `--dt-grad` also needs a section depth. `--convection` is the surface coefficient `h` in `W/(m²·K)` and `--perimeter` the exposed perimeter `P`; both feed `heat` only and need a model ambient temperature. `--tension-only` marks a truss as a cable. |
 | `open-cae element update <file>` | `--id <id> [--from <n>] [--to <n>] [--w <w>] [--w2 <w2>] [--w-from <s>] [--w-to <s>] [--dt <dT>] [--dt-grad <dT>] [--convection <h>] [--perimeter <P>] [--clear-load] [--clear-temperature]` | Updates only the named fields in place: endpoints, distributed load, temperature and convection; material, inertia, releases, tension-only and unnamed values are preserved. `--w` without `--w2` sets a uniform load, `--w2` alone changes the end intensity, and `--w-from`/`--w-to` follow the `element add` rule (both or neither). `--clear-load` removes the load and its span, `--clear-temperature` removes the uniform change and the gradient. Conflicts and an empty request report `session/argument-invalid`. |
 | `open-cae element split <file>` | `--id <id> --at <fraction>` | Splits a member at a length fraction strictly between 0 and 1, reusing or creating the interior node. Prints the interior node and both element ids. Uniform loads and temperatures are copied; partial-span/linear loads and gradients are rejected with `element/split-unsupported-load`. |
 | `open-cae element remove <file>` | `--id <id>` | Removes one element. |
@@ -78,7 +78,7 @@ loss/error lists.
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae material set <file>` | `--E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--conductivity <k>] [--section <shape> ...geometry]` | Sets the global material; `--alpha` is the thermal expansion coefficient in `1/K`, `--conductivity` the heat-conduction `k` in `W/(m·K)` (required only by `heat`). |
+| `open-cae material set <file>` | `--E <E> --A <A> [--density <rho>] [--name <name>] [--allowable <s>] [--alpha <a>] [--conductivity <k>] [--shear-modulus <G>] [--poissons-ratio <nu>] [--section <shape> ...geometry]` | Sets the global material; `--alpha` is the thermal expansion coefficient in `1/K`, `--conductivity` the heat-conduction `k` in `W/(m·K)` (required only by `heat`). `--shear-modulus` is `G` for `beam3d` torsion; when omitted it is derived as `E/(2(1+nu))` from `--poissons-ratio` (default `0.3`). |
 | `open-cae material preset <file>` | `--preset <name> [--section <shape> ...geometry] [--area <A>] [--allowable <s>]` | Presets: `steel`, `stainless-steel`, `aluminum`, `concrete`, `timber`. |
 | `open-cae library` | `[--units mm\|m]` | Prints presets and supported section shapes. |
 | `open-cae section properties` | `--section <shape> [...geometry] [--units mm\|m]` | Prints area, inertias, torsion constant, extreme fibre and section modulus. |
@@ -123,9 +123,9 @@ Section shapes and their geometry flags:
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae support add <file>` | `--node <n> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx] [--ky] [--kz] [--kr]` | At least one freedom, displacement or spring is required. `--rz`/`--kr` are 2D beam-node-only; `--dz`/`--kz` are 3D-only. `--direction` is an independent inclined constraint and cannot be combined with the other options. A supplied displacement constrains that degree of freedom; a supplied spring leaves it free. |
+| `open-cae support add <file>` | `--node <n> [--dx] [--dy] [--dz] [--rz] [--rx] [--ry] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx] [--ky] [--kz] [--kr]` | At least one freedom, displacement or spring is required. `--rz`/`--kr` are 2D beam-node-only; `--dz`/`--kz` are 3D-only; `--rx`/`--ry` constrain the extra rotations of `beam3d` nodes. `--direction` is an independent inclined constraint and cannot be combined with the other options. A supplied displacement constrains that degree of freedom; a supplied spring leaves it free. |
 | `open-cae support remove <file>` | `--node <n>` | Removes the support entry. |
-| `open-cae load add <file>` | `--node <n> [--fx] [--fy] [--fz] [--mz]` | Adds or updates a nodal force/moment; `--mz` is beam-node-only and `--fz` is 3D-only. |
+| `open-cae load add <file>` | `--node <n> [--fx] [--fy] [--fz] [--mz] [--mx] [--my]` | Adds or updates a nodal force/moment; `--mz` is beam-node-only, `--fz` is 3D-only and `--mx`/`--my` are `beam3d`-node-only. |
 | `open-cae load remove <file>` | `--node <n>` | Removes the nodal load. |
 | `open-cae model gravity <file>` | `[--gx] [--gy] [--gz]` | Sets the gravity vector; omitted components are 0. |
 | `open-cae model ambient <file>` | `[--temperature <Ta>] [--clear]` | Sets the ambient temperature used by surface convection in `heat`; `--clear` removes it. Ignored by structural analysis. |
@@ -175,7 +175,7 @@ successful solve, and values are never converted.
 
 | Command | Flags | Notes |
 |---------|-------|-------|
-| `open-cae solve <file>` | `[--out <file>] [--analysis static\|modal\|buckling] [--modes <N>] [--element truss\|beam] [--dimension 2\|3]` | Static by default. `--modes` (default 5) is modal/buckling-only. `--dimension` must match the document. `--element` is validated but does not change the solve. |
+| `open-cae solve <file>` | `[--out <file>] [--analysis static\|modal\|buckling] [--modes <N>] [--element truss\|beam\|beam3d] [--dimension 2\|3]` | Static by default. `--modes` (default 5) is modal/buckling-only. `--dimension` must match the document. `--element` is validated but does not change the solve. |
 | `open-cae modal <file>` | `[--modes <N>] [--out <file>]` | Modal solve. Needs a positive density or at least one positive nodal mass. |
 | `open-cae buckling <file>` | `[--modes <N>] [--out <file>]` | Linear buckling solve. |
 | `open-cae tension-only <file>` | `[--iterations <N>] [--tolerance <t>] [--out <file>]` | Cable active-set iteration; defaults are 20 and `1e-9`. |
@@ -221,13 +221,15 @@ negative convection coefficient or a non-positive perimeter reports
 | `open-cae load-cases <file>` | `[--out <file>]` | One summary row for `base` and each combination. |
 | `open-cae matrices <file>` | `[--out <file>]` | Assembled global stiffness and lumped mass matrices with row labels. |
 | `open-cae spectrum <file>` | `[--modes <N>] [--axis x\|y\|z] [--combination srss\|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out <file>]` | Response spectrum from `period:acceleration` points; `--axis` defaults to `x` and `--combination` to `srss`. `--damping` is the single modal damping ratio in `(0, 1]`, required by `cqc` and ignored by `srss`. |
-| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N] [--stations N] [--contour axial\|shear\|moment\|displacement]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and the sampling of an SVG contour. `--contour` colours SVG members by a result quantity and adds a colour bar with the sampled minimum and maximum and the unit; it is rejected for every other format with `export/invalid-contour`, and an unknown quantity reports `cli/invalid-option`. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. |
+| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N] [--stations N] [--contour axial\|shear\|moment\|displacement]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and the sampling of an SVG contour. `--contour` colours SVG members by a result quantity and adds a colour bar with the sampled minimum and maximum and the unit; it is rejected for every other format with `export/invalid-contour`, and an unknown quantity reports `cli/invalid-option`. SVG is deterministic, projects onto the global X–Y plane and carries a title and legend. HTML export is available through the SDK/API, not this CLI. Documents containing `beam3d` members extend the CSV tables: `nodes.csv` adds `rx`/`ry`, `reactions.csv` adds `mx`/`my` and `forces.csv` adds `torque`/`shearZ`/`momentY`; the Markdown and HTML reports gain the matching columns. |
 
 ### Rejected commands
 
-`open-cae nonlinear`, `frame`, `frame3d` and `contact` return
+`open-cae nonlinear` and `contact` return
 `capability/not-implemented` with exit code `2`; `import --format step` does
-the same. `beam` and `beam2d` are unknown commands (exit code `1`).
+the same. `beam`, `beam2d`, `frame` and `frame3d` are unknown commands (exit
+code `1`); spatial frames are modelled with `element add --kind beam3d` in a
+`--dimension 3` document and solved with `solve`.
 
 ## Examples
 

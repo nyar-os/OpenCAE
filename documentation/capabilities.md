@@ -53,14 +53,19 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | `.ocae` JSON I/O | ✅ supported |
 | CSV (solution tables and the `envelope --csv` table) / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
-| 3D beam (`beam3d`) | ❌ not implemented |
-| 3D frame (`frame3d`) | ❌ not implemented |
+| 3D beam (`beam3d`, spatial 6-DOF frame member: axial, torsion, bending about both axes, local-to-global transform with orientation vector/angle) | ✅ supported |
+| 3D frame (`frame3d`, spatial static frames of `beam3d` members with full fixity/hinge/roller supports, nodal forces and couples, local `+y`/`+z` distributed loads; displacements, reactions and end forces `N`/`T`/`Vy`/`Vz`/`My`/`Mz`) | ✅ supported |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
 | Abaqus `.inp` import (documented subset; see [Abaqus `.inp` import](#abaqus-inp-import)) | ✅ supported |
 | STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-`beam3d`/`frame3d`/`nonlinear` are rejected at every entry point, while
+`beam3d`/`frame3d` static analysis is available at every entry point; modal,
+buckling, stress-recovery, deflection, response-spectrum, frequency-response,
+nonlinear, influence-line, matrix-export and tension-only analyses reject
+models containing `beam3d` members with `capability/not-implemented`.
+`nonlinear` is rejected at
+every entry point, while
 `buckling`, `prescribedDisplacement`, `endRelease`, `thermalExpansion`,
 `thermalGradient`, `heat`, `partialSpanLoad`, `elasticSupports`,
 `inclinedSupports`, `matrixExport`, `responseSpectrum`, `frequencyResponse`,
@@ -1082,10 +1087,13 @@ message names the one-based input line.
 
 ## Limitations
 
-- Beams are **2D Euler-Bernoulli only** (no shear deformation, no
-  axial-bending coupling); bending-moment **end releases are supported** as
-  condensed hinges. **3D beams/frames (beam3d / frame3d) are not implemented**
-  and return `capability/not-implemented`.
+- Beams are **2D Euler-Bernoulli** (no shear deformation, no axial-bending
+  coupling); bending-moment **end releases are supported** as condensed
+  hinges. Spatial `beam3d`/`frame3d` members cover **linear static frame
+  analysis** with six degrees of freedom per node (axial, torsion and biaxial
+  bending, orientation reference vector and angle, local `+y`/`+z` distributed
+  loads, nodal couples and `mx`/`my` reaction moments); every other analysis
+  rejects models containing `beam3d` members with `capability/not-implemented`.
 - Static analysis is **linear elastic, small deformation**, with one
   deliberate exception: `geometricNonlinear` runs a large-displacement Newton
   iteration for **truss models only**. Material nonlinearity, beam/frame large
