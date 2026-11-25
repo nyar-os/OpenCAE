@@ -221,7 +221,7 @@ negative convection coefficient or a non-positive perimeter reports
 | `open-cae load-cases <file>` | `[--out <file>]` | One summary row for `base` and each combination. |
 | `open-cae matrices <file>` | `[--out <file>]` | Assembled global stiffness and lumped mass matrices with row labels. |
 | `open-cae spectrum <file>` | `[--modes <N>] [--axis x\|y\|z] [--combination srss\|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out <file>]` | Response spectrum from `period:acceleration` points; `--axis` defaults to `x` and `--combination` to `srss`. `--damping` is the single modal damping ratio in `(0, 1]`, required by `cqc` and ignored by `srss`. |
-| `open-cae export <file>` | `--format csv\|vtk\|md\|svg --out <dir\|file> [--scale N] [--stations N] [--contour axial\|shear\|moment\|displacement] [--drawing forces\|displacement\|reactions]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML and SVG. `--scale` (default `1`) multiplies the nodal displacements of the SVG deformed shape. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and the sampling of an SVG contour. `--contour` colours SVG members by a result quantity and adds a colour bar with the sampled minimum and maximum and the unit; it is rejected for every other format with `export/invalid-contour`, and an unknown quantity reports `cli/invalid-option`. `--drawing` writes a dedicated engineering drawing sheet instead of the plain shape: `forces` draws the shear and moment diagrams of every beam-like member (`forces.svg`), `displacement` draws the deformed shape with a scaled green displacement arrow and magnitude label at every displaced node (`displacements.svg`), `reactions` draws the support reaction vectors as purple arrows with magnitude and reaction-moment labels (`reactions.svg`); it is SVG-only, cannot combine with `--contour` and an unknown kind reports `cli/invalid-option` (`export/invalid-drawing` in the API). SVG is deterministic, projects onto the global X–Y plane (in a `--dimension 3` document Z is drawn as an oblique axis at 30° with 0.5 foreshortening, and the deformed shape and load arrows include Z) and carries a title and legend. HTML export is available through the SDK/API, not this CLI. Documents containing `beam3d` members extend the CSV tables: `nodes.csv` adds `rx`/`ry`, `reactions.csv` adds `mx`/`my` and `forces.csv` adds `torque`/`shearZ`/`momentY`; the Markdown and HTML reports gain the matching columns. |
+| `open-cae export <file>` | `--format csv\|vtk\|md\|svg\|pdf --out <dir\|file> [--scale N] [--stations N] [--contour axial\|shear\|moment\|displacement] [--drawing forces\|displacement\|reactions\|overlay\|modal\|envelope\|summary]` | CSV writes `nodes.csv`, `elements.csv`, `reactions.csv` and `forces.csv`; VTK is legacy ASCII. `--out` is a directory for CSV/VTK and a file for Markdown, HTML, SVG and PDF. `--scale` multiplies the nodal displacements of the SVG/PDF deformed shape and must be finite and positive; when omitted the export picks an automatic factor so the largest displacement spans about a fifth of the drawing height. `--stations` (default `11`, at least `2`) sets the sampled rows of `forces.csv` and the sampling of an SVG/PDF contour or force diagram. `--contour` colours SVG/PDF members by a result quantity and adds a colour bar with the sampled minimum and maximum and the unit; it is rejected for every other format with `export/invalid-contour`, and an unknown quantity reports `cli/invalid-option`. `--drawing` writes a dedicated engineering drawing sheet instead of the plain shape: `forces` draws the shear and moment diagrams of every beam-like member, with an axial `N(x)` panel for trusses (`forces.svg`), `displacement` draws the deformed shape with a scaled green displacement arrow and magnitude label at every displaced node (`displacements.svg`), `reactions` draws the support reaction vectors as purple arrows with magnitude and reaction-moment labels (`reactions.svg`), `overlay` compares the undeformed skeleton with the deformed centreline and labels only the extreme node (`overlay.svg`), `modal` panels the lowest five mode shapes with their frequencies (`modes.svg`), `envelope` draws the member force range across the load combinations (`envelope.svg`) and `summary` writes a one-page result sheet with a model thumbnail (`summary.svg`); it is SVG/PDF-only, cannot combine with `--contour` and an unknown kind reports `cli/invalid-option` (`export/invalid-drawing` in the API). `--format pdf` renders the same sheet as a single-page PDF of the same 960 × 720 point size, written to the same name with a `.pdf` suffix when `--out` is a directory, and the bytes are deterministic. SVG is deterministic, projects onto the global X–Y plane (in a `--dimension 3` document Z is drawn as an oblique axis at 30° with 0.5 foreshortening, and the deformed shape and load arrows include Z) and carries a title and legend. HTML export is available through the SDK/API, not this CLI. Documents containing `beam3d` members extend the CSV tables: `nodes.csv` adds `rx`/`ry`, `reactions.csv` adds `mx`/`my` and `forces.csv` adds `torque`/`shearZ`/`momentY`; the Markdown and HTML reports gain the matching columns. |
 
 ### Rejected commands
 
@@ -281,14 +281,35 @@ The same drawing can be coloured by `axial`, `shear` or `displacement`; omit
 The same cantilever as dedicated engineering drawing sheets: the forces sheet
 samples `V(x)` and `M(x)` per beam member, the displacement sheet draws the
 deformed shape with a green arrow and the magnitude at every displaced node
-(the tip reports `PL³/(3EI) = 1.587 mm` at the default scale `1`), the
-reactions sheet draws the fixed-end reaction as a purple arrow (`1000 N`)
-with the reaction moment label (`1.000e6 N·mm`):
+(the tip reports `PL³/(3EI) = 1.587 mm`, and the arrow length follows the
+automatic scale unless `--scale` overrides it), the reactions sheet draws the
+fixed-end reaction as a purple arrow (`1000 N`) with the reaction moment label
+(`1.000e6 N·mm`):
 
 ```shell
 open-cae export beam.ocae --format svg --out forces.svg --drawing forces
 open-cae export beam.ocae --format svg --out displacements.svg --drawing displacement --scale 2
 open-cae export beam.ocae --format svg --out reactions.svg --drawing reactions
+```
+
+The remaining sheets compare shapes and summaries. `overlay` needs only a
+static solution, `modal` needs mass (a density or `node mass`), `envelope`
+needs at least one load combination and `summary` needs a solved document:
+
+```shell
+open-cae export beam.ocae --format svg --out overlay.svg --drawing overlay
+open-cae export beam.ocae --format svg --out modes.svg --drawing modal
+open-cae export beam.ocae --format svg --out envelope.svg --drawing envelope
+open-cae export beam.ocae --format svg --out summary.svg --drawing summary
+```
+
+`--format pdf` writes the same sheet as a deterministic single-page PDF. The
+target is a file, and a directory target gains the drawing name with a `.pdf`
+suffix:
+
+```shell
+open-cae export beam.ocae --format pdf --out forces.pdf --drawing forces
+open-cae export beam.ocae --format pdf --out drawings --drawing summary
 ```
 
 Steady heat conduction through one bar in the metre system:

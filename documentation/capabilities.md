@@ -53,7 +53,8 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | `.ocae` JSON I/O | ✅ supported |
 | CSV (solution tables and the `envelope --csv` table) / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
-| SVG engineering drawings (`export --drawing forces\|displacement\|reactions`, shear/moment diagram sheet, nodal displacement vector sheet and support reaction vector sheet) | ✅ supported |
+| PDF sheet export (`export --format pdf`: the same deterministic drawing as a single-page PDF) | ✅ supported |
+| SVG/PDF engineering drawings (`export --drawing forces\|displacement\|reactions\|overlay\|modal\|envelope\|summary`) | ✅ supported |
 | 3D beam (`beam3d`, spatial 6-DOF frame member: axial, torsion, bending about both axes, local-to-global transform with orientation vector/angle) | ✅ supported |
 | 3D frame (`frame3d`, spatial static frames of `beam3d` members with full fixity/hinge/roller supports, nodal forces and couples, local `+y`/`+z` distributed loads; displacements, reactions and end forces `N`/`T`/`Vy`/`Vz`/`My`/`Mz`) | ✅ supported |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
@@ -123,9 +124,16 @@ likewise limited to truss members: it deactivates compressed cables, records
 the active set and iterations, and reports a mechanism when the slack topology
 cannot carry the load.
 
-HTML report and SVG shape export exist in the Rust API, the native addon and
-the TypeScript SDK; the `open-cae` CLI writes `csv`, `vtk`, `md` and `svg`
-(see [cli.md](cli.md)). The SVG drawing projects every node onto the global
+HTML report and SVG/PDF drawing export exist in the Rust API, the native addon
+and the TypeScript SDK; the `open-cae` CLI writes `csv`, `vtk`, `md`, `svg`
+and `pdf` (see [cli.md](cli.md)). `pdf` renders exactly the same sheet as the
+SVG export into a byte-deterministic single-page PDF 1.4 document of the same
+960 × 720 point size. The converter understands only the element subset the
+exporter emits — page and legend rectangles, lines, polylines, dashed outlines,
+support triangles, node dots, arrow markers and plain text in Helvetica
+(WinAnsi, with `≡`, `∝`, `→` and `…` mapped to ASCII stand-ins) — so it is a
+faithful preview of the exported sheet, not a general SVG renderer. Unknown
+elements are skipped and no fonts are embedded. The SVG drawing projects every node onto the global
 X–Y plane; in a three-dimensional document the Z axis is additionally drawn as
 a cabinet oblique axis (`x + 0.5·cos30°·z`, `y + 0.5·sin30°·z`), so pure Z
 members stay visible as inclined lines and their node labels no longer
@@ -134,9 +142,11 @@ fixed 960 × 720 viewBox to the projected undeformed and deformed geometry,
 and draws grey undeformed lines, a blue deformed polyline at the requested
 `scale`, node dots, support triangles and load arrows (a 3D force is projected
 with the same oblique map, so a pure Z load still gets an arrow). Like the reports it
-contains no timestamps, so repeated exports are byte-identical; the scale must
-be finite and positive and a model without nodes is rejected with
-`export/no-solution`.
+contains no timestamps, so repeated exports are byte-identical; an explicit
+scale must be finite and positive, and when it is omitted the export picks an
+automatic factor so the largest displacement spans about a fifth of the
+drawing height (a model without nodes is rejected with
+`export/no-solution`).
 
 `export --contour <quantity>` (SDK `export({ contour })`, addon `contour`,
 Rust `export_svg_with_contour`) replaces the blue deformed polyline with
@@ -146,19 +156,22 @@ and `displacement` uses the nodal displacement magnitudes. The colours map a
 blue–white–red diverging scale over the sampled extremes; the colour bar names
 the quantity, its unit (`N`, `N·mm`/`N·m`, `mm`/`m`) and the sampled minimum and
 maximum printed with four significant digits (scientific notation outside
-`1e-3 … 1e6`), so the drawing and the numbers agree. A contour is SVG-only; every
-other format rejects it with `export/invalid-contour`, and an unknown quantity
-is rejected with the same code (the CLI reports `cli/invalid-option`).
+`1e-3 … 1e6`), so the drawing and the numbers agree. A contour is SVG/PDF-only;
+every other format rejects it with `export/invalid-contour`, and an unknown
+quantity is rejected with the same code (the CLI reports
+`cli/invalid-option`).
 
 `export --drawing <kind>` (SDK `export({ drawing })`, addon `drawing`, Rust
 `DrawingKind`) replaces the plain shape sheet with a dedicated engineering
-drawing and is SVG-only; every other format rejects it with
+drawing and is SVG/PDF-only; every other format rejects it with
 `export/invalid-drawing`, as does combining it with `--contour`. `forces`
 (`export_forces_svg`, default file `forces.svg`) draws the shear `V(x)` and
 bending-moment `M(x)` diagram of every beam-like member sampled at
 `--stations` stations, annotated with the sampled extremes and the zero-shear
-crossings, and fails with `export/no-beam-diagram` when the model has no
-beam or frame members. `displacement` (`export_displacement_svg`, default file
+crossings; a truss member has no shear or moment and instead gets an axial
+`N(x)` panel, a diagram that is zero everywhere is labelled `V ≡ 0`/`M ≡ 0`,
+and a model without members fails with `export/no-beam-diagram`.
+`displacement` (`export_displacement_svg`, default file
 `displacements.svg`) draws the deformed shape as blue polylines at the
 `--scale` deformation factor over the dashed grey undeformed outline, then a
 green arrow at every node with a non-zero displacement whose length is
@@ -173,8 +186,21 @@ is proportional to the translational magnitude, labelled with the magnitude in
 newtons; a non-zero reaction moment is labelled next to the node with its
 component and the moment unit, and the legend reports the maximum magnitude so
 the sheet and the tables agree. An empty model fails with `export/no-solution`
-and a model without supports with `export/no-reactions`. All sheets are
-deterministic and contain no timestamps.
+and a model without supports with `export/no-reactions`. `overlay`
+(`export_overlay_svg`, default file `overlay.svg`) compares the undeformed
+skeleton with the deformed centreline at the automatic or requested scale and
+labels only the extreme node, so the sheet stays readable; `modal`
+(`export_modal_svg`, default file `modes.svg`) panels the lowest five mode
+shapes with their frequencies from the same modal solve
+(`material/invalid-density` when the model carries no mass, `export/no-modes`
+when no usable mode exists); `envelope` (`export_envelope_svg`, default file
+`envelope.svg`) draws min/max bars of the axial force, shear and moment of
+every member across the solved load combinations and names the controlling
+combination; `summary` (`summary_svg_text`, default file `summary.svg`) writes
+a one-page result sheet with the model size, load cases, extreme results and a
+thumbnail sketch. All sheets share the title block, are deterministic, contain
+no timestamps and are written to the drawing's default name when the target is
+a directory; a PDF target replaces the `.svg` suffix with `.pdf`.
 
 Model quantities are exposed as `summarize_model()` in Rust, `model_summary` in
 the addon and `modelSummary()` in the SDK, with CLI subcommand `model summary`.
@@ -734,14 +760,21 @@ the fixed-end moment `P·L = 1e6 N·mm` (`-1.000e6`) of a cantilever, the unifor
 and check the legend values and colours.
 
 `tests/drawings.rs`: the `forces` sheet of a uniformly loaded beam and of a
-cantilever, the `displacement` sheet of a tension bar (tip `FL/(EA) = 0.4762`
-labelled) and of a cantilever (tip `PL³/(3EI) = 1.587`, one arrow only at the
-free node), the `reactions` sheet of a two-bar truss (`|R| = 707.1 N` at both
-supports) and of a cantilever (`1000 N` and `1.000e6 N·mm` at the fixed end),
-byte-identical repeated exports, and the stable
-`export/invalid-drawing`, `export/invalid-scale`, `export/no-beam-diagram`,
-`export/no-reactions` and `export/no-solution` errors plus the directory
-default file names.
+cantilever, its axial `N(x)` panel for a truss and the `V ≡ 0`/`M ≡ 0` labels
+of a zero diagram, the `displacement` sheet of a tension bar (tip
+`FL/(EA) = 0.4762` labelled) and of a cantilever (tip `PL³/(3EI) = 1.587`, one
+arrow only at the free node), the `reactions` sheet of a two-bar truss
+(`|R| = 707.1 N` at both supports) and of a cantilever (`1000 N` and
+`1.000e6 N·mm` at the fixed end), the `overlay` sheet of a centre-loaded beam
+(extreme-node label, no arrows), the `modal` sheet of a massed truss (mode
+frequencies and the `material/invalid-density` rejection), the `envelope`
+sheet of two combinations (count, controlling name and force bars), PDF
+rendering of a force sheet (`%PDF-1.4` header, Helvetica font object,
+`960 720` page rectangle and byte-identical repeats) and the directory
+fallback to `<drawing>.pdf`, byte-identical repeated SVG exports, and the
+stable `export/invalid-drawing`, `export/invalid-scale`,
+`export/no-beam-diagram`, `export/no-reactions` and `export/no-solution`
+errors plus the directory default file names.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load
@@ -1177,6 +1210,13 @@ message names the one-based input line.
   loads, temperatures, gravity and supports are not pattern members, so two
   different element-load or thermal layouts still cannot be mixed by a
   combination.
+- The PDF export is a **rendering of the exporter's own SVG subset**, not a
+  general SVG-to-PDF converter: it carries rectangles, lines, polylines, dashed
+  outlines, arrow markers and Helvetica text, skips any element outside that
+  subset, does not embed fonts and does not support images, gradients, clipping,
+  transparency or page ranges. The automatic deformation scale applies to the
+  SVG and PDF sheets only; the CSV, VTK, Markdown and HTML exports never scale
+  displacements.
 - In-place edits (`node update`, `element update`) move nodes and reconnect
   **existing truss/beam endpoints**, and `element update` can also replace the
   distributed load, uniform temperature change, gradient and convection data of
