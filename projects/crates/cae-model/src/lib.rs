@@ -74,9 +74,9 @@ pub use crate::{
     export::{
         ContourQuantity, DrawingKind, auto_deformation_scale, displacement_svg_text, envelope_svg_text, export_csv,
         export_csv_with_stations, export_displacement_svg, export_envelope_svg, export_forces_svg, export_html, export_md,
-        export_modal_svg, export_overlay_svg, export_reactions_svg, export_svg, export_svg_with_contour, export_vtk,
-        forces_svg_text, modal_svg_text, overlay_svg_text, reactions_svg_text, summary_svg_text, svg_with_contour_text,
-        write_atomic,
+        export_modal_svg, export_moment_svg, export_overlay_svg, export_reactions_svg, export_shear_svg, export_svg,
+        export_svg_with_contour, export_vtk, forces_svg_text, modal_svg_text, moment_svg_text, overlay_svg_text,
+        reactions_svg_text, shear_svg_text, summary_svg_text, svg_with_contour_text, write_atomic,
     },
     library::{
         MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, PrincipalSectionReport, SectionProperties, SectionReport,

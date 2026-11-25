@@ -528,6 +528,13 @@ impl FromStr for ContourQuantity {
 pub enum DrawingKind {
     /// Shear `V(x)` and bending-moment `M(x)` diagrams per beam-like member.
     Forces,
+    /// Filled shear-force `V(x)` diagram drawn on the member axis, with end
+    /// values and the extreme labelled. Truss members are skipped because a
+    /// two-force member carries no shear.
+    Shear,
+    /// Filled bending-moment `M(x)` diagram drawn on the member axis, with
+    /// end values and the extreme labelled. Truss members are skipped.
+    Moment,
     /// Nodal displacement vectors drawn at the deformed nodes with their
     /// magnitudes labelled.
     Displacement,
@@ -552,6 +559,8 @@ impl DrawingKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Forces => "forces",
+            Self::Shear => "shear",
+            Self::Moment => "moment",
             Self::Displacement => "displacement",
             Self::Reactions => "reactions",
             Self::Overlay => "overlay",
@@ -565,6 +574,8 @@ impl DrawingKind {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Forces => "OpenCAE shear and moment diagrams",
+            Self::Shear => "OpenCAE shear force diagram",
+            Self::Moment => "OpenCAE bending moment diagram",
             Self::Displacement => "OpenCAE nodal displacement vectors",
             Self::Reactions => "OpenCAE support reaction vectors",
             Self::Overlay => "OpenCAE deformation overlay",
@@ -578,6 +589,8 @@ impl DrawingKind {
     pub const fn number(self) -> &'static str {
         match self {
             Self::Forces => "OCAE-DRW-01",
+            Self::Shear => "OCAE-DRW-08",
+            Self::Moment => "OCAE-DRW-09",
             Self::Displacement => "OCAE-DRW-02",
             Self::Reactions => "OCAE-DRW-03",
             Self::Overlay => "OCAE-DRW-04",
@@ -591,6 +604,8 @@ impl DrawingKind {
     pub const fn default_file_name(self) -> &'static str {
         match self {
             Self::Forces => "forces.svg",
+            Self::Shear => "shear.svg",
+            Self::Moment => "moment.svg",
             Self::Displacement => "displacements.svg",
             Self::Reactions => "reactions.svg",
             Self::Overlay => "overlay.svg",
@@ -607,6 +622,8 @@ impl FromStr for DrawingKind {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "forces" => Ok(Self::Forces),
+            "shear" => Ok(Self::Shear),
+            "moment" => Ok(Self::Moment),
             "displacement" => Ok(Self::Displacement),
             "reactions" => Ok(Self::Reactions),
             "overlay" => Ok(Self::Overlay),
@@ -616,7 +633,7 @@ impl FromStr for DrawingKind {
             other => Err(CaeError::new(
                 "export/invalid-drawing",
                 format!(
-                    "unsupported drawing kind `{other}`; valid values are `forces`, `displacement`, `reactions`, `overlay`, `modal`, `envelope` or `summary`"
+                    "unsupported drawing kind `{other}`; valid values are `forces`, `shear`, `moment`, `displacement`, `reactions`, `overlay`, `modal`, `envelope` or `summary`"
                 ),
             )),
         }
@@ -630,27 +647,50 @@ impl FromStr for DrawingKind {
 const SHEET_WIDTH: f64 = 960.0;
 /// Height of every exported sheet in SVG user units.
 const SHEET_HEIGHT: f64 = 720.0;
+/// The single font family used by every sheet, so headings, table cells,
+/// labels and notes share one typographic voice.
+const FONT_FAMILY: &str = "Inter, 'Segoe UI', system-ui, -apple-system, sans-serif";
+/// Three sizes, one per hierarchy level: sheet heading, body/table text and
+/// annotations/footnotes. Panels may interpolate between them, never invent a
+/// fourth voice.
+const FONT_TITLE: f64 = 19.0;
+const FONT_BODY: f64 = 11.5;
+const FONT_LABEL: f64 = 10.0;
+const FONT_NOTE: f64 = 9.0;
 /// Inner page border, inset from the page edge.
 const FRAME_LEFT: f64 = 12.0;
 const FRAME_TOP: f64 = 12.0;
 const FRAME_RIGHT: f64 = 948.0;
 const FRAME_BOTTOM: f64 = 708.0;
-/// Plot area inside the frame. The side margin is 80 user units, 8.3 % of the
-/// page width, so no content is closer than 8 % to the page edge.
+/// Plot area inside the frame. Content is centred in it and the shared margin
+/// keeps the model clear of the frame on every side.
 const PLOT_LEFT: f64 = 80.0;
 const PLOT_RIGHT: f64 = 880.0;
-const PLOT_TOP: f64 = 60.0;
-const PLOT_BOTTOM: f64 = 630.0;
-/// Top and bottom of the title block occupying the bottom strip of the frame.
-const TITLE_BLOCK_TOP: f64 = 640.0;
+const PLOT_TOP: f64 = 62.0;
+const PLOT_BOTTOM: f64 = 592.0;
+/// Top of the title block occupying the bottom strip of the frame. The block
+/// reserves a fixed label row, value row and a two-line note band, so no note
+/// can spill past the frame.
+const TITLE_BLOCK_TOP: f64 = 622.0;
 /// Geometry viewport inside the plot area. The extra inset keeps support
 /// symbols and node labels away from the frame, not merely the node dots.
-const VIEW_LEFT: f64 = 104.0;
-const VIEW_RIGHT: f64 = 856.0;
+const VIEW_LEFT: f64 = 96.0;
+const VIEW_RIGHT: f64 = 864.0;
 const VIEW_TOP: f64 = 78.0;
-const VIEW_BOTTOM: f64 = 600.0;
+const VIEW_BOTTOM: f64 = 584.0;
 /// Baseline of the single legend row drawn above the title block.
-const LEGEND_BASELINE: f64 = 620.0;
+const LEGEND_BASELINE: f64 = 608.0;
+/// Left, right and vertical centre of the title block cells. The drawing name
+/// cell is the widest, the numeric cells share the remaining width.
+const TITLE_SPLITS: [f64; 4] = [470.0, 620.0, 726.0, 844.0];
+/// Title block rows: label baseline, value baseline and the divider above the
+/// note band.
+const TITLE_LABEL_BASELINE: f64 = 637.0;
+const TITLE_VALUE_BASELINE: f64 = 657.0;
+const TITLE_NOTE_DIVIDER: f64 = 667.0;
+/// The two note baselines inside the title block. Both plus the font descent
+/// stay above `FRAME_BOTTOM`.
+const TITLE_NOTE_BASELINES: [f64; 2] = [684.0, 701.0];
 
 /// Static text of the drawing title block.
 struct SheetMeta<'a> {
@@ -693,7 +733,7 @@ fn write_sheet_open(text: &mut String, meta: &SheetMeta<'_>) {
     let _ = writeln!(
         text,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {SHEET_WIDTH} {SHEET_HEIGHT}\" width=\"960\" height=\"720\" \
-         role=\"img\" aria-labelledby=\"ocae-svg-title\">"
+         font-family=\"{FONT_FAMILY}\" role=\"img\" aria-labelledby=\"ocae-svg-title\">"
     );
     let _ = writeln!(text, "<title id=\"ocae-svg-title\">{}</title>", meta.title);
     text.push_str("<rect x=\"0\" y=\"0\" width=\"960\" height=\"720\" fill=\"#ffffff\"/>\n");
@@ -706,23 +746,59 @@ fn write_sheet_open(text: &mut String, meta: &SheetMeta<'_>) {
     );
     let _ = writeln!(
         text,
-        "<text x=\"480\" y=\"42\" text-anchor=\"middle\" font-family=\"system-ui, sans-serif\" font-size=\"19\" \
-         font-weight=\"600\" fill=\"#111827\">{}</text>",
+        "<text x=\"480\" y=\"40\" text-anchor=\"middle\" font-size=\"{FONT_TITLE}\" font-weight=\"600\" \
+         fill=\"#111827\">{}</text>",
         meta.title
     );
     let _ = writeln!(
         text,
-        "<line x1=\"{PLOT_LEFT}\" y1=\"50\" x2=\"{PLOT_RIGHT}\" y2=\"50\" stroke=\"#9ca3af\" stroke-width=\"0.8\"/>"
+        "<line x1=\"{PLOT_LEFT}\" y1=\"48\" x2=\"{PLOT_RIGHT}\" y2=\"48\" stroke=\"#9ca3af\" stroke-width=\"0.8\"/>"
     );
-    text.push_str("<g font-family=\"system-ui, sans-serif\">\n");
+    text.push_str("<g>\n");
+}
+
+/// Approximate advance width of `text` in the shared font at `size` points.
+///
+/// The layout only needs a stable estimate to keep text inside cells and
+/// labels from colliding, so a fixed average advance avoids measuring glyphs.
+fn text_width(text: &str, size: f64) -> f64 {
+    text.chars().count() as f64 * size * 0.56
+}
+
+/// Shrinks `preferred` until `text` fits `max_width`, never below `minimum`.
+fn fit_font_size(text: &str, max_width: f64, preferred: f64, minimum: f64) -> f64 {
+    let estimated = text_width(text, preferred);
+    if estimated <= max_width || estimated <= 0.0 {
+        preferred
+    }
+    else {
+        (preferred * max_width / estimated).clamp(minimum, preferred)
+    }
+}
+
+/// Writes one title-block cell: a small label and the value fitted into the
+/// cell width so a long drawing name cannot cross the cell divider.
+fn write_title_cell(text: &mut String, x: f64, cell_width: f64, label: &str, value: &str) {
+    let _ = writeln!(
+        text,
+        "<text x=\"{x:.2}\" y=\"{TITLE_LABEL_BASELINE}\" font-size=\"7.5\" letter-spacing=\"0.6\" \
+         fill=\"#6b7280\">{label}</text>"
+    );
+    let size = fit_font_size(value, cell_width - 4.0, 12.5, 8.0);
+    let _ = writeln!(
+        text,
+        "<text x=\"{x:.2}\" y=\"{TITLE_VALUE_BASELINE}\" font-size=\"{size:.2}\" fill=\"#111827\">{}</text>",
+        xml_escape(value)
+    );
 }
 
 /// Closes the content group and draws the title block with the drawing name,
 /// drawing number, units, scale, load case and up to two note lines.
+///
+/// Every row has a fixed baseline and every string is fitted to its cell, so
+/// no comment can leave the frame or overprint a divider.
 fn write_sheet_close(text: &mut String, meta: &SheetMeta<'_>, notes: &[&str]) {
     text.push_str("</g>\n");
-    const SPLITS: [f64; 4] = [490.0, 650.0, 748.0, 838.0];
-    let note_top = FRAME_BOTTOM - 26.0;
     let _ = writeln!(
         text,
         "<rect x=\"{FRAME_LEFT}\" y=\"{TITLE_BLOCK_TOP}\" width=\"{}\" height=\"{}\" fill=\"#ffffff\" \
@@ -730,43 +806,40 @@ fn write_sheet_close(text: &mut String, meta: &SheetMeta<'_>, notes: &[&str]) {
         FRAME_RIGHT - FRAME_LEFT,
         FRAME_BOTTOM - TITLE_BLOCK_TOP,
     );
-    for split in SPLITS {
+    for split in TITLE_SPLITS {
         let _ = writeln!(
             text,
-            "<line x1=\"{split}\" y1=\"{TITLE_BLOCK_TOP}\" x2=\"{split}\" y2=\"{note_top}\" stroke=\"#111827\" \
+            "<line x1=\"{split}\" y1=\"{TITLE_BLOCK_TOP}\" x2=\"{split}\" y2=\"{TITLE_NOTE_DIVIDER}\" stroke=\"#111827\" \
              stroke-width=\"0.8\"/>"
         );
     }
     let _ = writeln!(
         text,
-        "<line x1=\"{FRAME_LEFT}\" y1=\"{note_top}\" x2=\"{FRAME_RIGHT}\" y2=\"{note_top}\" stroke=\"#111827\" \
-         stroke-width=\"0.8\"/>"
+        "<line x1=\"{FRAME_LEFT}\" y1=\"{TITLE_NOTE_DIVIDER}\" x2=\"{FRAME_RIGHT}\" y2=\"{TITLE_NOTE_DIVIDER}\" \
+         stroke=\"#111827\" stroke-width=\"0.8\"/>"
     );
     let cells = [
-        (FRAME_LEFT + 8.0, "DRAWING", meta.title),
-        (SPLITS[0] + 8.0, "DWG NO.", meta.number),
-        (SPLITS[1] + 8.0, "UNITS", meta.units),
-        (SPLITS[2] + 8.0, "SCALE", meta.scale.as_str()),
-        (SPLITS[3] + 8.0, "LOAD CASE", meta.load_case.as_str()),
+        (FRAME_LEFT + 8.0, TITLE_SPLITS[0] - FRAME_LEFT - 16.0, "DRAWING", meta.title),
+        (TITLE_SPLITS[0] + 8.0, TITLE_SPLITS[1] - TITLE_SPLITS[0] - 16.0, "DWG NO.", meta.number),
+        (TITLE_SPLITS[1] + 8.0, TITLE_SPLITS[2] - TITLE_SPLITS[1] - 16.0, "UNITS", meta.units),
+        (TITLE_SPLITS[2] + 8.0, TITLE_SPLITS[3] - TITLE_SPLITS[2] - 16.0, "SCALE", meta.scale.as_str()),
+        (TITLE_SPLITS[3] + 8.0, FRAME_RIGHT - TITLE_SPLITS[3] - 16.0, "LOAD CASE", meta.load_case.as_str()),
     ];
-    text.push_str("<g font-family=\"system-ui, sans-serif\">\n");
-    for (x, label, value) in cells {
-        let _ = writeln!(
-            text,
-            "<text x=\"{x:.2}\" y=\"654\" font-size=\"7.5\" letter-spacing=\"0.6\" fill=\"#6b7280\">{label}</text>"
-        );
-        let _ = writeln!(text, "<text x=\"{x:.2}\" y=\"671\" font-size=\"12.5\" fill=\"#111827\">{}</text>", xml_escape(value));
+    for (x, width, label, value) in cells {
+        write_title_cell(text, x, width, label, value);
     }
-    for (index, note) in notes.iter().enumerate() {
-        let y = note_top + 10.0 + index as f64 * 11.0;
+    let note_width = FRAME_RIGHT - FRAME_LEFT - 16.0;
+    for (index, note) in notes.iter().take(TITLE_NOTE_BASELINES.len()).enumerate() {
+        let size = fit_font_size(note, note_width, FONT_NOTE, 7.0);
         let _ = writeln!(
             text,
-            "<text x=\"{:.2}\" y=\"{y:.2}\" font-size=\"9\" fill=\"#4b5563\">{}</text>",
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"{size:.2}\" fill=\"#4b5563\">{}</text>",
             FRAME_LEFT + 8.0,
+            TITLE_NOTE_BASELINES[index],
             xml_escape(note)
         );
     }
-    text.push_str("</g>\n</svg>\n");
+    text.push_str("</svg>\n");
 }
 
 /// Affine map from model coordinates to the shared geometry viewport.
@@ -890,10 +963,10 @@ pub fn forces_svg_text(model: &Model, stations: usize) -> Result<String, CaeErro
     let rows = panels.len().div_ceil(columns);
     let panel_width = (PLOT_RIGHT - PLOT_LEFT) / columns as f64;
     let slot_height = PLOT_BOTTOM - PLOT_TOP;
-    // Panels of a short model would otherwise stretch over the whole page and
-    // leave the diagram floating in an empty box.
-    let panel_height = (slot_height / rows as f64).min(300.0);
-    let grid_top = PLOT_TOP + (slot_height - rows as f64 * panel_height) / 2.0;
+    // Fill the plot area: a short model would otherwise leave its panels
+    // floating in a page of white margin.
+    let panel_height = slot_height / rows as f64;
+    let grid_top = PLOT_TOP;
     let length_unit = match model.units.unwrap_or(Units::Millimeter) {
         Units::Millimeter => "mm",
         Units::Meter => "m",
@@ -914,7 +987,41 @@ pub fn forces_svg_text(model: &Model, stations: usize) -> Result<String, CaeErro
         let py = grid_top + row as f64 * panel_height;
         let plot_left = px + 64.0;
         let plot_right = px + panel_width - 24.0;
-        let half_height = panel_height * 0.11;
+        let beam_like = panel.kind != ElementKind::Truss;
+        // The station axis at the panel bottom is shared by every curve.
+        let station_axis = py + panel_height - 26.0;
+        let (half_height, axial_baseline, shear_baseline, moment_baseline, axial_label_y) = if beam_like {
+            // Three stacked beam curves share the panel with their axis labels
+            // and the station axis. The baselines are laid out upwards from the
+            // axis so the moment curve can never run into the ticks.
+            let half = ((panel_height - 160.0) / 6.0).clamp(20.0, 63.0);
+            let moment_baseline = station_axis - 16.0 - half;
+            let shear_baseline = moment_baseline - 2.0 * half - 26.0;
+            let axial_baseline = shear_baseline - 2.0 * half - 26.0;
+            (half, axial_baseline, shear_baseline, moment_baseline, None)
+        }
+        else {
+            // A truss panel carries one curve. Anchor the zero line on the
+            // side opposite the force, so a one-signed diagram fills the panel
+            // instead of hugging a centre line.
+            let (minimum, maximum) = panel
+                .stations
+                .iter()
+                .map(|station| station.axial_force)
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| (low.min(value), high.max(value)));
+            let band_top = py + 68.0;
+            let band_bottom = station_axis - 12.0;
+            let (baseline, half) = if maximum <= 0.0 && minimum < 0.0 {
+                (band_top, band_bottom - band_top)
+            }
+            else if minimum >= 0.0 && maximum > 0.0 {
+                (band_bottom, band_bottom - band_top)
+            }
+            else {
+                ((band_top + band_bottom) / 2.0, (band_bottom - band_top) / 2.0)
+            };
+            (half, baseline, 0.0, 0.0, Some(py + 50.0))
+        };
 
         let _ = writeln!(
             text,
@@ -925,51 +1032,132 @@ pub fn forces_svg_text(model: &Model, stations: usize) -> Result<String, CaeErro
             panel_width - 8.0,
             panel_height - 8.0,
         );
+        let title = format!(
+            "{} · {} → {} · L = {} {}",
+            panel.id,
+            panel.from,
+            panel.to,
+            format_contour_value(panel.length),
+            length_unit
+        );
         let _ = writeln!(
             text,
-            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"13\" font-weight=\"600\" fill=\"#111827\">{} · {} → {} · L = {} {}</text>",
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"13\" font-weight=\"600\" fill=\"#111827\">{}</text>",
             px + 10.0,
             py + 20.0,
-            xml_escape(&panel.id),
-            xml_escape(&panel.from),
-            xml_escape(&panel.to),
-            format_contour_value(panel.length),
-            length_unit,
+            xml_escape(&title),
+        );
+        // One placer per panel: labels stay inside their own panel, clear of
+        // the panel border, the title and every plotted curve.
+        let mut placer = LabelPlacer::within(px + 8.0, px + panel_width - 8.0, py + 17.0, py + panel_height - 8.0);
+        placer.block_box((px + 4.0, py + 4.0, px + panel_width - 4.0, py + panel_height - 4.0));
+        placer.reserve((px + 10.0, py + 8.0, px + 10.0 + text_width(&title, 13.0) + 4.0, py + 23.0));
+
+        // The station axis at the panel bottom is shared by all three curves,
+        // so the 0/L labels never land inside a plotted curve.
+        placer.block_line((plot_left, station_axis), (plot_right, station_axis));
+        let _ = writeln!(
+            text,
+            "<line x1=\"{plot_left:.2}\" y1=\"{station_axis:.2}\" x2=\"{plot_right:.2}\" y2=\"{station_axis:.2}\" \
+             stroke=\"#d1d5db\" stroke-width=\"1\"/>"
+        );
+        for step in 0..=4 {
+            let x = plot_left + (plot_right - plot_left) * step as f64 / 4.0;
+            let _ = writeln!(
+                text,
+                "<line x1=\"{x:.2}\" y1=\"{station_axis:.2}\" x2=\"{x:.2}\" y2=\"{:.2}\" stroke=\"#9ca3af\" \
+                 stroke-width=\"1\"/>",
+                station_axis + 4.0
+            );
+        }
+        placer.reserve((plot_left - 1.0, station_axis + 5.0, plot_left + 9.0, station_axis + 18.0));
+        let _ = writeln!(
+            text,
+            "<text x=\"{plot_left:.2}\" y=\"{:.2}\" font-size=\"10\" fill=\"#6b7280\">0</text>",
+            station_axis + 17.0
+        );
+        placer.reserve((plot_right - 9.0, station_axis + 5.0, plot_right + 1.0, station_axis + 18.0));
+        let _ = writeln!(
+            text,
+            "<text x=\"{plot_right:.2}\" y=\"{:.2}\" font-size=\"10\" fill=\"#6b7280\" text-anchor=\"end\">L</text>",
+            station_axis + 17.0
         );
 
         let frame = CurveFrame { plot_left, plot_right, half_height };
-        let beam_like = panel.kind != ElementKind::Truss;
-        // Truss panels centre their single axial curve; beam panels stack the
-        // axial diagram above the shear and moment diagrams.
-        let axial_baseline = if beam_like { py + panel_height * 0.26 } else { py + panel_height * 0.42 };
-        write_force_curve(
+        let mut labels = Vec::new();
+        labels.extend(write_force_curve(
             &mut text,
+            &mut placer,
             &frame,
             axial_baseline,
             panel,
-            &CurveStyle { name: "N", axis_label: "N(x) [N]", color: "#0891b2" },
+            &CurveStyle { name: "N", axis_label: "N(x) [N]", color: "#0891b2", label_y: axial_label_y },
             |station| station.axial_force,
-        );
+        ));
         if beam_like {
-            write_force_curve(
+            labels.extend(write_force_curve(
                 &mut text,
+                &mut placer,
                 &frame,
-                py + panel_height * 0.54,
+                shear_baseline,
                 panel,
-                &CurveStyle { name: "V", axis_label: "V(x) [N]", color: "#2563eb" },
+                &CurveStyle { name: "V", axis_label: "V(x) [N]", color: "#2563eb", label_y: None },
                 |station| station.shear,
-            );
+            ));
             let moment_axis_label = format!("M(x) [{moment_unit}]");
-            write_force_curve(
+            labels.extend(write_force_curve(
                 &mut text,
+                &mut placer,
                 &frame,
-                py + panel_height * 0.82,
+                moment_baseline,
                 panel,
-                &CurveStyle { name: "M", axis_label: &moment_axis_label, color: "#b91c1c" },
+                &CurveStyle { name: "M", axis_label: &moment_axis_label, color: "#b91c1c", label_y: None },
                 |station| station.moment,
+            ));
+        }
+        for label in labels {
+            let placed = placer.place_near(label.anchor, label_width(&label.text), &LABEL_DIRECTIONS);
+            write_leader(&mut text, placed.leader);
+            let _ = writeln!(
+                text,
+                "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"{FONT_LABEL}\" fill=\"{}\">{}</text>",
+                placed.x,
+                placed.y,
+                label.colour,
+                xml_escape(&label.text)
             );
         }
     }
+
+    // Legend on the reserved band above the title block, outside every panel.
+    let legend_y = LEGEND_BASELINE;
+    text.push_str("<g font-size=\"12\" fill=\"#111827\">\n");
+    let _ = writeln!(
+        text,
+        "<line data-legend=\"1\" x1=\"{PLOT_LEFT}\" y1=\"{legend_y}\" x2=\"106\" y2=\"{legend_y}\" stroke=\"#0891b2\" \
+         stroke-width=\"2\"/><text x=\"114\" y=\"{legend_y}\">N(x)</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<line data-legend=\"1\" x1=\"210\" y1=\"{legend_y}\" x2=\"236\" y2=\"{legend_y}\" stroke=\"#2563eb\" \
+         stroke-width=\"2\"/><text x=\"244\" y=\"{legend_y}\">V(x)</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<line data-legend=\"1\" x1=\"330\" y1=\"{legend_y}\" x2=\"356\" y2=\"{legend_y}\" stroke=\"#b91c1c\" \
+         stroke-width=\"2\"/><text x=\"364\" y=\"{legend_y}\">M(x)</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<circle data-legend=\"1\" cx=\"470\" cy=\"{legend_y}\" r=\"3.5\" fill=\"#16a34a\"/>\
+         <text x=\"478\" y=\"{legend_y}\">zero crossing</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<circle data-legend=\"1\" cx=\"600\" cy=\"{legend_y}\" r=\"3\" fill=\"#111827\"/>\
+         <text x=\"608\" y=\"{legend_y}\">extreme</text>"
+    );
+    text.push_str("</g>\n");
 
     write_sheet_close(
         &mut text,
@@ -979,6 +1167,528 @@ pub fn forces_svg_text(model: &Model, stations: usize) -> Result<String, CaeErro
             "extremes and zero crossings are labelled with four significant digits; truss panels carry the axial diagram only.",
         ],
     );
+
+    Ok(text)
+}
+
+/// Writes a deterministic SVG sheet of the shear force `V(x)` diagram drawn on
+/// the member axes.
+///
+/// Only members with rotational stiffness (`beam` and `beam3d`) carry shear, so
+/// truss bars are skipped and named on the sheet. Each beam member keeps its
+/// axis as the zero line and the sampled shear is drawn as filled polygons on
+/// the local `+y` side: tension-side values positive (blue) and negative
+/// values red. The axis end values and the extreme station are labelled from
+/// the same [`solve_internal_forces`] report that fills `forces.csv`, so the
+/// drawing and the numbers cannot drift.
+///
+/// When `path` ends in `.svg` it is used as the output file, otherwise `path`
+/// is treated as a directory and `shear.svg` is created inside it.
+pub fn export_shear_svg(model: &Model, stations: usize, path: &Path) -> Result<(), CaeError> {
+    let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+        path.to_path_buf()
+    }
+    else {
+        path.join(DrawingKind::Shear.default_file_name())
+    };
+    write_atomic(&target, &shear_svg_text(model, stations)?)
+}
+
+/// Builds the shear-force sheet as SVG text without touching the file system,
+/// so the same bytes back the SVG and the PDF export.
+pub fn shear_svg_text(model: &Model, stations: usize) -> Result<String, CaeError> {
+    beam_diagram_svg_text(model, stations, BeamDiagramQuantity::Shear)
+}
+
+/// Writes a deterministic SVG sheet of the bending moment `M(x)` diagram drawn
+/// on the member axes.
+///
+/// The layout matches [`export_shear_svg`]: only `beam` and `beam3d` members are
+/// drawn, sagging moments are positive and plotted on the local `+y` side,
+/// negative moments are drawn on the opposite side in red, and both member end
+/// values plus the extreme station are labelled from the solved internal
+/// forces.
+///
+/// When `path` ends in `.svg` it is used as the output file, otherwise `path`
+/// is treated as a directory and `moment.svg` is created inside it.
+pub fn export_moment_svg(model: &Model, stations: usize, path: &Path) -> Result<(), CaeError> {
+    let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+        path.to_path_buf()
+    }
+    else {
+        path.join(DrawingKind::Moment.default_file_name())
+    };
+    write_atomic(&target, &moment_svg_text(model, stations)?)
+}
+
+/// Builds the bending-moment sheet as SVG text without touching the file
+/// system, so the same bytes back the SVG and the PDF export.
+pub fn moment_svg_text(model: &Model, stations: usize) -> Result<String, CaeError> {
+    beam_diagram_svg_text(model, stations, BeamDiagramQuantity::Moment)
+}
+
+/// Which internal force the beam diagram sheet plots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BeamDiagramQuantity {
+    Shear,
+    Moment,
+}
+
+impl BeamDiagramQuantity {
+    fn symbol(self) -> &'static str {
+        match self {
+            Self::Shear => "V",
+            Self::Moment => "M",
+        }
+    }
+
+    fn drawn_title(self) -> &'static str {
+        match self {
+            Self::Shear => "OpenCAE shear force diagram",
+            Self::Moment => "OpenCAE bending moment diagram",
+        }
+    }
+
+    fn value(self, station: &crate::solver::SectionForces) -> f64 {
+        match self {
+            Self::Shear => station.shear,
+            Self::Moment => station.moment,
+        }
+    }
+}
+
+/// Builds a filled shear or moment diagram on the member axes.
+///
+/// The projection reserves room for the largest excursion on every side, so a
+/// fill can never leave the plot area even at the model edge. Truss members are
+/// drawn dashed and listed in a status line instead of being given a diagram.
+fn beam_diagram_svg_text(model: &Model, stations: usize, quantity: BeamDiagramQuantity) -> Result<String, CaeError> {
+    if model.elements.is_empty() {
+        return Err(CaeError::new("export/no-beam-diagram", "the model has no members, so there is no diagram to draw"));
+    }
+    let diagrams = solve_internal_forces(model, stations)?;
+    let units = model.units.unwrap_or(Units::Millimeter);
+    let moment_unit = ContourQuantity::Moment.unit(units);
+    let length_unit = match units {
+        Units::Millimeter => "mm",
+        Units::Meter => "m",
+    };
+    let value_unit = match quantity {
+        BeamDiagramQuantity::Shear => "N",
+        BeamDiagramQuantity::Moment => moment_unit,
+    };
+
+    let beam_like = |kind: ElementKind| matches!(kind, ElementKind::Beam | ElementKind::Beam3D);
+    let depth = if model.dimension == 3 { 0.5 } else { 0.0 };
+    let oblique_x = depth * (std::f64::consts::FRAC_PI_6).cos();
+    let oblique_y = depth * (std::f64::consts::FRAC_PI_6).sin();
+    let project_point = |x: f64, y: f64, z: f64| (x + oblique_x * z, y + oblique_y * z);
+    let geometry: Vec<(f64, f64)> = model.nodes.iter().map(|node| project_point(node.x, node.y, node.z)).collect();
+    // The diagram excursion is large enough to fill the page; the fit reserves
+    // exactly the horizontal and vertical part each member's normal needs, so
+    // the fill cannot leave the viewport even on a diagonal or 3D member.
+    const MAX_OFFSET: f64 = 165.0;
+    let mut max_normal_x: f64 = 0.0;
+    let mut max_normal_y: f64 = 0.0;
+    for element in model.elements.iter().filter(|element| beam_like(element.kind)) {
+        let Some(from) = model.nodes.iter().find(|node| node.id == element.from)
+        else {
+            continue;
+        };
+        let Some(to) = model.nodes.iter().find(|node| node.id == element.to)
+        else {
+            continue;
+        };
+        let (ax, ay) = project_point(from.x, from.y, from.z);
+        let (bx, by) = project_point(to.x, to.y, to.z);
+        let (dx, dy) = (bx - ax, by - ay);
+        let length = (dx * dx + dy * dy).sqrt();
+        if length > 0.0 && length.is_finite() {
+            max_normal_x = max_normal_x.max((dy / length).abs());
+            max_normal_y = max_normal_y.max((dx / length).abs());
+        }
+    }
+    let reserve_x = MAX_OFFSET * max_normal_x + 24.0;
+    let reserve_y = MAX_OFFSET * max_normal_y + 24.0;
+    let projection = Projection::fit_in(
+        geometry.clone(),
+        VIEW_LEFT + reserve_x,
+        VIEW_TOP + reserve_y,
+        VIEW_RIGHT - reserve_x,
+        VIEW_BOTTOM - reserve_y,
+    )?;
+    let project = |x: f64, y: f64| projection.project(x, y);
+
+    let limit = diagrams
+        .elements
+        .iter()
+        .filter(|diagram| beam_like(diagram.kind))
+        .flat_map(|diagram| diagram.stations.iter())
+        .map(|station| quantity.value(station).abs())
+        .fold(0.0, f64::max);
+    // End forces recovered from the element stiffness matrix carry round-off
+    // such as 3e-11 on a support that is analytically zero; snap it before it
+    // reaches a printed label.
+    let snap = move |value: f64| if limit > 0.0 && value.abs() <= 1.0e-9 * limit { 0.0 } else { value };
+    let mut skipped = Vec::new();
+    for diagram in &diagrams.elements {
+        if !beam_like(diagram.kind) {
+            skipped.push(diagram.id.as_str());
+        }
+    }
+    let meta = SheetMeta::new(
+        model,
+        quantity.drawn_title(),
+        match quantity {
+            BeamDiagramQuantity::Shear => DrawingKind::Shear.number(),
+            BeamDiagramQuantity::Moment => DrawingKind::Moment.number(),
+        },
+        "schematic",
+    );
+
+    let mut text = String::new();
+    write_sheet_open(&mut text, &meta);
+
+    let status = if skipped.is_empty() {
+        "all members are beam-like; the filled diagram is drawn on each member axis.".to_string()
+    }
+    else {
+        format!("truss members carry no shear or moment and are skipped: {}.", skipped.join(", "))
+    };
+    let status_size = fit_font_size(&status, PLOT_RIGHT - PLOT_LEFT, 9.5, 7.5);
+    let _ = writeln!(
+        text,
+        "<text x=\"{PLOT_LEFT}\" y=\"57\" font-size=\"{status_size:.2}\" fill=\"#6b7280\">{}</text>",
+        xml_escape(&status)
+    );
+
+    // Geometry first: every member axis, every truss bar and every filled
+    // excursion is registered with the placer before any label is written.
+    let mut blocked: Vec<((f64, f64), (f64, f64))> = Vec::new();
+    let mut symbol_boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
+    let mut node_pairs = Vec::with_capacity(model.elements.len());
+    for element in &model.elements {
+        let from = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.from)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+        let to = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.to)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+        node_pairs.push((from, to));
+    }
+
+    text.push_str("<g stroke-linecap=\"round\">\n");
+    // Truss bars only carry the axial force, so they stay as a thin skeleton.
+    for (&(from, to), element) in node_pairs.iter().zip(&model.elements) {
+        if beam_like(element.kind) {
+            continue;
+        }
+        let (x1, y1) = project(geometry[from].0, geometry[from].1);
+        let (x2, y2) = project(geometry[to].0, geometry[to].1);
+        blocked.push(((x1, y1), (x2, y2)));
+        let _ = writeln!(
+            text,
+            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1.4\" \
+             stroke-dasharray=\"5 4\"/>"
+        );
+    }
+    // Supports keep the diagram readable as a structure, not a floating axis.
+    for support in &model.supports {
+        if !support_is_constrained(support) {
+            continue;
+        }
+        let Some(index) = model.nodes.iter().position(|node| node.id == support.node)
+        else {
+            continue;
+        };
+        let (cx, cy) = project(geometry[index].0, geometry[index].1);
+        symbol_boxes.push((cx - 11.0, cy + 4.0, cx + 11.0, cy + 16.0));
+        let _ = writeln!(
+            text,
+            "<polygon points=\"{cx:.2},{:.2} {:.2},{:.2} {:.2},{:.2}\" fill=\"#16a34a\"/>",
+            cy + 4.0,
+            cx - 8.0,
+            cy + 15.0,
+            cx + 8.0,
+            cy + 15.0,
+        );
+        let _ = writeln!(
+            text,
+            "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"#16a34a\" stroke-width=\"1.5\"/>",
+            cx - 11.0,
+            cy + 15.0,
+            cx + 11.0,
+            cy + 15.0,
+        );
+    }
+
+    // Each committed polygon edge is a drawing line no label may cross.
+    struct DiagramPolygon {
+        points: [(f64, f64); 4],
+        fill: &'static str,
+        stroke: &'static str,
+    }
+    let mut polygons: Vec<DiagramPolygon> = Vec::new();
+    let mut diagram_points: Vec<Vec<(f64, f64)>> = Vec::new();
+    for ((&(from, to), element), diagram) in node_pairs.iter().zip(&model.elements).zip(&diagrams.elements) {
+        if !beam_like(element.kind) || !diagram.length.is_finite() || diagram.length <= 0.0 {
+            continue;
+        }
+        let (x1, y1) = project(geometry[from].0, geometry[from].1);
+        let (x2, y2) = project(geometry[to].0, geometry[to].1);
+        let (dx, dy) = (x2 - x1, y2 - y1);
+        let length = (dx * dx + dy * dy).sqrt();
+        if !length.is_finite() || length <= 0.0 {
+            continue;
+        }
+        // The local +y axis of the member, projected. A horizontal member from
+        // left to right plots positive values above its axis.
+        let (nx, ny) = (dy / length, -dx / length);
+        let map = |position: f64, value: f64| {
+            let fraction = (position / diagram.length).clamp(0.0, 1.0);
+            let offset = if limit > 0.0 { snap(value) / limit * MAX_OFFSET } else { 0.0 };
+            (x1 + dx * fraction + nx * offset, y1 + dy * fraction + ny * offset)
+        };
+        let bases: Vec<(f64, f64)> = diagram.stations.iter().map(|station| map(station.position, 0.0)).collect();
+        let points: Vec<(f64, f64)> =
+            diagram.stations.iter().map(|station| map(station.position, quantity.value(station))).collect();
+        for window in 0..points.len().saturating_sub(1) {
+            let v1 = snap(quantity.value(&diagram.stations[window]));
+            let v2 = snap(quantity.value(&diagram.stations[window + 1]));
+            if (v1 - 0.0).abs() <= 1.0e-12 * limit.max(1.0) && (v2 - 0.0).abs() <= 1.0e-12 * limit.max(1.0) {
+                continue;
+            }
+            let positive = v1 + v2 >= 0.0;
+            let (fill, stroke) = if positive { ("#dbeafe", "#2563eb") } else { ("#fee2e2", "#b91c1c") };
+            if v1 * v2 >= 0.0 {
+                polygons.push(DiagramPolygon {
+                    points: [bases[window], points[window], points[window + 1], bases[window + 1]],
+                    fill,
+                    stroke,
+                });
+            }
+            else {
+                let fraction = v1 / (v1 - v2);
+                let (bx, by) = (
+                    bases[window].0 + (bases[window + 1].0 - bases[window].0) * fraction,
+                    bases[window].1 + (bases[window + 1].1 - bases[window].1) * fraction,
+                );
+                let crossing = (bx, by);
+                let first_positive = v1 > 0.0;
+                let first = if first_positive { ("#dbeafe", "#2563eb") } else { ("#fee2e2", "#b91c1c") };
+                let second = if first_positive { ("#fee2e2", "#b91c1c") } else { ("#dbeafe", "#2563eb") };
+                polygons.push(DiagramPolygon {
+                    points: [bases[window], points[window], crossing, crossing],
+                    fill: first.0,
+                    stroke: first.1,
+                });
+                polygons.push(DiagramPolygon {
+                    points: [crossing, crossing, points[window + 1], bases[window + 1]],
+                    fill: second.0,
+                    stroke: second.1,
+                });
+            }
+        }
+        diagram_points.push(points);
+    }
+    for polygon in &polygons {
+        let [a, b, c, d] = polygon.points;
+        let fill = polygon.fill;
+        let stroke = polygon.stroke;
+        let points = format!("{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}", a.0, a.1, b.0, b.1, c.0, c.1, d.0, d.1);
+        let _ = writeln!(text, "<polygon points=\"{points}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1\"/>");
+        blocked.push((a, b));
+        blocked.push((b, c));
+        blocked.push((c, d));
+        blocked.push((d, a));
+    }
+    // The member axis is the zero line, drawn on top of the fill so the sign
+    // change stays readable.
+    for (&(from, to), element) in node_pairs.iter().zip(&model.elements) {
+        if !beam_like(element.kind) {
+            continue;
+        }
+        let (x1, y1) = project(geometry[from].0, geometry[from].1);
+        let (x2, y2) = project(geometry[to].0, geometry[to].1);
+        blocked.push(((x1, y1), (x2, y2)));
+        let _ = writeln!(
+            text,
+            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#111827\" stroke-width=\"2.4\"/>"
+        );
+    }
+    for curve in &diagram_points {
+        let mut points = String::new();
+        for &(x, y) in curve {
+            let _ = write!(points, "{x:.2},{y:.2} ");
+        }
+        let _ = writeln!(
+            text,
+            "<polyline points=\"{}\" fill=\"none\" stroke=\"#374151\" stroke-width=\"1.2\"/>",
+            points.trim_end()
+        );
+    }
+    for &(x, y) in &geometry {
+        let (cx, cy) = project(x, y);
+        symbol_boxes.push((cx - 4.0, cy - 4.0, cx + 4.0, cy + 4.0));
+        let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"2.8\" fill=\"#111827\"/>");
+    }
+    text.push_str("</g>\n");
+
+    // Labels last, after every fill and axis, so nothing can be overprinted.
+    text.push_str("<g font-size=\"11\">\n");
+    let mut placer = LabelPlacer::within(PLOT_LEFT + 4.0, PLOT_RIGHT - 4.0, PLOT_TOP + 4.0, PLOT_BOTTOM - 4.0);
+    for (from, to) in &blocked {
+        placer.block_line(*from, *to);
+    }
+    for rect in symbol_boxes {
+        placer.block_box(rect);
+    }
+    let center = centroid(&geometry.iter().map(|&(x, y)| project(x, y)).collect::<Vec<_>>());
+    for (index, node) in model.nodes.iter().enumerate() {
+        let point = project(geometry[index].0, geometry[index].1);
+        let placed = place_node_label(&mut placer, &node.id, point, center, false, false);
+        write_leader(&mut text, placed.leader);
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" fill=\"#374151\">{}</text>",
+            placed.x,
+            placed.y,
+            xml_escape(&node.id)
+        );
+    }
+
+    // A shared node between two members would otherwise print the same end
+    // value twice at the same point.
+    let mut seen_annotations: Vec<(String, (f64, f64))> = Vec::new();
+    for ((&(from, to), element), diagram) in node_pairs.iter().zip(&model.elements).zip(&diagrams.elements) {
+        if !beam_like(element.kind) || !diagram.length.is_finite() || diagram.length <= 0.0 {
+            continue;
+        }
+        let (x1, y1) = project(geometry[from].0, geometry[from].1);
+        let (x2, y2) = project(geometry[to].0, geometry[to].1);
+        let (dx, dy) = (x2 - x1, y2 - y1);
+        let length = (dx * dx + dy * dy).sqrt();
+        if !length.is_finite() || length <= 0.0 {
+            continue;
+        }
+        let (nx, ny) = (dy / length, -dx / length);
+        let tip = |position: f64, value: f64| {
+            let fraction = (position / diagram.length).clamp(0.0, 1.0);
+            let offset = if limit > 0.0 { snap(value) / limit * MAX_OFFSET } else { 0.0 };
+            (x1 + dx * fraction + nx * offset, y1 + dy * fraction + ny * offset)
+        };
+        let mut annotations: Vec<(String, (f64, f64), bool)> = Vec::new();
+        if let (Some(first), Some(last)) = (diagram.stations.first(), diagram.stations.last()) {
+            let first_value = snap(quantity.value(first));
+            let last_value = snap(quantity.value(last));
+            annotations.push((
+                format!("{} = {} {value_unit}", quantity.symbol(), format_contour_value(first_value)),
+                tip(first.position, first_value),
+                first_value >= 0.0,
+            ));
+            annotations.push((
+                format!("{} = {} {value_unit}", quantity.symbol(), format_contour_value(last_value)),
+                tip(last.position, last_value),
+                last_value >= 0.0,
+            ));
+        }
+        if let Some((station, value)) = diagram
+            .stations
+            .iter()
+            .map(|station| (station, snap(quantity.value(station))))
+            .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal))
+        {
+            // An extreme that sits on a member end is already covered by the
+            // two end labels, so a third label would only duplicate it and
+            // crowd the same corner.
+            let at_end = diagram.stations.first().zip(diagram.stations.last()).is_some_and(|(first, last)| {
+                (station.position - first.position).abs() < 1.0e-9 || (station.position - last.position).abs() < 1.0e-9
+            });
+            if value.abs() > 0.0 && !at_end {
+                annotations.push((
+                    format!(
+                        "max |{}| = {} {value_unit} @ x={}",
+                        quantity.symbol(),
+                        format_contour_value(value.abs()),
+                        format_contour_value(station.position)
+                    ),
+                    tip(station.position, value),
+                    value >= 0.0,
+                ));
+            }
+        }
+        for (label, anchor, positive) in annotations {
+            if seen_annotations
+                .iter()
+                .any(|(seen, point)| *seen == label && (point.0 - anchor.0).abs() < 3.0 && (point.1 - anchor.1).abs() < 3.0)
+            {
+                continue;
+            }
+            seen_annotations.push((label.clone(), anchor));
+            let outward = if positive { (nx, ny) } else { (-nx, -ny) };
+            let placed = placer.place_near(anchor, label_width(&label), &directions_towards(outward));
+            write_leader(&mut text, placed.leader);
+            let colour = if positive { "#1d4ed8" } else { "#b91c1c" };
+            let _ = writeln!(
+                text,
+                "<text x=\"{:.2}\" y=\"{:.2}\" fill=\"{colour}\">{}</text>",
+                placed.x,
+                placed.y,
+                xml_escape(&label)
+            );
+        }
+    }
+    text.push_str("</g>\n");
+
+    // Legend on the reserved band above the title block, outside the model.
+    let legend_y = LEGEND_BASELINE;
+    text.push_str("<g font-size=\"12\" fill=\"#111827\">\n");
+    let _ = writeln!(
+        text,
+        "<rect data-legend=\"1\" x=\"{PLOT_LEFT}\" y=\"{}\" width=\"22\" height=\"8\" fill=\"#dbeafe\" stroke=\"#2563eb\"/>\
+         <text x=\"{}\" y=\"{}\">positive {} on local +y</text>",
+        legend_y - 8.0,
+        PLOT_LEFT + 30.0,
+        legend_y,
+        quantity.symbol()
+    );
+    let _ = writeln!(
+        text,
+        "<rect data-legend=\"1\" x=\"292\" y=\"{}\" width=\"22\" height=\"8\" fill=\"#fee2e2\" stroke=\"#b91c1c\"/>\
+         <text x=\"322\" y=\"{legend_y}\">negative {}</text>",
+        legend_y - 8.0,
+        quantity.symbol()
+    );
+    let _ = writeln!(
+        text,
+        "<line data-legend=\"1\" x1=\"412\" y1=\"{legend_y}\" x2=\"438\" y2=\"{legend_y}\" stroke=\"#111827\" \
+         stroke-width=\"2.4\"/><text x=\"446\" y=\"{legend_y}\">member axis (zero)</text>"
+    );
+    if !skipped.is_empty() {
+        let _ = writeln!(
+            text,
+            "<line data-legend=\"1\" x1=\"604\" y1=\"{legend_y}\" x2=\"630\" y2=\"{legend_y}\" stroke=\"#9ca3af\" \
+             stroke-width=\"1.4\" stroke-dasharray=\"5 4\"/><text x=\"638\" y=\"{legend_y}\">truss skipped</text>"
+        );
+    }
+    text.push_str("</g>\n");
+
+    let sign_note = match quantity {
+        BeamDiagramQuantity::Shear => {
+            "sign convention: V is positive when it acts upward on the left face of the cut (dV/dx = q, local +y), plotted on the local +y side."
+        }
+        BeamDiagramQuantity::Moment => {
+            "sign convention: sagging moment is positive and plotted on the local +y side (dM/dx = V); beam3d plots the local z moment."
+        }
+    };
+    let detail_note = format!(
+        "lengths in {length_unit}; each member end value and the extreme station are labelled; truss members carry no shear or moment and are skipped."
+    );
+    write_sheet_close(&mut text, &meta, &[sign_note, &detail_note]);
 
     Ok(text)
 }
@@ -995,6 +1705,18 @@ struct CurveStyle<'a> {
     name: &'a str,
     axis_label: &'a str,
     color: &'a str,
+    /// Fixed baseline of the quantity label, used by a one-curve truss panel
+    /// whose zero line may sit far from the panel title.
+    label_y: Option<f64>,
+}
+
+/// One text annotation requested by [`write_force_curve`]. The anchor is the
+/// point on the curve the label belongs to; the shared placer moves the text
+/// away from every line before it is written.
+struct CurveLabel {
+    text: String,
+    anchor: (f64, f64),
+    colour: &'static str,
 }
 
 /// Draws one sampled quantity of a panel as a curve over its zero line.
@@ -1007,72 +1729,88 @@ struct CurveStyle<'a> {
 /// green dot and a `{name}=0 @ x={position}` label. Exact zeros are detected
 /// after snapping round-off below `1e-12` of the largest magnitude, sign
 /// changes between neighbouring stations are located by linear interpolation.
+///
+/// The curve, the baseline, the ticks and the axis label are registered with
+/// `placer`, so the returned labels are written after every curve and cannot
+/// cross one.
 fn write_force_curve(
     text: &mut String,
+    placer: &mut LabelPlacer,
     frame: &CurveFrame,
     baseline: f64,
     panel: &ElementDiagram,
     style: &CurveStyle<'_>,
     value: impl Fn(&crate::solver::SectionForces) -> f64,
-) {
+) -> Vec<CurveLabel> {
     let CurveFrame { plot_left, plot_right, half_height } = *frame;
-    let CurveStyle { name, axis_label, color } = *style;
+    let CurveStyle { name, axis_label, color, label_y } = *style;
     let limit = panel.stations.iter().map(|station| value(station).abs()).fold(0.0, f64::max);
     let snap = |raw: f64| if limit > 0.0 && raw.abs() <= 1.0e-12 * limit { 0.0 } else { raw };
     let scale = if limit > 0.0 { half_height / limit } else { 0.0 };
     let map_x = |position: f64| plot_left + (position / panel.length).clamp(0.0, 1.0) * (plot_right - plot_left);
     let map_y = |raw: f64| baseline - snap(raw) * scale;
+    let mut labels = Vec::new();
 
+    placer.block_line((plot_left, baseline), (plot_right, baseline));
     let _ = writeln!(
         text,
         "<line x1=\"{plot_left:.2}\" y1=\"{baseline:.2}\" x2=\"{plot_right:.2}\" y2=\"{baseline:.2}\" stroke=\"#d1d5db\" \
          stroke-width=\"1\"/>"
     );
-    let _ = writeln!(
-        text,
-        "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"12\" fill=\"#374151\">{axis_label}</text>",
-        plot_left,
-        baseline - half_height - 8.0
-    );
-    // A station axis with quarter ticks and 0/L end labels, drawn once per
-    // panel (the axial curve is present in every panel).
-    if name == "N" {
-        for step in 0..=4 {
-            let x = plot_left + (plot_right - plot_left) * step as f64 / 4.0;
-            let _ = writeln!(
-                text,
-                "<line x1=\"{x:.2}\" y1=\"{baseline:.2}\" x2=\"{x:.2}\" y2=\"{:.2}\" stroke=\"#9ca3af\" \
-                 stroke-width=\"1\"/>",
-                baseline + 4.0
-            );
-        }
-        let _ = writeln!(
-            text,
-            "<text x=\"{plot_left:.2}\" y=\"{:.2}\" font-size=\"10\" fill=\"#6b7280\">0</text>",
-            baseline + 16.0
-        );
-        let _ = writeln!(
-            text,
-            "<text x=\"{plot_right:.2}\" y=\"{:.2}\" font-size=\"10\" fill=\"#6b7280\" text-anchor=\"end\">L</text>",
-            baseline + 16.0
-        );
-    }
+    let axis_y = label_y.unwrap_or(baseline - half_height - 8.0);
+    placer.reserve((plot_left, axis_y - 12.0, plot_left + text_width(axis_label, 12.0) + 4.0, axis_y + 3.0));
+    let _ =
+        writeln!(text, "<text x=\"{plot_left:.2}\" y=\"{axis_y:.2}\" font-size=\"12\" fill=\"#374151\">{axis_label}</text>");
 
     if limit == 0.0 {
         // A uniformly zero quantity would otherwise draw an unmarked flat
         // line that is indistinguishable from a missing diagram.
-        let _ = writeln!(
-            text,
-            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"11\" fill=\"#374151\" text-anchor=\"middle\">{name} \u{2261} 0</text>",
-            (plot_left + plot_right) / 2.0,
-            baseline - 6.0,
-        );
-        return;
+        labels.push(CurveLabel {
+            text: format!("{name} \u{2261} 0"),
+            anchor: ((plot_left + plot_right) / 2.0, baseline),
+            colour: "#374151",
+        });
+        return labels;
     }
 
+    let projected: Vec<(f64, f64)> =
+        panel.stations.iter().map(|station| (map_x(station.position), map_y(value(station)))).collect();
     let mut points = String::new();
-    for station in &panel.stations {
-        let _ = write!(points, "{:.2},{:.2} ", map_x(station.position), map_y(value(station)));
+    for &(x, y) in &projected {
+        let _ = write!(points, "{x:.2},{y:.2} ");
+    }
+    // A one-curve truss panel is shaded between the zero line and the curve.
+    // The pale band makes a constant axial force read as a diagram instead of a
+    // line floating in a large empty panel.
+    if label_y.is_some() {
+        for index in 0..projected.len().saturating_sub(1) {
+            let v1 = snap(value(&panel.stations[index]));
+            let v2 = snap(value(&panel.stations[index + 1]));
+            if v1 == 0.0 && v2 == 0.0 {
+                continue;
+            }
+            let first = projected[index];
+            let second = projected[index + 1];
+            let mut quads: Vec<Vec<(f64, f64)>> = Vec::new();
+            if v1 * v2 >= 0.0 {
+                quads.push(vec![(first.0, baseline), (second.0, baseline), second, first]);
+            }
+            else {
+                let fraction = v1 / (v1 - v2);
+                let x = first.0 + (second.0 - first.0) * fraction;
+                quads.push(vec![(first.0, baseline), (x, baseline), first]);
+                quads.push(vec![(x, baseline), (second.0, baseline), second]);
+            }
+            for quad in quads {
+                let positive = v1 + v2 >= 0.0;
+                let fill = if positive { "#fef2f2" } else { "#eff6ff" };
+                let rendered = quad.iter().map(|(x, y)| format!("{x:.2},{y:.2}")).collect::<Vec<_>>().join(" ");
+                let _ = writeln!(text, "<polygon points=\"{rendered}\" fill=\"{fill}\" stroke=\"none\"/>");
+            }
+        }
+    }
+    for window in projected.windows(2) {
+        placer.block_line(window[0], window[1]);
     }
     let _ = writeln!(text, "<polyline points=\"{}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"2\"/>", points.trim_end(),);
 
@@ -1087,14 +1825,12 @@ fn write_force_curve(
         let x = map_x(position);
         let y = map_y(best);
         let _ = writeln!(text, "<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"3\" fill=\"{color}\"/>");
-        let _ = writeln!(
-            text,
-            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"11\" fill=\"#111827\">max |{name}| = {} @ x={}</text>",
-            (x + 6.0).min(plot_right - 90.0),
-            (y - 6.0).max(baseline - half_height - 2.0),
-            format_contour_value(best.abs()),
-            format_contour_value(position),
-        );
+        placer.block_box((x - 3.0, y - 3.0, x + 3.0, y + 3.0));
+        labels.push(CurveLabel {
+            text: format!("max |{name}| = {} @ x={}", format_contour_value(best.abs()), format_contour_value(position)),
+            anchor: (x, y),
+            colour: "#111827",
+        });
     }
 
     let mut previous: Option<(f64, f64)> = None;
@@ -1117,16 +1853,16 @@ fn write_force_curve(
         if let Some(position) = crossing {
             let x = map_x(position);
             let _ = writeln!(text, "<circle cx=\"{x:.2}\" cy=\"{baseline:.2}\" r=\"3.5\" fill=\"#16a34a\"/>");
-            let _ = writeln!(
-                text,
-                "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"11\" fill=\"#166534\">{name}=0 @ x={}</text>",
-                (x - 6.0).max(plot_left),
-                baseline + half_height + 14.0,
-                format_contour_value(position),
-            );
+            placer.block_box((x - 3.5, baseline - 3.5, x + 3.5, baseline + 3.5));
+            labels.push(CurveLabel {
+                text: format!("{name}=0 @ x={}", format_contour_value(position)),
+                anchor: (x, baseline),
+                colour: "#166534",
+            });
         }
         previous = Some((raw, station.position));
     }
+    labels
 }
 /// Picks the deformation scale that makes the largest nodal displacement span
 /// about 18 % of the drawing canvas.
@@ -1178,22 +1914,94 @@ pub fn auto_deformation_scale(model: &Model, solution: &Solution) -> f64 {
     }
 }
 
-/// Approximate width of a label drawn at font size 11 in the sheet font.
+/// Approximate width of a label drawn at the annotation size in the sheet
+/// font.
 ///
-/// The label placement only needs a stable estimate, not exact metrics, so
-/// six pixels per character keep two labels apart without measuring text.
+/// The label placement only needs a stable estimate, not exact metrics, so a
+/// fixed average advance keeps labels apart without measuring text.
 fn label_width(text: &str) -> f64 {
-    text.chars().count() as f64 * 6.0
+    text_width(text, FONT_LABEL)
 }
 
 fn rectangles_overlap(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
     a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
 }
 
-/// Remembers the glyph boxes of the labels already drawn on a sheet so the
-/// next label can pick a position that does not overprint an earlier one.
+/// Glyph box of a label whose left end and baseline are (`x`, `y`).
+fn label_box(x: f64, y: f64, width: f64) -> (f64, f64, f64, f64) {
+    (x - 1.0, y - 11.0, x + width + 1.0, y + 3.0)
+}
+
+fn point_in_rect(point: (f64, f64), rect: (f64, f64, f64, f64)) -> bool {
+    point.0 >= rect.0 && point.0 <= rect.2 && point.1 >= rect.1 && point.1 <= rect.3
+}
+
+fn orientation(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+    (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+}
+
+/// Proper-intersection test of two open segments; touching endpoints count,
+/// because a label that touches a member line still reads as a crossing.
+fn segments_cross(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
+    let o1 = orientation(a, b, c);
+    let o2 = orientation(a, b, d);
+    let o3 = orientation(c, d, a);
+    let o4 = orientation(c, d, b);
+    if ((o1 > 0.0 && o2 < 0.0) || (o1 < 0.0 && o2 > 0.0)) && ((o3 > 0.0 && o4 < 0.0) || (o3 < 0.0 && o4 > 0.0)) {
+        return true;
+    }
+    // Collinear segments that touch: check the bounding boxes.
+    let on = |p: (f64, f64), q: (f64, f64), r: (f64, f64)| {
+        o1.abs() <= 1.0e-9
+            && (p.0.min(q.0) - 1.0e-9..=p.0.max(q.0) + 1.0e-9).contains(&r.0)
+            && (p.1.min(q.1) - 1.0e-9..=p.1.max(q.1) + 1.0e-9).contains(&r.1)
+    };
+    (o1.abs() <= 1.0e-9 && on(a, b, c))
+        || (o2.abs() <= 1.0e-9 && on(a, b, d))
+        || (o3.abs() <= 1.0e-9 && on(c, d, a))
+        || (o4.abs() <= 1.0e-9 && on(c, d, b))
+}
+
+fn segment_hits_rect(segment: ((f64, f64), (f64, f64)), rect: (f64, f64, f64, f64)) -> bool {
+    if point_in_rect(segment.0, rect) || point_in_rect(segment.1, rect) {
+        return true;
+    }
+    let corners = [(rect.0, rect.1), (rect.2, rect.1), (rect.2, rect.3), (rect.0, rect.3)];
+    (0..4).any(|index| {
+        let from = corners[index];
+        let to = corners[(index + 1) % 4];
+        segments_cross(segment.0, segment.1, from, to)
+    })
+}
+
+/// The eight compass directions, used to search room around a label anchor.
+const DIAGONAL: f64 = std::f64::consts::FRAC_1_SQRT_2;
+const LABEL_DIRECTIONS: [(f64, f64); 8] = [
+    (0.0, -1.0),
+    (DIAGONAL, -DIAGONAL),
+    (1.0, 0.0),
+    (DIAGONAL, DIAGONAL),
+    (0.0, 1.0),
+    (-DIAGONAL, DIAGONAL),
+    (-1.0, 0.0),
+    (-DIAGONAL, -DIAGONAL),
+];
+
+/// A label that has been placed, with an optional leader line from its anchor
+/// to the glyph box when the free spot was only found further out.
+#[derive(Debug, Clone, Copy, Default)]
+struct PlacedLabel {
+    x: f64,
+    y: f64,
+    leader: Option<((f64, f64), (f64, f64))>,
+}
+
+/// Remembers the glyph boxes and the drawn geometry of the sheet so the next
+/// label can pick a spot that overprints neither an earlier label nor a member
+/// line, an axis or an arrow.
 struct LabelPlacer {
     taken: Vec<(f64, f64, f64, f64)>,
+    blocked: Vec<((f64, f64), (f64, f64))>,
     min_x: f64,
     max_x: f64,
     min_baseline: f64,
@@ -1204,38 +2012,132 @@ impl LabelPlacer {
     /// Restricts every label to the given box, so labels of a geometry sheet
     /// stay inside the plot area instead of drifting into the frame.
     fn within(min_x: f64, max_x: f64, min_baseline: f64, max_baseline: f64) -> Self {
-        Self { taken: Vec::new(), min_x, max_x, min_baseline, max_baseline }
+        Self { taken: Vec::new(), blocked: Vec::new(), min_x, max_x, min_baseline, max_baseline }
     }
 
-    /// Places a label of `width` times 12 px whose preferred baseline anchor
-    /// is (`x`, `y`) and returns the final baseline anchor.
-    ///
-    /// The anchor is tried at the preferred spot and at the offsets around
-    /// it; the first candidate whose glyph box stays inside the drawing area
-    /// and misses every box placed before wins. When all candidates
-    /// collide, the clamped preferred anchor is used so the label at least
-    /// stays on the sheet.
+    /// Registers a drawn line that labels must not cross.
+    fn block_line(&mut self, from: (f64, f64), to: (f64, f64)) {
+        self.blocked.push((from, to));
+    }
+
+    /// Registers a filled symbol such as a node dot or support triangle.
+    fn block_box(&mut self, rect: (f64, f64, f64, f64)) {
+        let (min_x, min_y, max_x, max_y) = rect;
+        let corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)];
+        for index in 0..4 {
+            self.blocked.push((corners[index], corners[(index + 1) % 4]));
+        }
+    }
+
+    /// Reserves a box drawn outside the placer flow, such as a panel title, so
+    /// labels avoid it.
+    fn reserve(&mut self, rect: (f64, f64, f64, f64)) {
+        self.taken.push(rect);
+    }
+
+    fn free(&self, candidate: (f64, f64, f64, f64)) -> bool {
+        if self.taken.iter().any(|taken| rectangles_overlap(candidate, *taken)) {
+            return false;
+        }
+        let padded = (candidate.0 - 1.0, candidate.1 - 1.0, candidate.2 + 1.0, candidate.3 + 1.0);
+        !self.blocked.iter().any(|segment| segment_hits_rect(*segment, padded))
+    }
+
+    /// Places a label of `width` whose preferred baseline anchor is (`x`, `y`)
+    /// and returns the final baseline anchor.
     fn place(&mut self, x: f64, y: f64, width: f64) -> (f64, f64) {
-        const HEIGHT: f64 = 12.0;
-        let (min_x, max_x) = (self.min_x, self.max_x);
-        let (min_baseline, max_baseline) = (self.min_baseline, self.max_baseline);
-        let offsets =
-            [(0.0, 0.0), (0.0, HEIGHT + 6.0), (-width - 12.0, 0.0), (-width - 12.0, HEIGHT + 6.0), (0.0, -HEIGHT - 6.0)];
-        let box_of = |ax: f64, ay: f64| (ax - 1.0, ay - HEIGHT, ax + width + 1.0, ay + 2.0);
-        for (dx, dy) in offsets {
-            let ax = (x + dx).clamp(min_x, max_x - width);
-            let ay = (y + dy).clamp(min_baseline, max_baseline);
-            let candidate = box_of(ax, ay);
-            if !self.taken.iter().any(|taken| rectangles_overlap(candidate, *taken)) {
-                self.taken.push(candidate);
-                return (ax, ay);
+        let placed = self.place_label(x, y, width);
+        (placed.x, placed.y)
+    }
+
+    /// Like [`LabelPlacer::place`] but keeps the leader line of a label that
+    /// had to move away from its anchor.
+    fn place_label(&mut self, x: f64, y: f64, width: f64) -> PlacedLabel {
+        let anchor = (x + width / 2.0, y - 4.0);
+        self.place_near(anchor, width, &LABEL_DIRECTIONS)
+    }
+
+    /// Places a label around `anchor`, probing the eight directions outwards at
+    /// increasing distances. A candidate is accepted only when its glyph box
+    /// stays in bounds and crosses no registered line and no earlier label.
+    /// When every near spot collides, the label moves further out and is
+    /// connected to its anchor with a leader line instead of overprinting.
+    fn place_near(&mut self, anchor: (f64, f64), width: f64, directions: &[(f64, f64)]) -> PlacedLabel {
+        const DISTANCES: [f64; 4] = [12.0, 21.0, 31.0, 43.0];
+        for distance in DISTANCES {
+            for &(dx, dy) in directions {
+                let cx = anchor.0 + dx * distance;
+                let cy = anchor.1 + dy * distance;
+                let ax = (cx - width / 2.0).clamp(self.min_x, self.max_x - width);
+                let ay = (cy + 4.0).clamp(self.min_baseline, self.max_baseline);
+                let candidate = label_box(ax, ay, width);
+                if self.free(candidate) {
+                    self.taken.push(candidate);
+                    let leader = if distance > 18.0 { Some(leader_line(anchor, candidate)) } else { None };
+                    return PlacedLabel { x: ax, y: ay, leader };
+                }
             }
         }
-        let ax = x.clamp(min_x, max_x - width);
-        let ay = y.clamp(min_baseline, max_baseline);
-        self.taken.push(box_of(ax, ay));
-        (ax, ay)
+        // Every near slot is taken: move the label out along its preferred
+        // direction and connect it with a leader instead of overprinting a
+        // member or another label.
+        let (dx, dy) = directions.first().copied().unwrap_or((0.0, -1.0));
+        let ax = (anchor.0 + dx * 56.0 - width / 2.0).clamp(self.min_x, self.max_x - width);
+        let ay = (anchor.1 + dy * 56.0 + 4.0).clamp(self.min_baseline, self.max_baseline);
+        let candidate = label_box(ax, ay, width);
+        self.taken.push(candidate);
+        PlacedLabel { x: ax, y: ay, leader: Some(leader_line(anchor, candidate)) }
     }
+}
+
+/// Leader from a geometry anchor to the nearest edge of a label box.
+fn leader_line(anchor: (f64, f64), rect: (f64, f64, f64, f64)) -> ((f64, f64), (f64, f64)) {
+    let edge_x = if anchor.0 < rect.0 {
+        rect.0
+    }
+    else if anchor.0 > rect.2 {
+        rect.2
+    }
+    else {
+        anchor.0
+    };
+    let edge_y = if anchor.1 < rect.1 {
+        rect.1
+    }
+    else if anchor.1 > rect.3 {
+        rect.3
+    }
+    else {
+        anchor.1
+    };
+    (anchor, (edge_x, edge_y))
+}
+
+/// Writes the leader line of a placed label, if the placement had to move the
+/// text away from its anchor.
+fn write_leader(text: &mut String, leader: Option<((f64, f64), (f64, f64))>) {
+    let Some((from, to)) = leader
+    else {
+        return;
+    };
+    let _ = writeln!(
+        text,
+        "<line x1=\"{:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"#9ca3af\" stroke-width=\"0.9\"/>",
+        from.0, from.1, to.0, to.1
+    );
+}
+
+/// Orders the eight directions so the one closest to `preferred` is probed
+/// first, keeping a label on the side of the member or node it belongs to.
+fn directions_towards(preferred: (f64, f64)) -> [(f64, f64); 8] {
+    let length = (preferred.0 * preferred.0 + preferred.1 * preferred.1).sqrt();
+    let preferred = if length > 1.0e-9 { (preferred.0 / length, preferred.1 / length) } else { (0.0, -1.0) };
+    let mut directions = LABEL_DIRECTIONS;
+    directions.sort_by(|a, b| {
+        let score = |value: &(f64, f64)| value.0 * preferred.0 + value.1 * preferred.1;
+        score(b).partial_cmp(&score(a)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    directions
 }
 
 /// Screen-space centroid of a projected point set.
@@ -1246,8 +2148,8 @@ fn centroid(points: &[(f64, f64)]) -> (f64, f64) {
 }
 
 /// Places a node id on the side facing away from the model centre. A support
-/// node puts its id above the node while the support triangle stays below, so
-/// the symbol and the id occupy opposite sides of the node.
+/// node keeps its id on the outside of the triangle, and a node under a load
+/// arrow avoids the space above it, so neither symbol is overprinted.
 fn place_node_label(
     placer: &mut LabelPlacer,
     id: &str,
@@ -1255,34 +2157,29 @@ fn place_node_label(
     center: (f64, f64),
     supported: bool,
     avoid_above: bool,
-) -> (f64, f64) {
+) -> PlacedLabel {
     let width = label_width(id);
-    let (cx, cy) = point;
-    let horizontal = |cx: f64, cy: f64| {
-        if cx >= center.0 { (cx + 8.0, cy + 4.0) } else { (cx - 8.0 - width, cy + 4.0) }
-    };
-    let (x, y) = if supported {
-        let x = if cx >= center.0 { cx + 7.0 } else { cx - 7.0 - width };
-        (x, cy - 12.0)
+    let away = (point.0 - center.0, point.1 - center.1);
+    let preferred = if supported {
+        (0.0, -1.0)
     }
-    else if cy < center.1 {
-        // A load arrow entering from above owns that space, so the id moves
-        // to the side instead of sitting on the arrow shaft.
-        if avoid_above { horizontal(cx, cy) } else { (cx - width / 2.0, cy - 12.0) }
+    else if avoid_above {
+        if away.0 >= 0.0 { (1.0, -0.2) } else { (-1.0, -0.2) }
     }
-    else if (cx - center.0).abs() >= (cy - center.1).abs() || avoid_above {
-        horizontal(cx, cy)
+    else if away.0.abs() + away.1.abs() > 1.0e-6 {
+        away
     }
     else {
-        (cx - width / 2.0, cy + 18.0)
+        (0.0, -1.0)
     };
-    placer.place(x, y, width)
+    placer.place_near(point, width, &directions_towards(preferred))
 }
 
 /// Writes the member id of every element beside its undeformed midpoint and,
 /// when a solution is supplied, the signed axial force with its unit on the
-/// opposite side of the member. Both labels carry a white halo so they stay
-/// legible where they cross a drawing line.
+/// opposite side of the member. Both labels are pushed along the member normal
+/// until they clear every line and every earlier label, and fall back to a
+/// leader line rather than crossing the member.
 fn write_member_annotations(
     text: &mut String,
     placer: &mut LabelPlacer,
@@ -1304,10 +2201,13 @@ fn write_member_annotations(
         let (nx, ny) = (-dy / length, dx / length);
         let (mx, my) = ((x1 + x2) / 2.0, (y1 + y2) / 2.0);
         let id_width = label_width(&element.id);
-        let (lx, ly) = placer.place(mx + nx * 22.0 - id_width / 2.0, my + ny * 22.0 + 4.0, id_width);
+        let placed = placer.place_near((mx, my), id_width, &directions_towards((nx, ny)));
+        write_leader(text, placed.leader);
         let _ = writeln!(
             text,
-            "<text x=\"{lx:.2}\" y=\"{ly:.2}\" font-size=\"10\" font-weight=\"600\" fill=\"#111827\" {LABEL_HALO}>{}</text>",
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"{FONT_LABEL}\" font-weight=\"600\" fill=\"#111827\">{}</text>",
+            placed.x,
+            placed.y,
             xml_escape(&element.id)
         );
         if let Some(solution) = solution {
@@ -1316,11 +2216,14 @@ fn write_member_annotations(
                 let sign = if force > 0.0 { "+" } else { "" };
                 let label = format!("N = {sign}{} N", format_contour_value(force));
                 let width = label_width(&label);
-                let (lx, ly) = placer.place(mx - nx * 26.0 - width / 2.0, my - ny * 26.0 + 4.0, width);
+                let placed = placer.place_near((mx, my), width, &directions_towards((-nx, -ny)));
+                write_leader(text, placed.leader);
                 let colour = if force > 0.0 { "#b91c1c" } else { "#1d4ed8" };
                 let _ = writeln!(
                     text,
-                    "<text x=\"{lx:.2}\" y=\"{ly:.2}\" font-size=\"10\" fill=\"{colour}\" {LABEL_HALO}>{}</text>",
+                    "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"{FONT_LABEL}\" fill=\"{colour}\">{}</text>",
+                    placed.x,
+                    placed.y,
                     xml_escape(&label)
                 );
             }
@@ -1501,6 +2404,8 @@ pub fn displacement_svg_text(model: &Model, solution: &Solution, scale: f64) -> 
          fill=\"#16a34a\"/>\n</marker>\n</defs>\n",
     );
     text.push_str("<g stroke-linecap=\"round\">\n");
+    let mut blocked: Vec<((f64, f64), (f64, f64))> = Vec::new();
+    let mut symbol_boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
 
     let mut endpoints = Vec::with_capacity(model.elements.len());
     // Every geometry is drawn before every label, so no member, arrow or
@@ -1521,6 +2426,7 @@ pub fn displacement_svg_text(model: &Model, solution: &Solution, scale: f64) -> 
         endpoints.push((from, to));
         let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
         let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
+        blocked.push(((x1, y1), (x2, y2)));
         let _ = writeln!(
             text,
             "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1.2\" \
@@ -1530,15 +2436,21 @@ pub fn displacement_svg_text(model: &Model, solution: &Solution, scale: f64) -> 
     // Beam members follow their Hermite deflection curve; bars stay straight.
     for curve in &curves {
         let mut points = String::new();
+        let mut projected = Vec::with_capacity(curve.len());
         for &(x, y) in curve {
             let (sx, sy) = project(x, y);
+            projected.push((sx, sy));
             let _ = write!(points, "{sx:.2},{sy:.2} ");
+        }
+        for window in projected.windows(2) {
+            blocked.push((window[0], window[1]));
         }
         let _ =
             writeln!(text, "<polyline points=\"{}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>", points.trim_end(),);
     }
     for point in &deformed {
         let (cx, cy) = project(point.0, point.1);
+        symbol_boxes.push((cx - 4.0, cy - 4.0, cx + 4.0, cy + 4.0));
         let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"#111827\"/>");
     }
     let mut arrows = Vec::with_capacity(solution.nodes.len());
@@ -1560,6 +2472,7 @@ pub fn displacement_svg_text(model: &Model, solution: &Solution, scale: f64) -> 
         let arrow_length = 34.0 * (magnitude / max_magnitude);
         let tx = cx + direction_x * arrow_length;
         let ty = cy + direction_y * arrow_length;
+        blocked.push(((cx, cy), (tx, ty)));
         let _ = writeln!(
             text,
             "<line x1=\"{cx:.2}\" y1=\"{cy:.2}\" x2=\"{tx:.2}\" y2=\"{ty:.2}\" stroke=\"#16a34a\" stroke-width=\"2\" \
@@ -1569,22 +2482,35 @@ pub fn displacement_svg_text(model: &Model, solution: &Solution, scale: f64) -> 
     }
     text.push_str("</g>\n");
 
-    // Labels are drawn last and avoid the boxes of the labels before them,
-    // so two nodes displacing in the same direction cannot stack their text.
-    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"11\">\n");
+    // Labels are drawn last and avoid the geometry as well as the labels
+    // placed before them, so no value lands on a member, an arrow or another
+    // label.
+    text.push_str("<g font-size=\"11\">\n");
     let mut placer = LabelPlacer::within(PLOT_LEFT + 2.0, PLOT_RIGHT - 2.0, PLOT_TOP + 2.0, PLOT_BOTTOM - 2.0);
+    for (from, to) in &blocked {
+        placer.block_line(*from, *to);
+    }
+    for rect in symbol_boxes {
+        placer.block_box(rect);
+    }
     let center = centroid(&deformed.iter().map(|&(x, y)| project(x, y)).collect::<Vec<_>>());
     for (index, node) in model.nodes.iter().enumerate() {
         let point = project(deformed[index].0, deformed[index].1);
-        let (lx, ly) = place_node_label(&mut placer, &node.id, point, center, false, false);
-        let _ =
-            writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#374151\" {LABEL_HALO}>{}</text>", xml_escape(&node.id));
+        let placed = place_node_label(&mut placer, &node.id, point, center, false, false);
+        write_leader(&mut text, placed.leader);
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" fill=\"#374151\">{}</text>",
+            placed.x,
+            placed.y,
+            xml_escape(&node.id)
+        );
     }
     write_member_annotations(&mut text, &mut placer, model, None, &endpoints, &undeformed, &projection);
     for (tx, ty, direction_x, direction_y, magnitude) in arrows {
         let label = format!("{} {unit}", format_contour_value(magnitude));
         let (lx, ly) = placer.place(tx - direction_y * 12.0 + 2.0, ty + direction_x * 12.0 + 2.0, label_width(&label));
-        let _ = writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#166534\" {LABEL_HALO}>{}</text>", xml_escape(&label));
+        let _ = writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#166534\">{}</text>", xml_escape(&label));
     }
     text.push_str("</g>\n");
 
@@ -1691,6 +2617,8 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
          fill=\"#7c3aed\"/>\n</marker>\n</defs>\n",
     );
     text.push_str("<g stroke-linecap=\"round\">\n");
+    let mut blocked: Vec<((f64, f64), (f64, f64))> = Vec::new();
+    let mut symbol_boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
 
     let mut endpoints = Vec::with_capacity(model.elements.len());
     for element in &model.elements {
@@ -1707,6 +2635,7 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
         endpoints.push((from, to));
         let (x1, y1) = project(geometry[from].0, geometry[from].1);
         let (x2, y2) = project(geometry[to].0, geometry[to].1);
+        blocked.push(((x1, y1), (x2, y2)));
         let _ = writeln!(
             text,
             "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
@@ -1724,6 +2653,7 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
             continue;
         }
         let (cx, cy) = project(geometry[index].0, geometry[index].1);
+        symbol_boxes.push((cx - 11.0, cy + 4.0, cx + 11.0, cy + 16.0));
         // The triangle apex sits just below the node dot so the symbol never
         // covers the joint itself, and a short ground line closes the base.
         let _ = writeln!(
@@ -1746,6 +2676,7 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
     }
     for point in &geometry {
         let (cx, cy) = project(point.0, point.1);
+        symbol_boxes.push((cx - 4.0, cy - 4.0, cx + 4.0, cy + 4.0));
         let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"#111827\"/>");
     }
     // One entry per support: node anchor, optional arrow tip and magnitude,
@@ -1772,6 +2703,7 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
                 let arrow_length = 34.0 * (magnitude / max_magnitude);
                 let tx = cx + direction_x * arrow_length;
                 let ty = cy + direction_y * arrow_length;
+                blocked.push(((cx, cy), (tx, ty)));
                 let _ = writeln!(
                     text,
                     "<line x1=\"{cx:.2}\" y1=\"{cy:.2}\" x2=\"{tx:.2}\" y2=\"{ty:.2}\" stroke=\"#7c3aed\" \
@@ -1790,16 +2722,28 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
     }
     text.push_str("</g>\n");
 
-    // Labels are drawn after every geometry and avoid the boxes of the
-    // labels placed before them.
-    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"11\">\n");
+    // Labels are drawn after every geometry and avoid the drawn lines as well
+    // as the labels placed before them.
+    text.push_str("<g font-size=\"11\">\n");
     let mut placer = LabelPlacer::within(PLOT_LEFT + 2.0, PLOT_RIGHT - 2.0, PLOT_TOP + 2.0, PLOT_BOTTOM - 2.0);
+    for (from, to) in &blocked {
+        placer.block_line(*from, *to);
+    }
+    for rect in symbol_boxes {
+        placer.block_box(rect);
+    }
     let center = centroid(&geometry.iter().map(|&(x, y)| project(x, y)).collect::<Vec<_>>());
     for (index, node) in model.nodes.iter().enumerate() {
         let point = project(geometry[index].0, geometry[index].1);
-        let (lx, ly) = place_node_label(&mut placer, &node.id, point, center, supported_nodes[index], false);
-        let _ =
-            writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#374151\" {LABEL_HALO}>{}</text>", xml_escape(&node.id));
+        let placed = place_node_label(&mut placer, &node.id, point, center, supported_nodes[index], false);
+        write_leader(&mut text, placed.leader);
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" fill=\"#374151\">{}</text>",
+            placed.x,
+            placed.y,
+            xml_escape(&node.id)
+        );
     }
     write_member_annotations(&mut text, &mut placer, model, None, &endpoints, &geometry, &projection);
     for (cx, cy, arrow, moments) in &labels {
@@ -1808,15 +2752,13 @@ pub fn reactions_svg_text(model: &Model, solution: &Solution) -> Result<String, 
             // on top of the shaft or the node id.
             let label = format!("{} N", format_contour_value(*magnitude));
             let (lx, ly) = placer.place(tx - direction_y * 12.0 + 2.0, ty + direction_x * 12.0 + 2.0, label_width(&label));
-            let _ =
-                writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#5b21b6\" {LABEL_HALO}>{}</text>", xml_escape(&label));
+            let _ = writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#5b21b6\">{}</text>", xml_escape(&label));
         }
         let mut moment_y = cy + 28.0;
         for (value, component) in moments {
             let label = format!("{component} {} {moment_unit}", format_contour_value(*value));
             let (lx, ly) = placer.place(cx + 6.0, moment_y, label_width(&label));
-            let _ =
-                writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#5b21b6\" {LABEL_HALO}>{}</text>", xml_escape(&label));
+            let _ = writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#5b21b6\">{}</text>", xml_escape(&label));
             moment_y += 14.0;
         }
     }
@@ -1906,6 +2848,8 @@ pub fn overlay_svg_text(model: &Model, solution: &Solution, scale: f64) -> Resul
     let mut text = String::new();
     write_sheet_open(&mut text, &meta);
     text.push_str("<g stroke-linecap=\"round\">\n");
+    let mut blocked: Vec<((f64, f64), (f64, f64))> = Vec::new();
+    let mut symbol_boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
     let mut endpoints = Vec::with_capacity(model.elements.len());
     for element in &model.elements {
         let from = model
@@ -1921,6 +2865,7 @@ pub fn overlay_svg_text(model: &Model, solution: &Solution, scale: f64) -> Resul
         endpoints.push((from, to));
         let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
         let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
+        blocked.push(((x1, y1), (x2, y2)));
         let _ = writeln!(
             text,
             "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1.2\" \
@@ -1929,27 +2874,45 @@ pub fn overlay_svg_text(model: &Model, solution: &Solution, scale: f64) -> Resul
     }
     for curve in &curves {
         let mut points = String::new();
+        let mut projected = Vec::with_capacity(curve.len());
         for &(x, y) in curve {
             let (sx, sy) = project(x, y);
+            projected.push((sx, sy));
             let _ = write!(points, "{sx:.2},{sy:.2} ");
+        }
+        for window in projected.windows(2) {
+            blocked.push((window[0], window[1]));
         }
         let _ =
             writeln!(text, "<polyline points=\"{}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>", points.trim_end(),);
     }
     for &(x, y) in &undeformed {
         let (cx, cy) = project(x, y);
+        symbol_boxes.push((cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5));
         let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"2.5\" fill=\"#111827\"/>");
     }
     text.push_str("</g>\n");
 
-    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"11\">\n");
+    text.push_str("<g font-size=\"11\">\n");
     let mut placer = LabelPlacer::within(PLOT_LEFT + 2.0, PLOT_RIGHT - 2.0, PLOT_TOP + 2.0, PLOT_BOTTOM - 2.0);
+    for (from, to) in &blocked {
+        placer.block_line(*from, *to);
+    }
+    for rect in symbol_boxes {
+        placer.block_box(rect);
+    }
     let center = centroid(&undeformed.iter().map(|&(x, y)| project(x, y)).collect::<Vec<_>>());
     for (index, node) in model.nodes.iter().enumerate() {
         let point = project(undeformed[index].0, undeformed[index].1);
-        let (lx, ly) = place_node_label(&mut placer, &node.id, point, center, false, false);
-        let _ =
-            writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#374151\" {LABEL_HALO}>{}</text>", xml_escape(&node.id));
+        let placed = place_node_label(&mut placer, &node.id, point, center, false, false);
+        write_leader(&mut text, placed.leader);
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" fill=\"#374151\">{}</text>",
+            placed.x,
+            placed.y,
+            xml_escape(&node.id)
+        );
     }
     write_member_annotations(&mut text, &mut placer, model, None, &endpoints, &undeformed, &projection);
     if let Some((index, magnitude)) = magnitudes
@@ -1963,7 +2926,7 @@ pub fn overlay_svg_text(model: &Model, solution: &Solution, scale: f64) -> Resul
         let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
         let label = format!("{} · {} {unit}", node.id, format_contour_value(magnitude));
         let (lx, ly) = placer.place(cx + 16.0, cy + 4.0, label_width(&label));
-        let _ = writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#1d4ed8\" {LABEL_HALO}>{}</text>", xml_escape(&label));
+        let _ = writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#1d4ed8\">{}</text>", xml_escape(&label));
     }
     text.push_str("</g>\n");
 
@@ -2087,8 +3050,11 @@ pub fn modal_svg_text(model: &Model, modal: &ModalSolution) -> Result<String, Ca
     let panel_height = (slot_height / rows as f64).min(330.0);
     let grid_top = PLOT_TOP + (slot_height - rows as f64 * panel_height) / 2.0;
     let available_width = panel_width - 64.0;
-    // Half the panel height is reserved for the mode-shape excursion.
-    let available_height = (panel_height - 64.0) * 0.55;
+    // The header occupies the top 56 px and the mode shape can swing one
+    // amplitude above its undeformed position; reserve both so a peak can
+    // never reach the mode label.
+    let amplitude = (panel_height * 0.14).min(46.0);
+    let available_height = (panel_height - 56.0 - 2.0 * amplitude - 12.0).max(20.0);
     let factor = (available_width / width).min(available_height / height);
 
     // One amplitude scale shared by every panel, so relative amplitudes are
@@ -2099,7 +3065,7 @@ pub fn modal_svg_text(model: &Model, modal: &ModalSolution) -> Result<String, Ca
         .map(|shape| (shape.ux * shape.ux + shape.uy * shape.uy + shape.uz * shape.uz).sqrt())
         .fold(0.0, f64::max);
     let shape_scale = if max_translation > 0.0 && max_translation.is_finite() && factor > 0.0 && factor.is_finite() {
-        (panel_height * 0.20) / (max_translation * factor)
+        amplitude / (max_translation * factor)
     }
     else {
         0.0
@@ -2131,7 +3097,7 @@ pub fn modal_svg_text(model: &Model, modal: &ModalSolution) -> Result<String, Ca
         let px = PLOT_LEFT + column as f64 * panel_width;
         let py = grid_top + row as f64 * panel_height;
         let origin_x = px + 32.0 + (available_width - width * factor) / 2.0;
-        let origin_y = py + 44.0 + (available_height - height * factor) / 2.0;
+        let origin_y = py + 56.0 + amplitude + (available_height - height * factor) / 2.0;
         let project = |x: f64, y: f64| (origin_x + (x - min_x) * factor, origin_y + (max_y - y) * factor);
 
         let _ = writeln!(
@@ -2428,7 +3394,7 @@ pub fn summary_svg_text(model: &Model, solution: &Solution) -> Result<String, Ca
     let oblique_y = depth * (std::f64::consts::FRAC_PI_6).sin();
     let project_point = |x: f64, y: f64, z: f64| (x + oblique_x * z, y + oblique_y * z);
     let geometry: Vec<(f64, f64)> = model.nodes.iter().map(|node| project_point(node.x, node.y, node.z)).collect();
-    let projection = Projection::fit_in(geometry.clone(), 116.0, 116.0, 412.0, 556.0)?;
+    let projection = Projection::fit_in(geometry.clone(), 96.0, 120.0, 436.0, 552.0)?;
     let project = |x: f64, y: f64| projection.project(x, y);
 
     let meta = SheetMeta::new(model, DrawingKind::Summary.title(), DrawingKind::Summary.number(), "1:1 geometry");
@@ -2442,12 +3408,11 @@ pub fn summary_svg_text(model: &Model, solution: &Solution) -> Result<String, Ca
 
     let _ = writeln!(
         text,
-        "<rect x=\"96\" y=\"92\" width=\"336\" height=\"500\" fill=\"#ffffff\" stroke=\"#d1d5db\" stroke-width=\"1\"/>"
+        "<rect x=\"84\" y=\"84\" width=\"364\" height=\"512\" fill=\"#ffffff\" stroke=\"#d1d5db\" stroke-width=\"1\"/>"
     );
     let _ = writeln!(
         text,
-        "<text x=\"104\" y=\"110\" font-family=\"system-ui, sans-serif\" font-size=\"11\" letter-spacing=\"0.6\" \
-         fill=\"#6b7280\">MODEL SKETCH</text>"
+        "<text x=\"96\" y=\"102\" font-size=\"{FONT_LABEL}\" letter-spacing=\"0.7\" fill=\"#6b7280\">MODEL SKETCH</text>"
     );
 
     let mut supported_nodes = vec![false; model.nodes.len()];
@@ -2516,7 +3481,7 @@ pub fn summary_svg_text(model: &Model, solution: &Solution) -> Result<String, Ca
     text.push_str("</g>\n");
     let _ = writeln!(
         text,
-        "<text x=\"104\" y=\"580\" font-family=\"system-ui, sans-serif\" font-size=\"10\" fill=\"#6b7280\">blue: members · \
+        "<text x=\"96\" y=\"582\" font-size=\"{FONT_LABEL}\" fill=\"#6b7280\">blue: members · \
          green: supports · red: loads</text>"
     );
 
@@ -2590,8 +3555,8 @@ pub fn summary_svg_text(model: &Model, solution: &Solution) -> Result<String, Ca
         ),
     ];
 
-    write_summary_table(&mut text, 470.0, 96.0, 410.0, "MODEL", &model_rows);
-    write_summary_table(&mut text, 470.0, 306.0, 410.0, "EXTREMES", &extreme_rows);
+    write_summary_table(&mut text, 470.0, 84.0, 410.0, "MODEL", &model_rows);
+    write_summary_table(&mut text, 470.0, 310.0, 410.0, "EXTREMES", &extreme_rows);
 
     let note = "extreme values are signed; positive axial force is tension, positive moment follows the force-diagram sign convention.";
     let note2 = "per-kind sheets (forces, displacements, reactions, overlay, modal, envelope) carry the full detail.";
@@ -2605,37 +3570,38 @@ pub fn summary_svg_text(model: &Model, solution: &Solution) -> Result<String, Ca
 fn write_summary_table(text: &mut String, x: f64, top: f64, width: f64, title: &str, rows: &[(&str, String)]) {
     let _ = writeln!(
         text,
-        "<text x=\"{x:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"12\" font-weight=\"600\" \
-         letter-spacing=\"0.4\" fill=\"#111827\">{}</text>",
-        top + 2.0,
+        "<text x=\"{x:.2}\" y=\"{:.2}\" font-size=\"12.5\" font-weight=\"600\" \
+         letter-spacing=\"0.5\" fill=\"#111827\">{}</text>",
+        top + 4.0,
         title
     );
     let _ = writeln!(
         text,
         "<line x1=\"{x:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"#111827\" stroke-width=\"1\"/>",
-        top + 8.0,
+        top + 10.0,
         x + width,
-        top + 8.0,
+        top + 10.0,
     );
+    const ROW_HEIGHT: f64 = 28.0;
     for (index, (label, value)) in rows.iter().enumerate() {
-        let baseline = top + 28.0 + index as f64 * 22.0;
+        let baseline = top + 34.0 + index as f64 * ROW_HEIGHT;
         if index > 0 {
             let _ = writeln!(
                 text,
                 "<line x1=\"{x:.2}\" y1=\"{:.2}\" x2=\"{:.2}\" y2=\"{:.2}\" stroke=\"#e5e7eb\" stroke-width=\"0.8\"/>",
-                baseline - 15.0,
+                baseline - 19.0,
                 x + width,
-                baseline - 15.0,
+                baseline - 19.0,
             );
         }
+        let _ =
+            writeln!(text, "<text x=\"{x:.2}\" y=\"{baseline:.2}\" font-size=\"{FONT_BODY}\" fill=\"#4b5563\">{label}</text>");
+        // Long values (member lists, unit systems) shrink until they fit the
+        // value column instead of running under the label.
+        let value_size = fit_font_size(value, width - 130.0, FONT_BODY, 8.5);
         let _ = writeln!(
             text,
-            "<text x=\"{x:.2}\" y=\"{baseline:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" \
-             fill=\"#4b5563\">{label}</text>"
-        );
-        let _ = writeln!(
-            text,
-            "<text x=\"{:.2}\" y=\"{baseline:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" \
+            "<text x=\"{:.2}\" y=\"{baseline:.2}\" font-size=\"{value_size:.2}\" \
              text-anchor=\"end\" fill=\"#111827\">{}</text>",
             x + width,
             xml_escape(value),
@@ -2693,7 +3659,7 @@ pub fn svg_with_contour_text(
     // A contour drawing reserves the bottom of the plot area for the colour
     // bar, so its geometry is fitted above that band.
     let projection = if contour.is_some() {
-        Projection::fit_in(points, VIEW_LEFT, VIEW_TOP, VIEW_RIGHT, 556.0)?
+        Projection::fit_in(points, VIEW_LEFT, VIEW_TOP, VIEW_RIGHT, 528.0)?
     }
     else {
         Projection::fit(points)?
@@ -2712,6 +3678,10 @@ pub fn svg_with_contour_text(
          fill=\"#dc2626\"/>\n</marker>\n</defs>\n",
     );
     text.push_str("<g stroke-linecap=\"round\">\n");
+    // Every drawn line is registered with the label placer, so no label can be
+    // placed across a member, an outline or an arrow.
+    let mut blocked: Vec<((f64, f64), (f64, f64))> = Vec::new();
+    let mut symbol_boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
 
     let mut endpoints = Vec::with_capacity(model.elements.len());
     for element in &model.elements {
@@ -2732,6 +3702,7 @@ pub fn svg_with_contour_text(
         for segment in &series.segments {
             let (x1, y1) = project(segment.x1, segment.y1);
             let (x2, y2) = project(segment.x2, segment.y2);
+            blocked.push(((x1, y1), (x2, y2)));
             let color = contour_color(segment.value, limit);
             let _ = writeln!(
                 text,
@@ -2742,9 +3713,14 @@ pub fn svg_with_contour_text(
     else {
         for curve in curves.as_ref().expect("a plain drawing carries deformed curves") {
             let mut points = String::new();
+            let mut projected = Vec::with_capacity(curve.len());
             for &(x, y) in curve {
                 let (sx, sy) = project(x, y);
+                projected.push((sx, sy));
                 let _ = write!(points, "{sx:.2},{sy:.2} ");
+            }
+            for window in projected.windows(2) {
+                blocked.push((window[0], window[1]));
             }
             let _ = writeln!(
                 text,
@@ -2758,6 +3734,7 @@ pub fn svg_with_contour_text(
     for &(from, to) in &endpoints {
         let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
         let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
+        blocked.push(((x1, y1), (x2, y2)));
         let _ = writeln!(
             text,
             "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" \
@@ -2766,6 +3743,7 @@ pub fn svg_with_contour_text(
     }
     for &(x, y) in &undeformed {
         let (cx, cy) = project(x, y);
+        symbol_boxes.push((cx - 4.0, cy - 4.0, cx + 4.0, cy + 4.0));
         let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"#111827\"/>");
     }
     let mut supported_nodes = vec![false; model.nodes.len()];
@@ -2780,6 +3758,7 @@ pub fn svg_with_contour_text(
             continue;
         }
         let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
+        symbol_boxes.push((cx - 11.0, cy + 4.0, cx + 11.0, cy + 16.0));
         // The triangle apex sits just below the node dot so the symbol never
         // covers the joint itself, and a short ground line closes the base.
         let _ = writeln!(
@@ -2824,6 +3803,7 @@ pub fn svg_with_contour_text(
         let arrow_length = 34.0;
         let x1 = cx - direction_x * arrow_length;
         let y1 = cy - direction_y * arrow_length;
+        blocked.push(((x1, y1), (cx, cy)));
         let _ = writeln!(
             text,
             "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{cx:.2}\" y2=\"{cy:.2}\" stroke=\"#dc2626\" \
@@ -2841,15 +3821,28 @@ pub fn svg_with_contour_text(
     text.push_str("</g>\n");
 
     // Every label is drawn after every line, arrow and marker, and avoids the
-    // boxes of the labels placed before it, so text never overprints a symbol.
-    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"11\">\n");
+    // geometry as well as the labels placed before it, so text never overprints
+    // a member line or a symbol.
+    text.push_str("<g font-size=\"11\">\n");
     let mut placer = LabelPlacer::within(PLOT_LEFT + 2.0, PLOT_RIGHT - 2.0, PLOT_TOP + 2.0, PLOT_BOTTOM - 2.0);
+    for (from, to) in &blocked {
+        placer.block_line(*from, *to);
+    }
+    for rect in symbol_boxes {
+        placer.block_box(rect);
+    }
     let center = centroid(&undeformed.iter().map(|&(x, y)| project(x, y)).collect::<Vec<_>>());
     for (index, node) in model.nodes.iter().enumerate() {
         let point = project(undeformed[index].0, undeformed[index].1);
-        let (lx, ly) = place_node_label(&mut placer, &node.id, point, center, supported_nodes[index], load_above[index]);
-        let _ =
-            writeln!(text, "<text x=\"{lx:.2}\" y=\"{ly:.2}\" fill=\"#374151\" {LABEL_HALO}>{}</text>", xml_escape(&node.id));
+        let placed = place_node_label(&mut placer, &node.id, point, center, supported_nodes[index], load_above[index]);
+        write_leader(&mut text, placed.leader);
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" fill=\"#374151\">{}</text>",
+            placed.x,
+            placed.y,
+            xml_escape(&node.id)
+        );
     }
     let show_axial = contour
         .is_none_or(|quantity| matches!(quantity, ContourQuantity::Axial | ContourQuantity::Shear | ContourQuantity::Moment));
@@ -2876,7 +3869,7 @@ pub fn svg_with_contour_text(
     let legend_y = LEGEND_BASELINE;
     let legend_text_y = legend_y + 4.0;
     let mut cursor = PLOT_LEFT;
-    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"12\" fill=\"#111827\">\n");
+    text.push_str("<g font-size=\"12\" fill=\"#111827\">\n");
     let _ = writeln!(
         text,
         "<line data-legend=\"1\" x1=\"{cursor}\" y1=\"{legend_y}\" x2=\"{}\" y2=\"{legend_y}\" stroke=\"#9ca3af\" \
@@ -2940,7 +3933,7 @@ pub fn svg_with_contour_text(
     else {
         "grey dashed: undeformed members; blue: deformed centreline at the printed scale; loads carry their magnitude."
     };
-    let note2 = "node ids sit on the outside of each node; member ids and axial forces are offset from the member line with a white halo.";
+    let note2 = "node ids, member ids and axial forces are offset clear of every member line; a leader line connects a value that had to move further out.";
     write_sheet_close(&mut text, &meta, &[note, note2]);
 
     Ok(text)
@@ -3126,7 +4119,7 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
     // the row legend, so it never collides with the title block.
     const BAR_LEFT: f64 = 560.0;
     const BAR_RIGHT: f64 = 862.0;
-    const BAR_TOP: f64 = 578.0;
+    const BAR_TOP: f64 = 546.0;
     const BAR_HEIGHT: f64 = 12.0;
     const STEPS: usize = 12;
     let limit = series.min.abs().max(series.max.abs());
@@ -3138,8 +4131,8 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
     let maximum = snap(series.max);
     let _ = writeln!(
         text,
-        "<g font-family=\"system-ui, sans-serif\" font-size=\"12\" fill=\"#111827\">\n\
-         <text x=\"{BAR_LEFT}\" y=\"570\">contour: {} ({})</text>",
+        "<g font-size=\"12\" fill=\"#111827\">\n\
+         <text x=\"{BAR_LEFT}\" y=\"538\">contour: {} ({})</text>",
         quantity.label(),
         quantity.unit(units)
     );
@@ -3177,14 +4170,14 @@ fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &C
              fill=\"{color}\"/>"
         );
     }
-    let _ = writeln!(text, "<text x=\"{BAR_LEFT}\" y=\"604\" font-size=\"11\">{}</text>", format_contour_value(minimum));
+    let _ = writeln!(text, "<text x=\"{BAR_LEFT}\" y=\"574\" font-size=\"11\">{}</text>", format_contour_value(minimum));
     if minimum < 0.0 && maximum > 0.0 {
         let zero_x = BAR_LEFT + (0.0 - minimum) / span * (BAR_RIGHT - BAR_LEFT);
-        let _ = writeln!(text, "<text x=\"{zero_x:.2}\" y=\"604\" font-size=\"11\" text-anchor=\"middle\">0</text>");
+        let _ = writeln!(text, "<text x=\"{zero_x:.2}\" y=\"574\" font-size=\"11\" text-anchor=\"middle\">0</text>");
     }
     let _ = writeln!(
         text,
-        "<text x=\"{BAR_RIGHT}\" y=\"604\" font-size=\"11\" text-anchor=\"end\">{}</text>\n</g>",
+        "<text x=\"{BAR_RIGHT}\" y=\"574\" font-size=\"11\" text-anchor=\"end\">{}</text>\n</g>",
         format_contour_value(maximum)
     );
 }

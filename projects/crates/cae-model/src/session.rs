@@ -21,8 +21,8 @@ use crate::{
     envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
         ContourQuantity, DrawingKind, auto_deformation_scale, displacement_svg_text, envelope_svg_text,
-        export_csv_with_stations, export_html, export_md, export_vtk, forces_svg_text, modal_svg_text, overlay_svg_text,
-        reactions_svg_text, summary_svg_text, svg_with_contour_text, write_atomic,
+        export_csv_with_stations, export_html, export_md, export_vtk, forces_svg_text, modal_svg_text, moment_svg_text,
+        overlay_svg_text, reactions_svg_text, shear_svg_text, summary_svg_text, svg_with_contour_text, write_atomic,
     },
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
@@ -1644,6 +1644,8 @@ impl OpenCae {
                 let (text, default_name) = match options.drawing {
                     None => (svg_with_contour_text(model, &solution, scale, options.contour, stations)?, "model.svg"),
                     Some(DrawingKind::Forces) => (forces_svg_text(model, stations)?, DrawingKind::Forces.default_file_name()),
+                    Some(DrawingKind::Shear) => (shear_svg_text(model, stations)?, DrawingKind::Shear.default_file_name()),
+                    Some(DrawingKind::Moment) => (moment_svg_text(model, stations)?, DrawingKind::Moment.default_file_name()),
                     Some(DrawingKind::Displacement) => {
                         (displacement_svg_text(model, &solution, scale)?, DrawingKind::Displacement.default_file_name())
                     }
