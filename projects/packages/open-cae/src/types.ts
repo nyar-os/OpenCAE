@@ -1858,11 +1858,16 @@ export interface ElementAddRequest {
     readonly distributedLoadZEnd?: number;
 }
 
-/** Bending-moment release (hinge) at the ends of a two-dimensional beam. */
+/**
+ * End release (hinge) of a two-dimensional beam or a spatial `beam3d` member.
+ *
+ * A `beam` end frees its bending rotation; a `beam3d` end frees all three local
+ * rotations (both bending planes and torsion), forming a spatial pin.
+ */
 export interface EndRelease {
-    /** Release the bending moment at the `from` node. */
+    /** Release the moment at the `from` node. */
     readonly start: boolean;
-    /** Release the bending moment at the `to` node. */
+    /** Release the moment at the `to` node. */
     readonly end: boolean;
 }
 

@@ -684,11 +684,13 @@ impl OpenCae {
         self.edit(|model| model.set_element_temperature_gradient(id, gradient))
     }
 
-    /// Sets or clears the bending-moment releases of an existing beam and saves
-    /// the document.
+    /// Sets or clears the end releases of an existing beam or `beam3d` member
+    /// and saves the document.
     ///
-    /// `release` frees the start and/or end bending rotation; `None` restores a
-    /// fully continuous member. Truss elements cannot be released.
+    /// `release` frees the rotations of the start and/or end; a two-dimensional
+    /// beam releases its bending rotation, while a `beam3d` member releases all
+    /// three local rotations (a spatial pin). `None` restores a fully continuous
+    /// member. Truss elements cannot be released.
     pub fn set_element_release(&mut self, id: &str, release: Option<crate::EndRelease>) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.set_element_release(id, release))
     }

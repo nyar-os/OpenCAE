@@ -17,6 +17,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | partial-span distributed loads (`distributedLoadFrom`/`distributedLoadTo`, uniform or linear over part of a member) | ✅ supported |
 | parametric element splitting (`element split`, `splitElement()`; interior node + two segments) | ✅ supported |
 | beam end moment releases (`endRelease`, static condensation of hinges) | ✅ supported |
+| spatial frame end releases (`endRelease` on `beam3d`; a hinged end frees all three local rotations, static condensation and end-force recovery) | ✅ supported |
 | self-weight (`selfWeight`, lumped truss distribution + consistent beam loads) | ✅ supported |
 | uniform member temperature change (`thermalExpansion`, `α·ΔT` thermal strain + equivalent nodal loads) | ✅ supported |
 | through-depth temperature gradient (`thermalGradient`, linear ΔT across the section + equivalent end moments) | ✅ supported |
@@ -62,7 +63,13 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | STEP export | ❌ not implemented |
 | contact, prestress, dynamic time history | ❌ not implemented |
 
-`beam3d`/`frame3d` static analysis is available at every entry point; modal,
+`beam3d`/`frame3d` static analysis is available at every entry point, and
+`beam3d` members accept the same `endRelease` flags as two-dimensional beams:
+a hinged end frees all three local rotations (both bending planes and torsion)
+and is condensed out of the member, so only translations cross the hinge and
+the recovered end forces report zero moment and torque there. A released
+`beam3d` end leaves its node without rotational degrees of freedom, so a
+rotation support or nodal moment on that node is rejected as inactive. Modal,
 buckling, stress-recovery, deflection, response-spectrum, frequency-response,
 nonlinear, influence-line, matrix-export and tension-only analyses reject
 models containing `beam3d` members with `capability/not-implemented`.
@@ -1171,6 +1178,12 @@ message names the one-based input line.
   bending, orientation reference vector and angle, local `+y`/`+z` distributed
   loads, nodal couples and `mx`/`my` reaction moments); every other analysis
   rejects models containing `beam3d` members with `capability/not-implemented`.
+  A `beam3d` end release is a **spatial pin**: it frees all three local
+  rotations (both bending planes and torsion) at that end, condenses them out
+  of the member and recovers the internal rotations for end-force recovery.
+  It does not release translations, and a node whose every `beam3d` end is
+  released owns no rotational degree of freedom, so a rotation support or
+  nodal moment there reports `support/inactive-dof` or `load/inactive-dof`.
 - Static analysis is **linear elastic, small deformation**, with one
   deliberate exception: `geometricNonlinear` runs a large-displacement Newton
   iteration for **truss models only**. Material nonlinearity, beam/frame large

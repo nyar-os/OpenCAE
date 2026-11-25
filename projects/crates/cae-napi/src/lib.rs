@@ -444,10 +444,12 @@ fn element_split(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &report)
 }
 
-/// Sets or clears the bending-moment releases of a beam element.
+/// Sets or clears the end releases of a beam or `beam3d` element.
 ///
-/// The request accepts `id`, `start` and `end`. When both flags are `false` the
-/// release is cleared and the member becomes fully continuous again.
+/// The request accepts `id`, `start` and `end`. A `beam` end releases its
+/// bending rotation and a `beam3d` end releases all three local rotations.
+/// When both flags are `false` the release is cleared and the member becomes
+/// fully continuous again.
 #[function]
 fn element_release(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;

@@ -71,7 +71,7 @@ loss/error lists.
 | `open-cae element split <file>` | `--id <id> --at <fraction>` | Splits a member at a length fraction strictly between 0 and 1, reusing or creating the interior node. Prints the interior node and both element ids. Uniform loads and temperatures are copied; partial-span/linear loads and gradients are rejected with `element/split-unsupported-load`. |
 | `open-cae element remove <file>` | `--id <id>` | Removes one element. |
 | `open-cae element forces <file>` | `--id <id>` | Prints the solved result of one element. |
-| `open-cae element release <file>` | `--id <id> [--start] [--end]` | Releases the bending moment at one or both beam ends; at least one flag is required. Trusses are rejected. |
+| `open-cae element release <file>` | `--id <id> [--start] [--end]` | Releases one or both ends of a `beam` or `beam3d` member; at least one flag is required. A `beam` end frees its bending rotation, while a `beam3d` end frees all three local rotations (a spatial pin). Trusses are rejected. |
 | `open-cae element tension-only <file>` | `--id <id> [--clear]` | Marks a truss as tension-only, or clears it with `--clear`. Beams are rejected. |
 
 ### Material and sections
