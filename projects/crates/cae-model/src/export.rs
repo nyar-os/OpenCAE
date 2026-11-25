@@ -972,20 +972,27 @@ fn contour_color(value: f64, limit: f64) -> String {
     format!("#{:02x}{:02x}{:02x}", blend(from.0, to.0), blend(from.1, to.1), blend(from.2, to.2))
 }
 
+/// Formats a contour extreme with four significant digits.
+///
+/// The legend labels must stay compact and meaningful: fixed decimal places
+/// printed values such as `-1000000.000` or `-19954.390`, where the trailing
+/// digits are noise. Very large or very small magnitudes use scientific
+/// notation, everything else rounds to four significant digits and trims the
+/// trailing zeros.
 fn format_contour_value(value: f64) -> String {
-    let magnitude = value.abs();
     if value == 0.0 {
-        "0".to_string()
+        return "0".to_string();
     }
-    else if magnitude >= 1.0e7 || magnitude < 1.0e-3 {
-        format!("{value:.3e}")
+    let magnitude = value.abs();
+    if magnitude >= 1.0e6 || magnitude < 1.0e-3 {
+        return format!("{value:.3e}");
     }
-    else if magnitude < 1.0 {
-        format!("{value:.4}")
+    let decimals = (3.0 - magnitude.log10().floor()).clamp(0.0, 6.0) as usize;
+    let mut text = format!("{value:.decimals$}");
+    if text.contains('.') {
+        text.truncate(text.trim_end_matches('0').trim_end_matches('.').len());
     }
-    else {
-        format!("{value:.3}")
-    }
+    text
 }
 
 fn write_contour_legend(text: &mut String, quantity: ContourQuantity, series: &ContourSeries, units: Units) {
