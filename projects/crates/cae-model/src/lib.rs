@@ -138,6 +138,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "beam2d": "supported",
     "beam3d": "supported",
     "frame3d": "supported",
+    "spatialEndRelease": "supported",
     "modal": "supported",
     "selfWeight": "supported",
     "prescribedDisplacement": "supported",

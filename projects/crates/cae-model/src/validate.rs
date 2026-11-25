@@ -4,7 +4,7 @@ use boost_check::{CheckReport, Issue as CheckIssue, Severity as CheckSeverity};
 use serde::Serialize;
 
 use crate::{
-    model::{ElementKind, FORMAT, Model, Units, VERSION, rotation_nodes, spatial_beam_nodes},
+    model::{ElementKind, FORMAT, Model, Units, VERSION, rotation_nodes, spatial_rotation_nodes},
     solver::check_stability,
 };
 
@@ -397,15 +397,6 @@ impl Model {
                         format!("orientation data of beam3d element `{}` must be finite", element.id),
                     ));
                 }
-                if element.release.is_some() {
-                    report.push(check_error(
-                        "element/release-requires-beam",
-                        format!(
-                            "end releases are only implemented for two-dimensional beam elements (element `{}`)",
-                            element.id
-                        ),
-                    ));
-                }
                 if element.temperature_gradient.is_some() {
                     report.push(check_error(
                         "element/gradient-requires-beam",
@@ -596,11 +587,11 @@ impl Model {
                 ));
             }
             if let Some(release) = element.release {
-                if element.kind != ElementKind::Beam {
+                if !matches!(element.kind, ElementKind::Beam | ElementKind::Beam3D) {
                     report.push(check_error(
                         "element/release-requires-beam",
                         format!(
-                            "element `{}` is a truss element and cannot have bending-moment releases; use a beam element",
+                            "element `{}` is a truss element and cannot have end releases; use a beam or beam3d element",
                             element.id
                         ),
                     ));
@@ -624,7 +615,7 @@ impl Model {
         }
 
         let rotation_nodes = rotation_nodes(self);
-        let spatial_nodes = spatial_beam_nodes(self);
+        let spatial_rotations = spatial_rotation_nodes(self);
         for support in &self.supports {
             if self.node(&support.node).is_none() {
                 report.push(check_error("support/unknown-node", format!("support references unknown node `{}`", support.node)));
@@ -671,10 +662,10 @@ impl Model {
                 }
             }
             if support.rz {
-                if self.dimension == 3 && !spatial_nodes.contains(support.node.as_str()) {
+                if self.dimension == 3 && !spatial_rotations.contains(support.node.as_str()) {
                     report.push(check_error(
                         "support/inactive-dof",
-                        format!("node `{}` has no rz rotational degree of freedom: it has no beam3d element", support.node),
+                        format!("node `{}` has no rz rotational degree of freedom: it has no beam3d element, or every beam3d end at the node is released", support.node),
                     ));
                 }
                 else if self.dimension == 2 && !rotation_nodes.contains(support.node.as_str()) {
@@ -697,10 +688,10 @@ impl Model {
                         ),
                     ));
                 }
-                else if !spatial_nodes.contains(support.node.as_str()) {
+                else if !spatial_rotations.contains(support.node.as_str()) {
                     report.push(check_error(
                         "support/inactive-dof",
-                        format!("node `{}` has no {name} rotational degree of freedom: it has no beam3d element", support.node),
+                        format!("node `{}` has no {name} rotational degree of freedom: it has no beam3d element, or every beam3d end at the node is released", support.node),
                     ));
                 }
             }
@@ -830,11 +821,11 @@ impl Model {
                 ));
             }
             if load.mz != 0.0 {
-                if self.dimension == 3 && !spatial_nodes.contains(load.node.as_str()) {
+                if self.dimension == 3 && !spatial_rotations.contains(load.node.as_str()) {
                     report.push(check_error(
                         "load/inactive-dof",
                         format!(
-                            "node `{}` has no rz rotational degree of freedom for the mz moment: it has no beam3d element",
+                            "node `{}` has no rz rotational degree of freedom for the mz moment: it has no beam3d element, or every beam3d end at the node is released",
                             load.node
                         ),
                     ));
@@ -857,11 +848,11 @@ impl Model {
                         format!("node `{}` in a two-dimensional document cannot carry a {name} moment (currently {value}); set dimension to 3", load.node),
                     ));
                 }
-                else if !spatial_nodes.contains(load.node.as_str()) {
+                else if !spatial_rotations.contains(load.node.as_str()) {
                     report.push(check_error(
                         "load/inactive-dof",
                         format!(
-                            "node `{}` has no rotational degree of freedom for the {name} moment: it has no beam3d element",
+                            "node `{}` has no rotational degree of freedom for the {name} moment: it has no beam3d element, or every beam3d end at the node is released",
                             load.node
                         ),
                     ));
@@ -892,11 +883,11 @@ impl Model {
                     ));
                 }
                 if load.mz != 0.0 {
-                    if self.dimension == 3 && !spatial_nodes.contains(load.node.as_str()) {
+                    if self.dimension == 3 && !spatial_rotations.contains(load.node.as_str()) {
                         report.push(check_error(
                             "load/inactive-dof",
                             format!(
-                                "node `{}` has no rz rotational degree of freedom for the mz moment: it has no beam3d element",
+                                "node `{}` has no rz rotational degree of freedom for the mz moment: it has no beam3d element, or every beam3d end at the node is released",
                                 load.node
                             ),
                         ));

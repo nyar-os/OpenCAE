@@ -316,19 +316,22 @@ pub struct ElementMaterial {
     pub area: Option<f64>,
 }
 
-/// Bending-moment release (hinge) at the ends of a two-dimensional beam.
+/// End release (hinge) of a beam or `beam3d` member.
 ///
-/// A released end carries no bending moment; the matching rotational degree of
-/// freedom is condensed out of the element before assembly, so the element
-/// behaves like a member with a hinge at that end. Releasing both ends of a
-/// member therefore models a simply supported (moment-free) beam.
+/// A released end carries no moment; the matching rotational degrees of freedom
+/// are condensed out of the element before assembly, so the element behaves
+/// like a member with a hinge at that end. A two-dimensional beam releases its
+/// single bending rotation, while a `beam3d` member releases all three local
+/// rotations (both bending planes and torsion), leaving a spatial pin that
+/// still transfers the three translations. Releasing both ends of a member
+/// therefore models a simply supported (moment-free) span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndRelease {
-    /// Release the bending moment at the `from` node.
+    /// Release the moment at the `from` node.
     #[serde(default)]
     pub start: bool,
-    /// Release the bending moment at the `to` node.
+    /// Release the moment at the `to` node.
     #[serde(default)]
     pub end: bool,
 }
@@ -472,10 +475,11 @@ pub struct Element {
     /// sides. It is required only when [`Element::convection`] is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perimeter: Option<f64>,
-    /// Optional bending-moment releases at the beam ends.
+    /// Optional end releases (hinges) of a beam or `beam3d` member.
     ///
-    /// Only valid on two-dimensional beam elements; a member with both ends
-    /// released carries no end moments. `beam3d` members reject releases.
+    /// A two-dimensional beam releases its bending rotation; a `beam3d` member
+    /// releases all three local rotations at the released end. A member with
+    /// both ends released carries no end moments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<EndRelease>,
     /// Marks a truss member as tension-only (a cable).
@@ -1968,7 +1972,7 @@ impl Model {
         Ok(())
     }
 
-    /// Sets or clears the bending-moment releases of an existing beam.
+    /// Sets or clears the end releases of an existing beam or `beam3d` member.
     ///
     /// A release on a truss element is rejected with
     /// `element/release-requires-beam`, an empty release with
@@ -1986,10 +1990,10 @@ impl Model {
             .iter_mut()
             .find(|element| element.id == id)
             .ok_or_else(|| CaeError::new("element/unknown-id", format!("unknown element `{id}`")))?;
-        if element.kind != ElementKind::Beam && release.is_some() {
+        if !matches!(element.kind, ElementKind::Beam | ElementKind::Beam3D) && release.is_some() {
             return Err(CaeError::new(
                 "element/release-requires-beam",
-                format!("element `{id}` is a truss element and cannot have bending-moment releases; use a beam element"),
+                format!("element `{id}` is a truss element and cannot have end releases; use a beam or beam3d element"),
             ));
         }
         element.release = release;
@@ -2930,11 +2934,37 @@ pub(crate) fn rotation_nodes(model: &Model) -> std::collections::HashSet<&str> {
         .collect()
 }
 
+/// Identifiers of nodes that own the three spatial rotational degrees of
+/// freedom `rx`, `ry` and `rz`.
+///
+/// A released `beam3d` end transfers no rotation to its node, so a node only
+/// owns spatial rotations when at least one `beam3d` end at the node is
+/// continuous. Rotational degrees of freedom are activated only for these
+/// nodes, so a released end cannot create a zero-stiffness rotation row.
+pub(crate) fn spatial_rotation_nodes(model: &Model) -> std::collections::HashSet<&str> {
+    model
+        .elements
+        .iter()
+        .filter(|element| element.kind == ElementKind::Beam3D)
+        .flat_map(|element| {
+            let release = element.release.unwrap_or_default();
+            let mut nodes = Vec::with_capacity(2);
+            if !release.start {
+                nodes.push(element.from.as_str());
+            }
+            if !release.end {
+                nodes.push(element.to.as_str());
+            }
+            nodes
+        })
+        .collect()
+}
+
 /// Identifiers of nodes touched by at least one spatial `beam3d` member.
 ///
-/// These nodes own the six degrees of freedom `ux`, `uy`, `uz`, `rx`, `ry`
-/// and `rz`; every other node in the document keeps its translational degrees
-/// of freedom only.
+/// These nodes own the six degree-of-freedom layout `ux`, `uy`, `uz`, `rx`,
+/// `ry` and `rz`; every other node in the document keeps its translational
+/// degrees of freedom only.
 pub(crate) fn spatial_beam_nodes(model: &Model) -> std::collections::HashSet<&str> {
     model
         .elements
