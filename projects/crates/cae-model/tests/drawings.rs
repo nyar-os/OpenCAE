@@ -12,7 +12,7 @@ use std::{
 
 use cae_model::{
     ContourQuantity, DrawingKind, ElementKind, ExportFormat, ExportOptions, Model, OpenCae, OpenCaeOptions, Units,
-    export_displacement_svg, export_reactions_svg, solve, solve_internal_forces,
+    auto_deformation_scale, export_displacement_svg, export_reactions_svg, solve, solve_internal_forces,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -179,7 +179,11 @@ fn displacement_drawing_labels_the_tension_bar_tip() {
     assert!(text.contains("0.4762"), "missing the tip magnitude label: {text}");
     assert!(text.contains("max |u| = 0.4762"), "missing the legend maximum: {text}");
     assert!(text.contains("mm"), "missing the displacement unit: {text}");
-    assert!(text.contains("deformation × 1.00"), "missing the scale note: {text}");
+    // The session default scale adapts to the displacement magnitude.
+    let solution = solve(&model).expect("solve");
+    let auto = auto_deformation_scale(&model, &solution);
+    assert!(auto > 1.0, "tiny displacements must pick a large scale: {auto}");
+    assert!(text.contains(&format!("deformation × {auto:.2}")), "missing the adaptive scale note: {text}");
 
     session.export_with_options(ExportFormat::Svg, &target, displacement_options()).expect("repeat export");
     let repeated = fs::read_to_string(&target).expect("repeated displacements.svg");
@@ -225,7 +229,7 @@ fn displacement_drawing_rejects_invalid_scale() {
         .export_with_options(
             ExportFormat::Svg,
             &directory.join("displacements.svg"),
-            ExportOptions { drawing: Some(DrawingKind::Displacement), scale: 0.0, ..ExportOptions::default() },
+            ExportOptions { drawing: Some(DrawingKind::Displacement), scale: Some(0.0), ..ExportOptions::default() },
         )
         .expect_err("zero scale must be rejected");
     assert_eq!(error.code, "export/invalid-scale");
@@ -283,7 +287,7 @@ fn forces_drawing_extremes_match_the_sampled_diagram() {
 }
 
 #[test]
-fn forces_drawing_rejects_models_without_beam_members() {
+fn forces_drawing_includes_the_truss_axial_diagram() {
     let directory = temporary_dir("forces-truss");
     let mut model = Model::new(Units::Millimeter);
     model.add_node("n1", 0.0, 0.0).expect("n1");
@@ -293,11 +297,35 @@ fn forces_drawing_rejects_models_without_beam_members() {
     model.add_support("n2", false, true).expect("guide");
     model.add_load("n2", Some(1000.0), None).expect("load");
     let session = save_session(&model, &directory, "truss");
-    let error = session
-        .export_with_options(ExportFormat::Svg, &directory.join("forces.svg"), forces_options())
-        .expect_err("a truss has no diagram");
-    assert_eq!(error.code, "export/no-beam-diagram");
-    assert!(!directory.join("forces.svg").exists());
+    let target = directory.join("forces.svg");
+    session.export_with_options(ExportFormat::Svg, &target, forces_options()).expect("a truss has an axial diagram");
+    let text = fs::read_to_string(&target).expect("forces.svg");
+    // The 1000 N tension load passes through the two-force member.
+    assert!(text.contains("max |N| = 1000"), "missing the axial extreme: {text}");
+    assert!(text.contains("N(x) [N]"), "missing the axial axis label: {text}");
+    assert!(!text.contains("max |V|"), "a truss panel carries no shear diagram: {text}");
+    assert!(!text.contains("max |M|"), "a truss panel carries no moment diagram: {text}");
+}
+
+#[test]
+fn forces_drawing_labels_a_uniformly_zero_diagram() {
+    // A beam carrying only axial force has zero shear and moment everywhere;
+    // the panels must say so instead of drawing an unmarked flat line.
+    let directory = temporary_dir("forces-zero");
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", 1000.0, 0.0).expect("n2");
+    model.add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, Some(1.0e6), None).expect("beam");
+    model.add_support_full("n1", true, true, false, false).expect("pin");
+    model.add_support_full("n2", false, true, false, false).expect("roller");
+    model.add_load("n2", Some(1000.0), None).expect("axial load");
+    let session = save_session(&model, &directory, "axial");
+    let target = directory.join("forces.svg");
+    session.export_with_options(ExportFormat::Svg, &target, forces_options()).expect("forces export");
+    let text = fs::read_to_string(&target).expect("forces.svg");
+    assert!(text.contains("V \u{2261} 0"), "the zero shear field must be labelled: {text}");
+    assert!(text.contains("M \u{2261} 0"), "the zero moment field must be labelled: {text}");
+    assert!(text.contains("max |N| = 1000"), "the axial diagram must still be drawn: {text}");
 }
 
 #[test]
@@ -331,4 +359,162 @@ fn drawing_option_reports_stable_errors() {
     // A directory target picks the documented default file name.
     let report = session.export_with_options(ExportFormat::Svg, &directory, forces_options()).expect("directory export");
     assert!(report.files[0].ends_with("forces.svg"), "unexpected default name: {}", report.files[0]);
+}
+
+#[test]
+fn displacement_drawing_draws_geometry_before_labels() {
+    let directory = temporary_dir("displacement-order");
+    let model = two_bar_truss();
+    let session = save_session(&model, &directory, "truss");
+    let target = directory.join("displacements.svg");
+    session.export_with_options(ExportFormat::Svg, &target, displacement_options()).expect("displacement export");
+    let text = fs::read_to_string(&target).expect("displacements.svg");
+    // Every arrow is emitted before the first magnitude label, so no vector
+    // can overprint the text it annotates.
+    let last_arrow = text.rfind("marker-end").expect("arrows");
+    let first_label = text.find(" mm</text>").expect("magnitude labels");
+    assert!(last_arrow < first_label, "labels must be drawn after every arrow");
+    // Node id labels never share a position.
+    // Node id labels carry a white halo, so the fill attribute is not the
+    // last attribute on the text element.
+    let ids: Vec<&str> = text.lines().filter(|line| line.contains("fill=\"#374151\"")).collect();
+    assert_eq!(ids.len(), 3, "one id label per node: {ids:?}");
+    let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+    assert_eq!(ids.len(), unique.len(), "node labels must not stack: {ids:?}");
+}
+
+#[test]
+fn plain_svg_bends_the_loaded_beam() {
+    // The deformed beam must be a sampled curve, not a straight chord.
+    let directory = temporary_dir("plain-beam-curve");
+    let model = uniformly_loaded_beam();
+    let session = save_session(&model, &directory, "uniform");
+    let target = directory.join("model.svg");
+    session.export(ExportFormat::Svg, &target).expect("svg export");
+    let text = fs::read_to_string(&target).expect("model.svg");
+    let deformed = text.lines().find(|line| line.contains("stroke=\"#2563eb\"")).expect("deformed polyline");
+    assert!(deformed.matches(',').count() > 3, "the deformed beam must be sampled: {deformed}");
+}
+
+#[test]
+fn overlay_drawing_compares_both_shapes() {
+    let directory = temporary_dir("overlay");
+    let model = centre_loaded_beam();
+    let session = save_session(&model, &directory, "centre");
+    let target = directory.join("overlay.svg");
+    let report = session
+        .export_with_options(
+            ExportFormat::Svg,
+            &target,
+            ExportOptions { drawing: Some(DrawingKind::Overlay), ..ExportOptions::default() },
+        )
+        .expect("overlay export");
+    assert_eq!(report.files, vec![target.display().to_string()]);
+    let text = fs::read_to_string(&target).expect("overlay.svg");
+    assert!(text.contains("OpenCAE deformation overlay"), "missing title: {text}");
+    assert!(text.contains("deformed ×"), "missing the scale legend: {text}");
+    // The loaded centre node is the extreme node and gets the only label.
+    assert!(text.contains("n2 · "), "missing the extreme node annotation: {text}");
+    assert!(!text.contains("marker-end"), "the overlay draws no arrows");
+    session
+        .export_with_options(
+            ExportFormat::Svg,
+            &target,
+            ExportOptions { drawing: Some(DrawingKind::Overlay), ..ExportOptions::default() },
+        )
+        .expect("repeat overlay export");
+    assert_eq!(text, fs::read_to_string(&target).expect("repeated overlay.svg"), "overlay export must be deterministic");
+}
+
+#[test]
+fn modal_drawing_lists_the_frequencies() {
+    let directory = temporary_dir("modal");
+    let mut model = two_bar_truss();
+    model.set_material_full(Some("steel".to_string()), 210000.0, 100.0, 7.85e-9);
+    let session = save_session(&model, &directory, "truss");
+    let target = directory.join("modes.svg");
+    let report = session
+        .export_with_options(
+            ExportFormat::Svg,
+            &target,
+            ExportOptions { drawing: Some(DrawingKind::Modal), ..ExportOptions::default() },
+        )
+        .expect("modal export");
+    assert_eq!(report.files, vec![target.display().to_string()]);
+    let text = fs::read_to_string(&target).expect("modes.svg");
+    assert!(text.contains("OpenCAE mode shapes"), "missing title: {text}");
+    assert!(text.contains("mode 1 · f = "), "missing the first frequency panel: {text}");
+    assert!(text.contains("Hz</text>"), "missing the frequency unit: {text}");
+}
+
+#[test]
+fn modal_drawing_reports_models_without_masses() {
+    let directory = temporary_dir("modal-massless");
+    let model = two_bar_truss();
+    let session = save_session(&model, &directory, "truss");
+    let error = session
+        .export_with_options(
+            ExportFormat::Svg,
+            &directory.join("modes.svg"),
+            ExportOptions { drawing: Some(DrawingKind::Modal), ..ExportOptions::default() },
+        )
+        .expect_err("a massless model has no modes");
+    assert_eq!(error.code, "material/invalid-density");
+}
+
+#[test]
+fn envelope_drawing_lists_the_ranges() {
+    let directory = temporary_dir("envelope");
+    let mut model = uniformly_loaded_beam();
+    model.add_combination("D", 1.0, 0.0).expect("dead combination");
+    model.add_combination("1.4D", 1.4, 0.0).expect("factored combination");
+    let session = save_session(&model, &directory, "uniform");
+    let target = directory.join("envelope.svg");
+    let report = session
+        .export_with_options(
+            ExportFormat::Svg,
+            &target,
+            ExportOptions { drawing: Some(DrawingKind::Envelope), ..ExportOptions::default() },
+        )
+        .expect("envelope export");
+    assert_eq!(report.files, vec![target.display().to_string()]);
+    let text = fs::read_to_string(&target).expect("envelope.svg");
+    assert!(text.contains("OpenCAE force envelope"), "missing title: {text}");
+    assert!(text.contains("2 combinations"), "missing the combination count: {text}");
+    assert!(text.contains("1.4D"), "missing the controlling combination: {text}");
+    assert!(text.contains("N "), "missing the axial bar label: {text}");
+}
+
+#[test]
+fn pdf_export_renders_the_force_sheet() {
+    let directory = temporary_dir("pdf");
+    let model = uniformly_loaded_beam();
+    let session = save_session(&model, &directory, "uniform");
+    let target = directory.join("forces.pdf");
+    let report =
+        session.export_with_options(ExportFormat::Pdf, &target, forces_options()).expect("a force sheet is also a PDF");
+    assert_eq!(report.files, vec![target.display().to_string()]);
+    let bytes = fs::read(&target).expect("forces.pdf");
+    assert!(bytes.starts_with(b"%PDF-1.4"), "missing the PDF header");
+    assert!(bytes.ends_with(b"%%EOF\n"), "missing the PDF trailer");
+    assert!(bytes.windows(9).any(|window| window == b"Helvetica"), "missing the font object");
+    assert!(bytes.windows(10).any(|window| window == b"960 720 re"), "missing the page rectangle");
+    session.export_with_options(ExportFormat::Pdf, &target, forces_options()).expect("repeat pdf export");
+    assert_eq!(bytes, fs::read(&target).expect("repeated forces.pdf"), "PDF export must be byte-deterministic");
+}
+
+#[test]
+fn pdf_export_falls_back_to_the_drawing_name() {
+    let directory = temporary_dir("pdf-directory");
+    let model = centre_loaded_beam();
+    let session = save_session(&model, &directory, "centre");
+    let report = session
+        .export_with_options(
+            ExportFormat::Pdf,
+            &directory,
+            ExportOptions { drawing: Some(DrawingKind::Reactions), ..ExportOptions::default() },
+        )
+        .expect("a directory target gains the drawing name");
+    assert_eq!(report.files, vec![directory.join("reactions.pdf").display().to_string()]);
+    assert!(directory.join("reactions.pdf").exists());
 }

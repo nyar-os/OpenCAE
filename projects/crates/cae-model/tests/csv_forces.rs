@@ -82,7 +82,7 @@ fn export_stations_option_refines_the_force_table_only() {
     session.add_support("n2", false, true, false).expect("roller");
 
     let target = directory.join("csv");
-    let options = cae_model::ExportOptions { scale: 1.0, stations: Some(5), ..cae_model::ExportOptions::default() };
+    let options = cae_model::ExportOptions { scale: Some(1.0), stations: Some(5), ..cae_model::ExportOptions::default() };
     let report = session.export_with_options(ExportFormat::Csv, &target, options).expect("csv export");
     assert_eq!(report.files.len(), 4);
     assert!(report.files.iter().any(|file| file.ends_with("forces.csv")));

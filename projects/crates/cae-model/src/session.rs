@@ -8,6 +8,7 @@
 //! codes stay outside this module.
 
 use std::{
+    fs,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -19,11 +20,13 @@ use crate::{
     abaqus::{ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, ImportLoss, import_abaqus_file},
     envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
-        ContourQuantity, DrawingKind, export_csv_with_stations, export_displacement_svg, export_forces_svg, export_html,
-        export_md, export_reactions_svg, export_svg_with_contour, export_vtk, write_atomic,
+        ContourQuantity, DrawingKind, auto_deformation_scale, displacement_svg_text, envelope_svg_text,
+        export_csv_with_stations, export_html, export_md, export_vtk, forces_svg_text, modal_svg_text, overlay_svg_text,
+        reactions_svg_text, summary_svg_text, svg_with_contour_text, write_atomic,
     },
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
+    pdf::pdf_from_svg,
     solver::{
         BucklingCombinationSolution, BucklingSolution, CombinationSolution, ConstructionStage, ConstructionStageSolution,
         DeflectionSolution, ElementResult, FrequencyResponseSolution, HeatSolution, InfluenceDirection, InfluenceLineSolution,
@@ -127,6 +130,8 @@ pub enum ExportFormat {
     Html,
     /// One deterministic SVG drawing of the model and deformed shape.
     Svg,
+    /// One deterministic PDF rendering of the same drawing as `Svg`.
+    Pdf,
 }
 
 impl ExportFormat {
@@ -138,6 +143,7 @@ impl ExportFormat {
             Self::Md => "md",
             Self::Html => "html",
             Self::Svg => "svg",
+            Self::Pdf => "pdf",
         }
     }
 }
@@ -152,21 +158,24 @@ impl FromStr for ExportFormat {
             "md" => Ok(Self::Md),
             "html" | "htm" => Ok(Self::Html),
             "svg" => Ok(Self::Svg),
+            "pdf" => Ok(Self::Pdf),
             "inp" | "abaqus" | "step" | "stp" => Err(not_implemented(&format!("`{value}` format export"))),
             other => Err(CaeError::new(
                 "cli/unknown-format",
-                format!("unknown export format `{other}`; only csv, vtk, md, html or svg is supported"),
+                format!("unknown export format `{other}`; only csv, vtk, md, html, svg or pdf is supported"),
             )),
         }
     }
 }
 
 /// Options of [`OpenCae::export_with_options`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ExportOptions {
     /// Scale factor applied to nodal displacements when drawing the deformed
-    /// shape of an SVG export. Must be finite and positive; defaults to `1.0`.
-    pub scale: f64,
+    /// shape of an SVG or PDF export. Must be finite and positive when
+    /// given. `None` picks an automatic scale so the largest displacement
+    /// spans about a fifth of the drawing height.
+    pub scale: Option<f64>,
     /// Stations sampled per member in the `forces.csv` table of a CSV export.
     ///
     /// `None` keeps the default of 11 stations. The value counts both element
@@ -186,12 +195,6 @@ pub struct ExportOptions {
     /// other format rejects the option with `export/invalid-drawing`, and it
     /// cannot be combined with `contour`.
     pub drawing: Option<DrawingKind>,
-}
-
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self { scale: 1.0, stations: None, contour: None, drawing: None }
-    }
 }
 
 /// Report returned by [`OpenCae::export`].
@@ -1544,29 +1547,31 @@ impl OpenCae {
 
     /// Solves the open document and exports the result with `options`.
     ///
-    /// `options.scale` only affects the SVG format: it multiplies the nodal
-    /// displacements of the deformed shape. `options.contour` is also SVG-only
-    /// and turns the drawing into a result contour with a colour bar; every
-    /// other format rejects it with `export/invalid-contour`.
-    /// `options.drawing` selects a dedicated SVG engineering drawing (shear
-    /// and moment diagrams); it is SVG-only, cannot combine with `contour`,
-    /// and every other format rejects it with `export/invalid-drawing`.
+    /// `options.scale` only affects the SVG and PDF formats: it multiplies
+    /// the nodal displacements of the deformed shape, and `None` picks an
+    /// automatic scale. `options.contour` is also SVG/PDF-only and turns the
+    /// drawing into a result contour with a colour bar; every other format
+    /// rejects it with `export/invalid-contour`. `options.drawing` selects a
+    /// dedicated engineering drawing (force, displacement, reaction,
+    /// overlay, modal or envelope sheets); it is SVG/PDF-only, cannot
+    /// combine with `contour`, and every other format rejects it with
+    /// `export/invalid-drawing`.
     pub fn export_with_options(
         &self,
         format: ExportFormat,
         target: &Path,
         options: ExportOptions,
     ) -> Result<ExportReport, CaeError> {
-        if options.contour.is_some() && format != ExportFormat::Svg {
+        if options.contour.is_some() && !matches!(format, ExportFormat::Svg | ExportFormat::Pdf) {
             return Err(CaeError::new(
                 "export/invalid-contour",
-                format!("the contour option only applies to SVG export, not `{}`", format.as_str()),
+                format!("the contour option only applies to SVG and PDF export, not `{}`", format.as_str()),
             ));
         }
-        if options.drawing.is_some() && format != ExportFormat::Svg {
+        if options.drawing.is_some() && !matches!(format, ExportFormat::Svg | ExportFormat::Pdf) {
             return Err(CaeError::new(
                 "export/invalid-drawing",
-                format!("the drawing option only applies to SVG export, not `{}`", format.as_str()),
+                format!("the drawing option only applies to SVG and PDF export, not `{}`", format.as_str()),
             ));
         }
         if options.drawing.is_some() && options.contour.is_some() {
@@ -1622,39 +1627,62 @@ impl OpenCae {
                 };
                 vec![file.display().to_string()]
             }
-            ExportFormat::Svg => {
-                let default_name = match options.drawing {
-                    None => {
-                        export_svg_with_contour(
-                            model,
-                            &solution,
-                            options.scale,
-                            options.contour,
-                            options.stations.unwrap_or(11),
-                            target,
-                        )?;
-                        "model.svg"
+            ExportFormat::Svg | ExportFormat::Pdf => {
+                let stations = options.stations.unwrap_or(11);
+                let scale = match options.scale {
+                    Some(scale) if scale.is_finite() && scale > 0.0 => scale,
+                    Some(scale) => {
+                        return Err(CaeError::new(
+                            "export/invalid-scale",
+                            format!("the deformed-shape scale must be a finite positive number, but is {scale}"),
+                        ));
                     }
-                    Some(DrawingKind::Forces) => {
-                        export_forces_svg(model, options.stations.unwrap_or(11), target)?;
-                        DrawingKind::Forces.default_file_name()
-                    }
+                    None => auto_deformation_scale(model, &solution),
+                };
+                let (text, default_name) = match options.drawing {
+                    None => (svg_with_contour_text(model, &solution, scale, options.contour, stations)?, "model.svg"),
+                    Some(DrawingKind::Forces) => (forces_svg_text(model, stations)?, DrawingKind::Forces.default_file_name()),
                     Some(DrawingKind::Displacement) => {
-                        export_displacement_svg(model, &solution, options.scale, target)?;
-                        DrawingKind::Displacement.default_file_name()
+                        (displacement_svg_text(model, &solution, scale)?, DrawingKind::Displacement.default_file_name())
                     }
                     Some(DrawingKind::Reactions) => {
-                        export_reactions_svg(model, &solution, target)?;
-                        DrawingKind::Reactions.default_file_name()
+                        (reactions_svg_text(model, &solution)?, DrawingKind::Reactions.default_file_name())
+                    }
+                    Some(DrawingKind::Overlay) => {
+                        (overlay_svg_text(model, &solution, scale)?, DrawingKind::Overlay.default_file_name())
+                    }
+                    Some(DrawingKind::Modal) => {
+                        let modal = solve_modal(model, 5)?;
+                        (modal_svg_text(model, &modal)?, DrawingKind::Modal.default_file_name())
+                    }
+                    Some(DrawingKind::Envelope) => {
+                        let report = solve_envelope(model)?;
+                        (envelope_svg_text(model, &report)?, DrawingKind::Envelope.default_file_name())
+                    }
+                    Some(DrawingKind::Summary) => {
+                        (summary_svg_text(model, &solution)?, DrawingKind::Summary.default_file_name())
                     }
                 };
-                let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {
-                    target.to_path_buf()
+                if format == ExportFormat::Pdf {
+                    let file = if target.extension().and_then(|extension| extension.to_str()) == Some("pdf") {
+                        target.to_path_buf()
+                    }
+                    else {
+                        target.join(default_name.replace(".svg", ".pdf"))
+                    };
+                    write_atomic_bytes(&file, &pdf_from_svg(&text))?;
+                    vec![file.display().to_string()]
                 }
                 else {
-                    target.join(default_name)
-                };
-                vec![file.display().to_string()]
+                    let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+                        target.to_path_buf()
+                    }
+                    else {
+                        target.join(default_name)
+                    };
+                    write_atomic(&file, &text)?;
+                    vec![file.display().to_string()]
+                }
             }
         };
         Ok(ExportReport { format: format.as_str().to_string(), path: target.display().to_string(), files })
@@ -1700,6 +1728,18 @@ impl OpenCae {
 
 fn positive_density(model: &Model) -> bool {
     model.material.density.is_finite() && model.material.density > 0.0
+}
+
+/// Publishes raw bytes through a same-directory temporary file, the binary
+/// counterpart of [`write_atomic`] used by the PDF export.
+fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<(), CaeError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.as_os_str().is_empty() {
+        fs::create_dir_all(parent)
+            .map_err(|error| CaeError::new("io/write", format!("cannot create directory `{}`: {error}", parent.display())))?;
+    }
+    boost_session::save_atomic(path, contents)
+        .map_err(|error| CaeError::new("io/write", format!("cannot write `{}`: {error}", path.display())))
 }
 
 /// Stable error for a capability this build does not implement.

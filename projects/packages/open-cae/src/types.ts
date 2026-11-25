@@ -26,7 +26,7 @@ export type SupportLevel = 'supported' | 'unsupported';
 export type Severity = 'error' | 'warning' | 'notice';
 
 /** Export formats `export()` can write. */
-export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html' | 'svg';
+export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html' | 'svg' | 'pdf';
 
 /**
  * Result quantity an SVG export can colour the members by.
@@ -39,20 +39,26 @@ export type ContourQuantity = 'axial' | 'shear' | 'moment' | 'displacement';
 /**
  * Dedicated SVG engineering drawing kind.
  *
- * `forces` writes a sheet with the shear `V(x)` and bending-moment `M(x)`
- * diagram of every beam-like member, annotated with the sampled extremes and
- * the zero-shear crossings. `displacement` writes the deformed shape with a
- * scaled green arrow and the magnitude label at every displaced node.
- * `reactions` writes the undeformed shape with a purple arrow, magnitude
- * label and reaction-moment label at every supported node.
+ * `forces` writes the shear `V(x)` and bending-moment `M(x)` diagram of every
+ * beam-like member (axial `N(x)` for trusses), annotated with the sampled
+ * extremes and the zero-shear crossings. `displacement` writes the deformed
+ * shape with a scaled green arrow and the magnitude label at every displaced
+ * node. `reactions` writes the undeformed shape with a purple arrow, magnitude
+ * label and reaction-moment label at every supported node. `overlay` compares
+ * the undeformed skeleton with the deformed centreline and labels only the
+ * extreme node. `modal` draws the lowest mode shapes with their frequencies,
+ * `envelope` draws the member force range across every load combination and
+ * `summary` writes a one-page result summary with a model thumbnail.
  */
-export type DrawingKind = 'forces' | 'displacement' | 'reactions';
+export type DrawingKind = 'forces' | 'displacement' | 'reactions' | 'overlay' | 'modal' | 'envelope' | 'summary';
 
 /** Options of `export()`. */
 export interface ExportOptions {
     /**
      * Scale factor applied to nodal displacements when drawing the deformed
-     * shape of an SVG export. Must be finite and positive; defaults to `1`.
+     * shape of an SVG or PDF export. Must be finite and positive; omitted
+     * picks an automatic scale so the largest displacement spans about a
+     * fifth of the drawing height.
      */
     readonly scale?: number;
     /**
@@ -61,15 +67,17 @@ export interface ExportOptions {
      */
     readonly stations?: number;
     /**
-     * Colours the members of an SVG export by a result quantity and adds a
-     * colour bar with the sampled minimum and maximum. Only SVG accepts it;
-     * every other format rejects it with `export/invalid-contour`.
+     * Colours the members of an SVG or PDF export by a result quantity and
+     * adds a colour bar with the sampled minimum and maximum. Only SVG and
+     * PDF accept it; every other format rejects it with
+     * `export/invalid-contour`.
      */
     readonly contour?: ContourQuantity;
     /**
-     * Selects a dedicated SVG engineering drawing instead of the deformed-shape
-     * or contour drawing. Only SVG accepts it; it cannot combine with `contour`,
-     * and every other format rejects it with `export/invalid-drawing`.
+     * Selects a dedicated engineering drawing instead of the deformed-shape or
+     * contour drawing. Only SVG and PDF accept it; it cannot combine with
+     * `contour`, and every other format rejects it with
+     * `export/invalid-drawing`.
      */
     readonly drawing?: DrawingKind;
 }

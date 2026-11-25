@@ -1611,12 +1611,12 @@ fn export(ctx: CallContext) -> Result<JsValue> {
     let format = text(&ctx, 1)?.parse::<ExportFormat>().map_err(fail)?;
     let target = text(&ctx, 2)?;
     let options = optional_object(&ctx, 3)?;
-    let mut scale = 1.0;
+    let mut scale = None;
     let mut stations = None;
     let mut contour = None;
     let mut drawing = None;
     if let Some(options) = options.as_ref() {
-        scale = number_field(options, "scale")?.unwrap_or(1.0);
+        scale = number_field(options, "scale")?;
         stations = usize_field(options, "stations")?;
         contour = options
             .get("contour")

@@ -23,15 +23,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     session.add_support("n2", true, true, false)?;
     session.add_load("n3", None, Some(-1000.0), None)?;
 
-    session.export_with_options(
-        ExportFormat::Svg,
-        &out.join("truss.svg"),
-        ExportOptions { scale: 1.5, ..Default::default() },
-    )?;
+    // Default scale: auto so the deformed shape visibly separates from the
+    // undeformed outline instead of lying on top of it.
+    session.export_with_options(ExportFormat::Svg, &out.join("truss.svg"), ExportOptions::default())?;
     session.export_with_options(
         ExportFormat::Svg,
         &out.join("truss-axial.svg"),
-        ExportOptions { scale: 1.5, contour: Some(ContourQuantity::Axial), ..Default::default() },
+        ExportOptions { contour: Some(ContourQuantity::Axial), ..Default::default() },
     )?;
     println!("done");
     Ok(())

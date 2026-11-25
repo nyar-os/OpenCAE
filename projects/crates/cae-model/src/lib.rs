@@ -57,6 +57,7 @@ mod error;
 mod export;
 mod library;
 mod model;
+mod pdf;
 mod session;
 mod solver;
 mod validate;
@@ -71,8 +72,11 @@ pub use crate::{
     },
     error::CaeError,
     export::{
-        ContourQuantity, DrawingKind, export_csv, export_csv_with_stations, export_displacement_svg, export_forces_svg,
-        export_html, export_md, export_reactions_svg, export_svg, export_svg_with_contour, export_vtk, write_atomic,
+        ContourQuantity, DrawingKind, auto_deformation_scale, displacement_svg_text, envelope_svg_text, export_csv,
+        export_csv_with_stations, export_displacement_svg, export_envelope_svg, export_forces_svg, export_html, export_md,
+        export_modal_svg, export_overlay_svg, export_reactions_svg, export_svg, export_svg_with_contour, export_vtk,
+        forces_svg_text, modal_svg_text, overlay_svg_text, reactions_svg_text, summary_svg_text, svg_with_contour_text,
+        write_atomic,
     },
     library::{
         MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, PrincipalSectionReport, SectionProperties, SectionReport,
@@ -85,6 +89,7 @@ pub use crate::{
         LoadPattern, Material, Model, Node, PatternFactor, PrescribedDisplacement, Section, SpringStiffness, Support, Units,
         VERSION,
     },
+    pdf::pdf_from_svg,
     session::{
         DocumentSummary, ElementSplitReport, ExportFormat, ExportOptions, ExportReport, ImportReport, OpenCae, OpenCaeOptions,
         Report, ValidationReport, not_implemented,
@@ -180,10 +185,15 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "md": "supported",
     "html": "supported",
     "svg": "supported",
+    "pdf": "supported",
     "svgContour": "supported",
     "svgForces": "supported",
     "svgDisplacement": "supported",
     "svgReactions": "supported",
+    "svgOverlay": "supported",
+    "svgModal": "supported",
+    "svgEnvelope": "supported",
+    "svgSummary": "supported",
     "inp": "supported",
     "step": "unsupported"
   }

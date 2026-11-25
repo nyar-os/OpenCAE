@@ -318,7 +318,7 @@ function numberListOption(ctx: CommandContext, b: Bound, name: string): number[]
 }
 
 function exportFormat(ctx: CommandContext, value: string): ExportFormat {
-    if (value === 'csv' || value === 'vtk' || value === 'md' || value === 'svg') {
+    if (value === 'csv' || value === 'vtk' || value === 'md' || value === 'svg' || value === 'pdf') {
         return value;
     }
     if (value === 'inp' || value === 'abaqus' || value === 'step' || value === 'stp') {
@@ -358,7 +358,15 @@ function drawingOption(ctx: CommandContext, b: Bound): DrawingKind | undefined {
     if (value === undefined) {
         return undefined;
     }
-    if (value === 'forces' || value === 'displacement' || value === 'reactions') {
+    if (
+        value === 'forces' ||
+        value === 'displacement' ||
+        value === 'reactions' ||
+        value === 'overlay' ||
+        value === 'modal' ||
+        value === 'envelope' ||
+        value === 'summary'
+    ) {
         return value;
     }
     throw failure(ctx, 'cli/invalid-option', 'unknownDrawing', { value });
@@ -2228,7 +2236,7 @@ cli
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement|reactions]',
+                'export <file> --format csv|vtk|md|svg|pdf --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement|reactions|overlay|modal|envelope|summary]',
             );
             const format = exportFormat(ctx, b.required('--format'));
             const out = b.required('--out');

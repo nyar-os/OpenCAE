@@ -85,7 +85,7 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
     let target = directory.join("model.svg");
 
     let first = session
-        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5, ..ExportOptions::default() })
+        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: Some(1.5), ..ExportOptions::default() })
         .expect("first export");
     assert_eq!(first.format, "svg");
     assert_eq!(first.files, vec![target.display().to_string()]);
@@ -104,7 +104,7 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
     assert!(text.contains("projection: XY</text>"), "missing projection note: {text}");
 
     session
-        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5, ..ExportOptions::default() })
+        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: Some(1.5), ..ExportOptions::default() })
         .expect("second export");
     let repeated = fs::read_to_string(&target).expect("model.svg");
     assert_eq!(text, repeated, "repeated SVG exports must be byte-identical");
@@ -162,7 +162,12 @@ fn dashed_member_lines(text: &str) -> Vec<(f64, f64, f64, f64)> {
     };
 
     text.lines()
-        .filter(|line| line.starts_with("<line ") && line.contains("stroke-dasharray") && attribute(line, "y1") < 660.0)
+        .filter(|line| {
+            line.starts_with("<line ")
+                && line.contains("stroke-dasharray")
+                && !line.contains("data-legend")
+                && attribute(line, "y1") < 660.0
+        })
         .map(|line| (attribute(line, "x1"), attribute(line, "y1"), attribute(line, "x2"), attribute(line, "y2")))
         .collect()
 }
@@ -191,7 +196,9 @@ fn svg_export_projects_three_dimensional_models_obliquely() {
     let text = fs::read_to_string(&target).expect("space.svg");
     assert!(text.contains("<polyline"));
     assert!(text.contains("<polygon"));
-    assert!(text.contains("scale 1.00"));
+    // The default scale adapts to the displacement magnitude, so the note
+    // only has to name the scale it actually drew with.
+    assert!(text.contains("deformed (scale "), "missing the scale note: {text}");
     assert!(text.contains("OpenCAE model and deformed shape"));
     assert!(text.contains("projection: XY, oblique Z (30°, 0.5)"), "missing oblique note: {text}");
 }
@@ -204,7 +211,7 @@ fn svg_export_keeps_pure_z_members_visible_in_frames() {
     let target = directory.join("frame.svg");
 
     session
-        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 200.0, ..ExportOptions::default() })
+        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: Some(200.0), ..ExportOptions::default() })
         .expect("svg export");
     let text = fs::read_to_string(&target).expect("frame.svg");
     assert!(text.contains("projection: XY, oblique Z (30°, 0.5)"), "missing oblique note: {text}");
@@ -252,7 +259,8 @@ fn svg_export_keeps_pure_z_members_visible_in_frames() {
 
     // Contour exports of the same frame stay deterministic.
     let contour = directory.join("frame-disp.svg");
-    let options = ExportOptions { scale: 200.0, contour: Some(ContourQuantity::Displacement), ..ExportOptions::default() };
+    let options =
+        ExportOptions { scale: Some(200.0), contour: Some(ContourQuantity::Displacement), ..ExportOptions::default() };
     session.export_with_options(ExportFormat::Svg, &contour, options).expect("contour export");
     let first = fs::read_to_string(&contour).expect("frame-disp.svg");
     session.export_with_options(ExportFormat::Svg, &contour, options).expect("repeat contour export");
@@ -304,9 +312,8 @@ fn svg_moment_contour_reports_the_fixed_end_moment() {
     // P·L = 1e6 N·mm; the legend prints the sampled extreme with four
     // significant digits in scientific notation.
     assert!(text.contains("-1.000e6"), "missing P·L extreme: {text}");
-    // A varying field keeps the gradient bar: the white page background plus
-    // twelve colour steps.
-    assert_eq!(text.matches("<rect").count(), 13, "a varying contour keeps the twelve-step bar: {text}");
+    // A varying field keeps the gradient bar: twelve colour swatches.
+    assert_eq!(text.matches("data-swatch=\"1\"").count(), 12, "a varying contour keeps the twelve-step bar: {text}");
     assert!(text.contains("font-size=\"11\">-1.000e6</text>"), "missing sampled minimum label: {text}");
     assert!(text.contains("text-anchor=\"end\">0</text>"), "missing sampled maximum label: {text}");
     assert!(text.contains("stroke=\"#1d4ed8\"") || text.contains("stroke=\"#b91c1c\""), "missing contour colour: {text}");
@@ -330,8 +337,8 @@ fn svg_axial_contour_of_a_tension_bar_is_uniform_red() {
     assert!(text.contains("contour: axial force (N)"), "missing axial legend: {text}");
     assert!(text.contains("uniform 1000</text>"), "a constant field must be labelled uniform: {text}");
     assert_eq!(text.matches("uniform 1000").count(), 1, "the uniform value must be printed once: {text}");
-    // The page background plus one solid swatch; a uniform field has no gradient.
-    assert_eq!(text.matches("<rect").count(), 2, "a uniform contour needs a single swatch: {text}");
+    // One solid swatch; a uniform field has no gradient.
+    assert_eq!(text.matches("data-swatch=\"1\"").count(), 1, "a uniform contour needs a single swatch: {text}");
     assert!(text.contains("stroke=\"#b91c1c\""), "the maximum must be drawn red: {text}");
 }
 
@@ -346,8 +353,11 @@ fn svg_uniform_axial_contour_labels_the_compression_once() {
     session.export_with_options(ExportFormat::Svg, &target, options).expect("contour export");
     let text = fs::read_to_string(&target).expect("axial.svg");
     assert!(text.contains("uniform -707.1</text>"), "missing uniform compression label: {text}");
-    assert_eq!(text.matches("-707.1").count(), 1, "the two endpoints must not repeat the same value: {text}");
-    assert_eq!(text.matches("<rect").count(), 2, "a uniform contour needs a single swatch: {text}");
+    // The legend prints the shared value once; each of the two members also
+    // carries its signed axial force, so the value appears three times.
+    assert_eq!(text.matches("uniform -707.1").count(), 1, "the legend must not repeat the value: {text}");
+    assert_eq!(text.matches("N = -707.1 N</text>").count(), 2, "each member needs a signed axial label: {text}");
+    assert_eq!(text.matches("data-swatch=\"1\"").count(), 1, "a uniform contour needs a single swatch: {text}");
 }
 
 #[test]
