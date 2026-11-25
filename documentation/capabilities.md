@@ -53,6 +53,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | `.ocae` JSON I/O | ✅ supported |
 | CSV (solution tables and the `envelope --csv` table) / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
+| SVG engineering drawings (`export --drawing forces\|displacement`, shear/moment diagram sheet and nodal displacement vector sheet) | ✅ supported |
 | 3D beam (`beam3d`, spatial 6-DOF frame member: axial, torsion, bending about both axes, local-to-global transform with orientation vector/angle) | ✅ supported |
 | 3D frame (`frame3d`, spatial static frames of `beam3d` members with full fixity/hinge/roller supports, nodal forces and couples, local `+y`/`+z` distributed loads; displacements, reactions and end forces `N`/`T`/`Vy`/`Vz`/`My`/`Mz`) | ✅ supported |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
@@ -148,6 +149,23 @@ maximum printed with four significant digits (scientific notation outside
 `1e-3 … 1e6`), so the drawing and the numbers agree. A contour is SVG-only; every
 other format rejects it with `export/invalid-contour`, and an unknown quantity
 is rejected with the same code (the CLI reports `cli/invalid-option`).
+
+`export --drawing <kind>` (SDK `export({ drawing })`, addon `drawing`, Rust
+`DrawingKind`) replaces the plain shape sheet with a dedicated engineering
+drawing and is SVG-only; every other format rejects it with
+`export/invalid-drawing`, as does combining it with `--contour`. `forces`
+(`export_forces_svg`, default file `forces.svg`) draws the shear `V(x)` and
+bending-moment `M(x)` diagram of every beam-like member sampled at
+`--stations` stations, annotated with the sampled extremes and the zero-shear
+crossings, and fails with `export/no-beam-diagram` when the model has no
+beam or frame members. `displacement` (`export_displacement_svg`, default file
+`displacements.svg`) draws the deformed shape as blue polylines at the
+`--scale` deformation factor over the dashed grey undeformed outline, then a
+green arrow at every node with a non-zero displacement whose length is
+proportional to the magnitude and whose tip carries the magnitude in the
+displacement unit, with a legend naming the scale and the maximum magnitude;
+an invalid scale is rejected with `export/invalid-scale` exactly like the
+plain SVG. Both sheets are deterministic and contain no timestamps.
 
 Model quantities are exposed as `summarize_model()` in Rust, `model_summary` in
 the addon and `modelSummary()` in the SDK, with CLI subcommand `model summary`.
@@ -705,6 +723,13 @@ exports, and the stable `export/no-solution`, `export/invalid-scale`,
 the fixed-end moment `P·L = 1e6 N·mm` (`-1.000e6`) of a cantilever, the uniform
 1000 N axial force of a tension bar and the `FL/(EA) = 0.047619 mm` extension,
 and check the legend values and colours.
+
+`tests/drawings.rs`: the `forces` sheet of a uniformly loaded beam and of a
+cantilever, the `displacement` sheet of a tension bar (tip `FL/(EA) = 0.4762`
+labelled) and of a cantilever (tip `PL³/(3EI) = 1.587`, one arrow only at the
+free node), byte-identical repeated exports, and the stable
+`export/invalid-drawing`, `export/invalid-scale`, `export/no-beam-diagram` and
+`export/no-solution` errors plus the directory default file names.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load
