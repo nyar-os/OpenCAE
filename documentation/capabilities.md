@@ -55,7 +55,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | CSV (solution tables and the `envelope --csv` table) / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
 | PDF sheet export (`export --format pdf`: the same deterministic drawing as a single-page PDF) | ✅ supported |
-| SVG/PDF engineering drawings (`export --drawing forces\|displacement\|reactions\|overlay\|modal\|envelope\|summary`) | ✅ supported |
+| SVG/PDF engineering drawings (`export --drawing forces\|shear\|moment\|displacement\|reactions\|overlay\|modal\|envelope\|summary`) | ✅ supported |
 | 3D beam (`beam3d`, spatial 6-DOF frame member: axial, torsion, bending about both axes, local-to-global transform with orientation vector/angle) | ✅ supported |
 | 3D frame (`frame3d`, spatial static frames of `beam3d` members with full fixity/hinge/roller supports, nodal forces and couples, local `+y`/`+z` distributed loads; displacements, reactions and end forces `N`/`T`/`Vy`/`Vz`/`My`/`Mz`) | ✅ supported |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
@@ -178,6 +178,21 @@ bending-moment `M(x)` diagram of every beam-like member sampled at
 crossings; a truss member has no shear or moment and instead gets an axial
 `N(x)` panel, a diagram that is zero everywhere is labelled `V ≡ 0`/`M ≡ 0`,
 and a model without members fails with `export/no-beam-diagram`.
+`shear` (`export_shear_svg`, default file `shear.svg`) and `moment`
+(`export_moment_svg`, default file `moment.svg`) draw the same sampled
+`V(x)`/`M(x)` data as a filled diagram on each beam or `beam3d` member axis:
+positive values on the local `+y` side in blue, negative values on the
+opposite side in red, both member end values and the extreme station labelled.
+Truss members cannot carry shear or moment, so they stay as a dashed skeleton
+and are listed in a status line; the sheet draws no fill for them. The values
+come from the same `solve_internal_forces` report as `forces.csv`, so the
+analytic `qL²/8` and `PL/4` checks in `tests/drawing_layout.rs` hold. Both
+sheets use the same page and title block as every other drawing: one font
+family in three sizes, a fixed label/value/note title block whose text shrinks
+to fit its cell, a plot area centred on the model, a legend on the reserved
+band above the title block and labels placed by an eight-direction search that
+rejects any position crossing a member, an axis or an earlier label, moving out
+with a leader line when no near spot is free.
 `displacement` (`export_displacement_svg`, default file
 `displacements.svg`) draws the deformed shape as blue polylines at the
 `--scale` deformation factor over the dashed grey undeformed outline, then a
@@ -782,6 +797,15 @@ fallback to `<drawing>.pdf`, byte-identical repeated SVG exports, and the
 stable `export/invalid-drawing`, `export/invalid-scale`,
 `export/no-beam-diagram`, `export/no-reactions` and `export/no-solution`
 errors plus the directory default file names.
+
+`tests/drawing_layout.rs` reads every exported sheet back as SVG and checks the
+reader-visible layout instead of the writer: every text box and geometry point
+stays inside the page frame, no body label crosses a member, axis, arrow or
+another label, the title-block text never overruns its cell, the two-bar truss
+fills at least 60 % of the geometry viewport, and the new `shear`/`moment`
+sheets reproduce the analytic `V(0) = +qL/2`, `V(L) = -qL/2`,
+`M_max = qL²/8 = 250000 N·mm` and `PL/4 = 250000 N·mm` values, skip truss
+members with a named status line, and are byte-deterministic.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load
