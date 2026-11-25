@@ -358,7 +358,7 @@ function drawingOption(ctx: CommandContext, b: Bound): DrawingKind | undefined {
     if (value === undefined) {
         return undefined;
     }
-    if (value === 'forces' || value === 'displacement') {
+    if (value === 'forces' || value === 'displacement' || value === 'reactions') {
         return value;
     }
     throw failure(ctx, 'cli/invalid-option', 'unknownDrawing', { value });
@@ -2228,7 +2228,7 @@ cli
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement]',
+                'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement|reactions]',
             );
             const format = exportFormat(ctx, b.required('--format'));
             const out = b.required('--out');

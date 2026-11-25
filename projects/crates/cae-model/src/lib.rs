@@ -72,7 +72,7 @@ pub use crate::{
     error::CaeError,
     export::{
         ContourQuantity, DrawingKind, export_csv, export_csv_with_stations, export_displacement_svg, export_forces_svg,
-        export_html, export_md, export_svg, export_svg_with_contour, export_vtk, write_atomic,
+        export_html, export_md, export_reactions_svg, export_svg, export_svg_with_contour, export_vtk, write_atomic,
     },
     library::{
         MATERIAL_PRESETS, MaterialPreset, PolygonSectionReport, PrincipalSectionReport, SectionProperties, SectionReport,
@@ -183,6 +183,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "svgContour": "supported",
     "svgForces": "supported",
     "svgDisplacement": "supported",
+    "svgReactions": "supported",
     "inp": "supported",
     "step": "unsupported"
   }

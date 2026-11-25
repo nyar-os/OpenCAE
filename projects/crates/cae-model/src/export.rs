@@ -530,6 +530,9 @@ pub enum DrawingKind {
     /// Nodal displacement vectors drawn at the deformed nodes with their
     /// magnitudes labelled.
     Displacement,
+    /// Support reaction vectors drawn at the supported nodes with their
+    /// magnitudes and reaction moments labelled.
+    Reactions,
 }
 
 impl DrawingKind {
@@ -538,6 +541,7 @@ impl DrawingKind {
         match self {
             Self::Forces => "forces",
             Self::Displacement => "displacement",
+            Self::Reactions => "reactions",
         }
     }
 
@@ -546,6 +550,7 @@ impl DrawingKind {
         match self {
             Self::Forces => "OpenCAE shear and moment diagrams",
             Self::Displacement => "OpenCAE nodal displacement vectors",
+            Self::Reactions => "OpenCAE support reaction vectors",
         }
     }
 
@@ -554,6 +559,7 @@ impl DrawingKind {
         match self {
             Self::Forces => "forces.svg",
             Self::Displacement => "displacements.svg",
+            Self::Reactions => "reactions.svg",
         }
     }
 }
@@ -565,9 +571,10 @@ impl FromStr for DrawingKind {
         match value {
             "forces" => Ok(Self::Forces),
             "displacement" => Ok(Self::Displacement),
+            "reactions" => Ok(Self::Reactions),
             other => Err(CaeError::new(
                 "export/invalid-drawing",
-                format!("unsupported drawing kind `{other}`; valid values are `forces`, `displacement`"),
+                format!("unsupported drawing kind `{other}`; valid values are `forces`, `displacement`, `reactions`"),
             )),
         }
     }
@@ -995,6 +1002,237 @@ pub fn export_displacement_svg(model: &Model, solution: &Solution, scale: f64, p
         text,
         "<text x=\"240\" y=\"690\">deformation × {:.2} · arrow length ∝ |u| · max |u| = {} {unit}</text>",
         scale,
+        format_contour_value(max_magnitude),
+    );
+    text.push_str("</g>\n</svg>\n");
+
+    write_atomic(&target, &text)
+}
+
+/// Writes a deterministic SVG sheet of support reaction vectors.
+///
+/// The members are drawn as blue lines at their undeformed positions, the
+/// nodes as black dots with their ids and every constrained support as a
+/// green triangle, exactly like the plain SVG drawing. On top of that, every
+/// support of the solution's reaction summary — the same per
+/// support rows `reactions.csv` writes — gets a purple arrow starting at the
+/// node and pointing along the projected reaction vector `(fx, fy, fz)`. The
+/// arrow length is proportional to the translational magnitude, normalised so
+/// the largest magnitude spans 34 px, and the tip is labelled with the
+/// magnitude in newtons; a non-zero reaction moment is labelled next to the
+/// node with its component and the moment unit. The legend names the
+/// proportionality of the arrows and the maximum magnitude, so the drawing
+/// and the reaction tables agree. An empty model fails with
+/// `export/no-solution` and a model without supports fails with
+/// `export/no-reactions` instead of drawing a meaningless sheet.
+///
+/// When `path` ends in `.svg` it is used as the output file, otherwise `path`
+/// is treated as a directory and `reactions.svg` is created inside it.
+pub fn export_reactions_svg(model: &Model, solution: &Solution, path: &Path) -> Result<(), CaeError> {
+    if model.nodes.is_empty() {
+        return Err(CaeError::new("export/no-solution", "the model has no nodes, so there is no reaction to draw"));
+    }
+    check_alignment(model, solution)?;
+    if model.supports.is_empty() {
+        return Err(CaeError::new("export/no-reactions", "the model has no supports, so there is no reaction to draw"));
+    }
+    let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+        path.to_path_buf()
+    }
+    else {
+        path.join(DrawingKind::Reactions.default_file_name())
+    };
+
+    let depth = if model.dimension == 3 { 0.5 } else { 0.0 };
+    let oblique_x = depth * (std::f64::consts::FRAC_PI_6).cos();
+    let oblique_y = depth * (std::f64::consts::FRAC_PI_6).sin();
+    let project_point = |x: f64, y: f64, z: f64| (x + oblique_x * z, y + oblique_y * z);
+    let geometry: Vec<(f64, f64)> = model.nodes.iter().map(|node| project_point(node.x, node.y, node.z)).collect();
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for &(x, y) in &geometry {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(CaeError::new("export/invalid-model", "node coordinates must be finite before an SVG can be drawn"));
+        }
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    let mut width = max_x - min_x;
+    let mut height = max_y - min_y;
+    if width <= 0.0 {
+        width = 1.0;
+        min_x -= 0.5;
+    }
+    if height <= 0.0 {
+        height = 1.0;
+        min_y -= 0.5;
+    }
+    let max_y = min_y + height;
+
+    const VIEW_WIDTH: f64 = 960.0;
+    const VIEW_HEIGHT: f64 = 720.0;
+    const SIDE_MARGIN: f64 = 40.0;
+    const TOP_MARGIN: f64 = 60.0;
+    const PLOT_BOTTOM: f64 = 630.0;
+    let available_width = VIEW_WIDTH - 2.0 * SIDE_MARGIN;
+    let available_height = PLOT_BOTTOM - TOP_MARGIN;
+    let factor = (available_width / width).min(available_height / height);
+    let origin_x = SIDE_MARGIN + (available_width - width * factor) / 2.0;
+    let origin_y = TOP_MARGIN + (available_height - height * factor) / 2.0;
+    let project = |x: f64, y: f64| (origin_x + (x - min_x) * factor, origin_y + (max_y - y) * factor);
+
+    let units = model.units.unwrap_or(Units::Millimeter);
+    let moment_unit = ContourQuantity::Moment.unit(units);
+    let magnitudes: Vec<f64> = solution
+        .reaction_summary
+        .supports
+        .iter()
+        .map(|support| (support.fx * support.fx + support.fy * support.fy + support.fz * support.fz).sqrt())
+        .collect();
+    let max_magnitude = magnitudes.iter().copied().fold(0.0, f64::max);
+
+    let heading = DrawingKind::Reactions.title();
+    let mut text = String::new();
+    text.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        text,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {VIEW_WIDTH} {VIEW_HEIGHT}\" width=\"960\" height=\"720\" \
+         role=\"img\" aria-labelledby=\"ocae-svg-title\">"
+    );
+    let _ = writeln!(text, "<title id=\"ocae-svg-title\">{heading}</title>");
+    text.push_str("<rect x=\"0\" y=\"0\" width=\"960\" height=\"720\" fill=\"#ffffff\"/>\n");
+    let _ = writeln!(
+        text,
+        "<text x=\"480\" y=\"30\" text-anchor=\"middle\" font-family=\"system-ui, sans-serif\" font-size=\"20\" \
+         fill=\"#111827\">{heading}</text>"
+    );
+    text.push_str(
+        "<defs>\n<marker id=\"ocae-reaction-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" \
+         markerHeight=\"6\" orient=\"auto\" markerUnits=\"strokeWidth\">\n<path d=\"M0,0 L10,5 L0,10 z\" \
+         fill=\"#7c3aed\"/>\n</marker>\n</defs>\n",
+    );
+    text.push_str("<g stroke-linecap=\"round\">\n");
+
+    for element in &model.elements {
+        let from = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.from)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+        let to = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.to)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+        let (x1, y1) = project(geometry[from].0, geometry[from].1);
+        let (x2, y2) = project(geometry[to].0, geometry[to].1);
+        let _ = writeln!(
+            text,
+            "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
+        );
+    }
+    for support in &model.supports {
+        let constrained = support.dx
+            || support.dy
+            || support.dz
+            || support.rz
+            || support.spring.is_some()
+            || support.direction.is_some()
+            || support.prescribed.is_some();
+        if !constrained {
+            continue;
+        }
+        let Some(index) = model.nodes.iter().position(|node| node.id == support.node)
+        else {
+            continue;
+        };
+        let (cx, cy) = project(geometry[index].0, geometry[index].1);
+        let _ = writeln!(
+            text,
+            "<polygon points=\"{cx:.2},{cy:.2} {:.2},{:.2} {:.2},{:.2}\" fill=\"#16a34a\"/>",
+            cx - 7.0,
+            cy + 11.0,
+            cx + 7.0,
+            cy + 11.0
+        );
+    }
+    for (index, node) in model.nodes.iter().enumerate() {
+        let (cx, cy) = project(geometry[index].0, geometry[index].1);
+        let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"#111827\"/>");
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#374151\">{}</text>",
+            cx + 6.0,
+            cy - 6.0,
+            xml_escape(&node.id)
+        );
+    }
+    for (position, support) in solution.reaction_summary.supports.iter().enumerate() {
+        let Some(index) = model.nodes.iter().position(|node| node.id == support.node)
+        else {
+            continue;
+        };
+        let (cx, cy) = project(geometry[index].0, geometry[index].1);
+        let magnitude = magnitudes[position];
+        if magnitude > 0.0 && magnitude.is_finite() {
+            // The reaction is a vector, so the same linear map projects its
+            // direction; a pure Z reaction becomes an inclined arrow in 3D.
+            let (vector_x, vector_y) = project_point(support.fx, support.fy, support.fz);
+            let vector_length = (vector_x * vector_x + vector_y * vector_y).sqrt();
+            if vector_length > 0.0 && vector_length.is_finite() {
+                let direction_x = vector_x / vector_length;
+                let direction_y = -vector_y / vector_length;
+                let arrow_length = 34.0 * (magnitude / max_magnitude);
+                let tx = cx + direction_x * arrow_length;
+                let ty = cy + direction_y * arrow_length;
+                let _ = writeln!(
+                    text,
+                    "<line x1=\"{cx:.2}\" y1=\"{cy:.2}\" x2=\"{tx:.2}\" y2=\"{ty:.2}\" stroke=\"#7c3aed\" \
+                     stroke-width=\"2\" marker-end=\"url(#ocae-reaction-arrow)\"/>"
+                );
+                let _ = writeln!(
+                    text,
+                    "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" \
+                     fill=\"#5b21b6\">{} N</text>",
+                    tx + 4.0,
+                    ty - 4.0,
+                    format_contour_value(magnitude),
+                );
+            }
+        }
+        let mut moment_y = cy + 24.0;
+        for (component, value) in [("Mx", support.mx.unwrap_or(0.0)), ("My", support.my.unwrap_or(0.0)), ("Mz", support.mz)] {
+            if value == 0.0 || !value.is_finite() {
+                continue;
+            }
+            let _ = writeln!(
+                text,
+                "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#5b21b6\">{} \
+                 {} {moment_unit}</text>",
+                cx + 6.0,
+                moment_y,
+                component,
+                format_contour_value(value),
+            );
+            moment_y += 14.0;
+        }
+    }
+    text.push_str("</g>\n");
+
+    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"13\" fill=\"#111827\">\n");
+    let _ = writeln!(
+        text,
+        "<line x1=\"40\" y1=\"686\" x2=\"70\" y2=\"686\" stroke=\"#7c3aed\" stroke-width=\"2\"/>\n<text \
+         x=\"78\" y=\"690\">reaction vector</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<text x=\"240\" y=\"690\">arrow length ∝ |R| · max |R| = {} N · moments labelled in {moment_unit}</text>",
         format_contour_value(max_magnitude),
     );
     text.push_str("</g>\n</svg>\n");

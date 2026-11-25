@@ -78,7 +78,7 @@
             "  open-cae load-cases <file> [--out report.json]",
             "  open-cae matrices <file> [--out report.json]",
             "  open-cae spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]",
-            "  open-cae export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement]",
+            "  open-cae export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement|reactions]",
             "  open-cae report <file>",
             "  open-cae capabilities"
         ],
@@ -285,7 +285,7 @@
             "format": "export format, `csv`, `vtk`, `md` or `svg`",
             "scale": "SVG scale factor",
             "contour": "SVG contour quantity, `axial`, `shear`, `moment` or `displacement`",
-            "drawing": "SVG engineering drawing kind, `forces` for shear and moment diagrams, `displacement` for nodal displacement vectors"
+            "drawing": "SVG engineering drawing kind, `forces` for shear and moment diagrams, `displacement` for nodal displacement vectors, `reactions` for support reaction vectors"
         },
         "message": {
             "created": "created {path} ({units}, dimension {dimension})",
@@ -334,7 +334,7 @@
             "unknownImportFormat": "unknown import format `{format}`; only abaqus or inp is supported",
             "unsupportedImportFormat": "cannot infer the import format of `{file}`; provide an Abaqus `.inp` file or use --format abaqus",
             "unknownContour": "unknown contour quantity `{value}`; use `axial`, `shear`, `moment` or `displacement`",
-            "unknownDrawing": "unknown drawing kind `{value}`; use `forces` or `displacement`",
+            "unknownDrawing": "unknown drawing kind `{value}`; use `forces`, `displacement` or `reactions`",
             "unknownAnalysis": "unknown analysis `{value}`; only static, modal, buckling or tension-only is supported",
             "invalidIterations": "`--iterations` value `{value}` is not a positive integer",
             "tensionOnlyOptionsRequireAnalysis": "`--iterations` and `--tolerance` require `--analysis tension-only`",

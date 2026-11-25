@@ -43,8 +43,10 @@ export type ContourQuantity = 'axial' | 'shear' | 'moment' | 'displacement';
  * diagram of every beam-like member, annotated with the sampled extremes and
  * the zero-shear crossings. `displacement` writes the deformed shape with a
  * scaled green arrow and the magnitude label at every displaced node.
+ * `reactions` writes the undeformed shape with a purple arrow, magnitude
+ * label and reaction-moment label at every supported node.
  */
-export type DrawingKind = 'forces' | 'displacement';
+export type DrawingKind = 'forces' | 'displacement' | 'reactions';
 
 /** Options of `export()`. */
 export interface ExportOptions {

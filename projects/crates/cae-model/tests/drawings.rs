@@ -12,7 +12,7 @@ use std::{
 
 use cae_model::{
     ContourQuantity, DrawingKind, ElementKind, ExportFormat, ExportOptions, Model, OpenCae, OpenCaeOptions, Units,
-    export_displacement_svg, solve, solve_internal_forces,
+    export_displacement_svg, export_reactions_svg, solve, solve_internal_forces,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -65,6 +65,96 @@ fn forces_options() -> ExportOptions {
 
 fn displacement_options() -> ExportOptions {
     ExportOptions { drawing: Some(DrawingKind::Displacement), ..ExportOptions::default() }
+}
+
+fn reactions_options() -> ExportOptions {
+    ExportOptions { drawing: Some(DrawingKind::Reactions), ..ExportOptions::default() }
+}
+
+/// Two 45° truss bars with a 1000 N downward apex load on pinned supports.
+/// Analytic: each bar carries -707.1068 N and each support reaction has
+/// magnitude `sqrt(500² + 500²) = 707.1 N`.
+fn two_bar_truss() -> Model {
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", -500.0, 0.0).expect("n1");
+    model.add_node("n2", 500.0, 0.0).expect("n2");
+    model.add_node("n3", 0.0, 500.0).expect("n3");
+    model.add_element("e1", "n1", "n3", None).expect("e1");
+    model.add_element("e2", "n2", "n3", None).expect("e2");
+    model.set_material(Some("steel".to_string()), 210_000.0, 100.0);
+    model.add_support_full("n1", true, true, false, false).expect("pin");
+    model.add_support_full("n2", true, true, false, false).expect("pin");
+    model.add_load("n3", None, Some(-1000.0)).expect("apex load");
+    model
+}
+
+#[test]
+fn reactions_drawing_labels_the_truss_supports() {
+    let directory = temporary_dir("reactions-truss");
+    let model = two_bar_truss();
+    let session = save_session(&model, &directory, "truss");
+
+    let report =
+        session.export_with_options(ExportFormat::Svg, &directory, reactions_options()).expect("reactions drawing of a truss");
+    let target = directory.join("reactions.svg");
+    assert_eq!(report.files, vec![target.display().to_string()]);
+    let text = fs::read_to_string(&target).expect("reactions.svg");
+    assert!(text.contains("OpenCAE support reaction vectors"), "missing title: {text}");
+    // Each pinned support carries |R| = sqrt(500² + 500²) = 707.1 N.
+    assert!(text.contains("max |R| = 707.1 N"), "missing the legend maximum: {text}");
+    assert_eq!(text.matches(">707.1 N</text>").count(), 2, "one magnitude label per support: {text}");
+    assert_eq!(text.matches("marker-end=\"url(#ocae-reaction-arrow)\"").count(), 2, "one arrow per support: {text}");
+
+    session.export_with_options(ExportFormat::Svg, &directory, reactions_options()).expect("repeat export");
+    let repeated = fs::read_to_string(&target).expect("repeated reactions.svg");
+    assert_eq!(text, repeated, "repeated reaction drawings must be byte-identical");
+}
+
+#[test]
+fn reactions_drawing_labels_the_cantilever_fixed_end() {
+    let directory = temporary_dir("reactions-cantilever");
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", 1000.0, 0.0).expect("n2");
+    model.add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, Some(1.0e6), None).expect("beam");
+    model.set_material(Some("steel".to_string()), 210_000.0, 100.0);
+    model.add_support_full("n1", true, true, false, true).expect("fixed");
+    model.add_load("n2", None, Some(-1000.0)).expect("tip load");
+    let session = save_session(&model, &directory, "cantilever");
+    let target = directory.join("reactions.svg");
+
+    session.export_with_options(ExportFormat::Svg, &target, reactions_options()).expect("reactions export");
+    let text = fs::read_to_string(&target).expect("reactions.svg");
+    // Analytic fixed-end reaction: |R| = 1000 N and |Mz| = P·L = 1.000e6 N·mm.
+    assert!(text.contains(">1000 N</text>"), "missing the force magnitude label: {text}");
+    assert!(text.contains("1.000e6 N·mm"), "missing the reaction moment label: {text}");
+    assert_eq!(text.matches("marker-end=\"url(#ocae-reaction-arrow)\"").count(), 1, "one arrow at the fixed end: {text}");
+}
+
+#[test]
+fn reactions_drawing_rejects_an_empty_model() {
+    let directory = temporary_dir("reactions-empty");
+    let model = two_bar_truss();
+    let solution = solve(&model).expect("solve");
+    let empty = Model::new(Units::Millimeter);
+    let error = export_reactions_svg(&empty, &solution, &directory.join("reactions.svg")).expect_err("empty model");
+    assert_eq!(error.code, "export/no-solution");
+}
+
+#[test]
+fn reactions_drawing_rejects_a_model_without_supports() {
+    let directory = temporary_dir("reactions-unsupported");
+    let model = two_bar_truss();
+    let solution = solve(&model).expect("solve");
+    let mut unsupported = Model::new(Units::Millimeter);
+    unsupported.add_node("n1", -500.0, 0.0).expect("n1");
+    unsupported.add_node("n2", 500.0, 0.0).expect("n2");
+    unsupported.add_node("n3", 0.0, 500.0).expect("n3");
+    unsupported.add_element("e1", "n1", "n3", None).expect("e1");
+    unsupported.add_element("e2", "n2", "n3", None).expect("e2");
+    unsupported.set_material(Some("steel".to_string()), 210_000.0, 100.0);
+    let error = export_reactions_svg(&unsupported, &solution, &directory.join("reactions.svg")).expect_err("no supports");
+    assert_eq!(error.code, "export/no-reactions");
 }
 
 #[test]

@@ -20,7 +20,7 @@ use crate::{
     envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
         ContourQuantity, DrawingKind, export_csv_with_stations, export_displacement_svg, export_forces_svg, export_html,
-        export_md, export_svg_with_contour, export_vtk, write_atomic,
+        export_md, export_reactions_svg, export_svg_with_contour, export_vtk, write_atomic,
     },
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
@@ -1642,6 +1642,10 @@ impl OpenCae {
                     Some(DrawingKind::Displacement) => {
                         export_displacement_svg(model, &solution, options.scale, target)?;
                         DrawingKind::Displacement.default_file_name()
+                    }
+                    Some(DrawingKind::Reactions) => {
+                        export_reactions_svg(model, &solution, target)?;
+                        DrawingKind::Reactions.default_file_name()
                     }
                 };
                 let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {

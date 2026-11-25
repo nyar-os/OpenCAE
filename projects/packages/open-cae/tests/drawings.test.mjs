@@ -55,6 +55,7 @@ test('drawing exports write deterministic sheets', { skip: sdk === undefined }, 
         const capabilities = await session.capabilities();
         assert.equal(capabilities.io.svgForces, 'supported');
         assert.equal(capabilities.io.svgDisplacement, 'supported');
+        assert.equal(capabilities.io.svgReactions, 'supported');
 
         const document = await cantilever(session, directory, 'beam');
 
@@ -73,6 +74,18 @@ test('drawing exports write deterministic sheets', { skip: sdk === undefined }, 
         document.export('svg', displacementPath, { drawing: 'displacement' });
         const repeated = await readFile(displacementPath, 'utf8');
         assert.equal(repeated, displacement, 'repeated drawing exports must be byte-identical');
+
+        const reactionsPath = join(directory, 'reactions.svg');
+        document.export('svg', reactionsPath, { drawing: 'reactions' });
+        const reactions = await readFile(reactionsPath, 'utf8');
+        assert.match(reactions, /OpenCAE support reaction vectors/);
+        // Fixed-end reaction: |R| = 1000 N and |Mz| = P·L = 1.000e6 N·mm.
+        assert.match(reactions, />1000 N<\/text>/);
+        assert.match(reactions, /1\.000e6 N·mm/);
+
+        document.export('svg', reactionsPath, { drawing: 'reactions' });
+        const repeatedReactions = await readFile(reactionsPath, 'utf8');
+        assert.equal(repeatedReactions, reactions, 'repeated reaction exports must be byte-identical');
 
         assert.throws(
             () => document.export('svg', join(directory, 'bad.svg'), { drawing: 'pressure' }),
