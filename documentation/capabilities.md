@@ -125,10 +125,14 @@ cannot carry the load.
 HTML report and SVG shape export exist in the Rust API, the native addon and
 the TypeScript SDK; the `open-cae` CLI writes `csv`, `vtk`, `md` and `svg`
 (see [cli.md](cli.md)). The SVG drawing projects every node onto the global
-X–Y plane (Z is ignored, including in three-dimensional documents), fits a
+X–Y plane; in a three-dimensional document the Z axis is additionally drawn as
+a cabinet oblique axis (`x + 0.5·cos30°·z`, `y + 0.5·sin30°·z`), so pure Z
+members stay visible as inclined lines and their node labels no longer
+overprint, and the deformed shape includes `uz`. It fits a
 fixed 960 × 720 viewBox to the projected undeformed and deformed geometry,
 and draws grey undeformed lines, a blue deformed polyline at the requested
-`scale`, node dots, support triangles and load arrows. Like the reports it
+`scale`, node dots, support triangles and load arrows (a 3D force is projected
+with the same oblique map, so a pure Z load still gets an arrow). Like the reports it
 contains no timestamps, so repeated exports are byte-identical; the scale must
 be finite and positive and a model without nodes is rejected with
 `export/no-solution`.
@@ -140,7 +144,8 @@ coloured member segments: `axial`, `shear` and `moment` come from the same
 and `displacement` uses the nodal displacement magnitudes. The colours map a
 blue–white–red diverging scale over the sampled extremes; the colour bar names
 the quantity, its unit (`N`, `N·mm`/`N·m`, `mm`/`m`) and the sampled minimum and
-maximum, so the drawing and the numbers agree. A contour is SVG-only; every
+maximum printed with four significant digits (scientific notation outside
+`1e-3 … 1e6`), so the drawing and the numbers agree. A contour is SVG-only; every
 other format rejects it with `export/invalid-contour`, and an unknown quantity
 is rejected with the same code (the CLI reports `cli/invalid-option`).
 
@@ -690,14 +695,16 @@ plus:
   (loads, gravity, patterns, temperature) reports `combination/empty`;
 - CSV/VTK/Markdown/HTML content and `.ocae` round trips.
 
-`tests/svg_export.rs`: a two-bar truss and a three-dimensional bar, checked for
-`<svg`, `<line`, `<polyline`, the title, the requested scale, support and load
-markers, the documented XY projection note, byte-identical repeated exports,
-and the stable `export/no-solution`, `export/invalid-scale`,
+`tests/svg_export.rs`: a two-bar truss, a three-dimensional bar and a
+`beam3d` portal frame, checked for `<svg`, `<line`, `<polyline`, the title, the
+requested scale, support and load markers, the documented XY and oblique-Z
+projection notes, non-degenerate pure-Z members with separated node labels
+inside the viewBox, the projected Z load arrow, byte-identical repeated
+exports, and the stable `export/no-solution`, `export/invalid-scale`,
 `export/invalid-contour` and `export/mismatch` errors. The contour cases draw
-the fixed-end moment `P·L = 1e6 N·mm` of a cantilever, the uniform 1000 N axial
-force of a tension bar and the `FL/(EA) = 0.047619 mm` extension, and check the
-legend values and colours.
+the fixed-end moment `P·L = 1e6 N·mm` (`-1.000e6`) of a cantilever, the uniform
+1000 N axial force of a tension bar and the `FL/(EA) = 0.047619 mm` extension,
+and check the legend values and colours.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load
