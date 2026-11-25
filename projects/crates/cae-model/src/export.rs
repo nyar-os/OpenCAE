@@ -592,9 +592,7 @@ pub fn export_svg_with_contour(
         .nodes
         .iter()
         .zip(&solution.nodes)
-        .map(|(node, result)| {
-            project_point(node.x + scale * result.ux, node.y + scale * result.uy, node.z + scale * result.uz)
-        })
+        .map(|(node, result)| project_point(node.x + scale * result.ux, node.y + scale * result.uy, node.z + scale * result.uz))
         .collect();
     let series = contour.map(|quantity| contour_series(model, solution, &deformed, quantity, stations)).transpose()?;
 
@@ -806,16 +804,9 @@ pub fn export_svg_with_contour(
         "<line x1=\"520\" y1=\"{legend_y}\" x2=\"550\" y2=\"{legend_y}\" stroke=\"#dc2626\" stroke-width=\"2\" \
          marker-end=\"url(#ocae-load-arrow)\"/>\n<text x=\"558\" y=\"{legend_text_y}\">load</text>"
     );
-    let projection_label = if model.dimension == 3 {
-        "projection: XY, oblique Z (30°, 0.5)"
-    }
-    else {
-        "projection: XY"
-    };
-    let _ = writeln!(
-        text,
-        "<text x=\"920\" y=\"{legend_text_y}\" text-anchor=\"end\">{projection_label}</text>\n</g>\n</svg>\n"
-    );
+    let projection_label = if model.dimension == 3 { "projection: XY, oblique Z (30°, 0.5)" } else { "projection: XY" };
+    let _ =
+        writeln!(text, "<text x=\"920\" y=\"{legend_text_y}\" text-anchor=\"end\">{projection_label}</text>\n</g>\n</svg>\n");
 
     write_atomic(&target, &text)
 }
