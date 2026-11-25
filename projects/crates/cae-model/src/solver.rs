@@ -6178,7 +6178,7 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
     let applied_forces = system.to_global_vector(&system.forces);
     let mut applied = ForceResultant::default();
     let mut applied_moment = MomentResultant::default();
-    for node in 0..model.nodes.len() {
+    for (node, position) in model.nodes.iter().enumerate() {
         let mut loads = [0.0_f64; 3];
         for (component, value) in loads.iter_mut().enumerate().take(translation_components) {
             *value = node_value(layout, &applied_forces, node, component);
@@ -6189,7 +6189,6 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
         if spatial {
             // The wrench balance is taken about the document origin, so the
             // translational loads enter as `r × F` next to the nodal couples.
-            let position = &model.nodes[node];
             applied_moment.mx += position.y * loads[2] - position.z * loads[1];
             applied_moment.my += position.z * loads[0] - position.x * loads[2];
             applied_moment.mz += position.x * loads[1] - position.y * loads[0];
