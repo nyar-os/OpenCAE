@@ -19,7 +19,8 @@ use crate::{
     abaqus::{ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, ImportLoss, import_abaqus_file},
     envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
-        ContourQuantity, export_csv_with_stations, export_html, export_md, export_svg_with_contour, export_vtk, write_atomic,
+        ContourQuantity, DrawingKind, export_csv_with_stations, export_forces_svg, export_html, export_md,
+        export_svg_with_contour, export_vtk, write_atomic,
     },
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
@@ -177,11 +178,19 @@ pub struct ExportOptions {
     /// into a contour drawing with a colour bar; every other format rejects the
     /// option with `export/invalid-contour`.
     pub contour: Option<ContourQuantity>,
+    /// Dedicated engineering drawing an SVG export produces instead of the
+    /// deformed-shape or contour drawing.
+    ///
+    /// `None` keeps the standard drawing. A kind turns the SVG into that
+    /// drawing; `stations` controls the sampling of the `forces` kind. Every
+    /// other format rejects the option with `export/invalid-drawing`, and it
+    /// cannot be combined with `contour`.
+    pub drawing: Option<DrawingKind>,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        Self { scale: 1.0, stations: None, contour: None }
+        Self { scale: 1.0, stations: None, contour: None, drawing: None }
     }
 }
 
@@ -1539,6 +1548,9 @@ impl OpenCae {
     /// displacements of the deformed shape. `options.contour` is also SVG-only
     /// and turns the drawing into a result contour with a colour bar; every
     /// other format rejects it with `export/invalid-contour`.
+    /// `options.drawing` selects a dedicated SVG engineering drawing (shear
+    /// and moment diagrams); it is SVG-only, cannot combine with `contour`,
+    /// and every other format rejects it with `export/invalid-drawing`.
     pub fn export_with_options(
         &self,
         format: ExportFormat,
@@ -1549,6 +1561,18 @@ impl OpenCae {
             return Err(CaeError::new(
                 "export/invalid-contour",
                 format!("the contour option only applies to SVG export, not `{}`", format.as_str()),
+            ));
+        }
+        if options.drawing.is_some() && format != ExportFormat::Svg {
+            return Err(CaeError::new(
+                "export/invalid-drawing",
+                format!("the drawing option only applies to SVG export, not `{}`", format.as_str()),
+            ));
+        }
+        if options.drawing.is_some() && options.contour.is_some() {
+            return Err(CaeError::new(
+                "export/invalid-drawing",
+                "the drawing and contour options cannot be combined in one SVG export",
             ));
         }
         let model = &self.current()?.model;
@@ -1599,19 +1623,28 @@ impl OpenCae {
                 vec![file.display().to_string()]
             }
             ExportFormat::Svg => {
-                export_svg_with_contour(
-                    model,
-                    &solution,
-                    options.scale,
-                    options.contour,
-                    options.stations.unwrap_or(11),
-                    target,
-                )?;
+                let default_name = match options.drawing {
+                    None => {
+                        export_svg_with_contour(
+                            model,
+                            &solution,
+                            options.scale,
+                            options.contour,
+                            options.stations.unwrap_or(11),
+                            target,
+                        )?;
+                        "model.svg"
+                    }
+                    Some(DrawingKind::Forces) => {
+                        export_forces_svg(model, options.stations.unwrap_or(11), target)?;
+                        DrawingKind::Forces.default_file_name()
+                    }
+                };
                 let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {
                     target.to_path_buf()
                 }
                 else {
-                    target.join("model.svg")
+                    target.join(default_name)
                 };
                 vec![file.display().to_string()]
             }

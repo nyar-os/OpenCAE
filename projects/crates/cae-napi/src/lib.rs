@@ -15,11 +15,11 @@
 use std::path::Path;
 
 use cae_model::{
-    CaeError, ConstructionStage, ContourQuantity, ElementKind, ElementUpdate, EndRelease, ExportFormat, ExportOptions,
-    InfluenceDirection, InfluenceQuantity, InfluenceTrainRequest, Material, OpenCae, OpenCaeOptions, PatternFactor, Section,
-    SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report, ellipse_section_report,
-    i_standard_section_report, library_json, polygon_section_report, principal_section_report, section_report,
-    t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
+    CaeError, ConstructionStage, ContourQuantity, DrawingKind, ElementKind, ElementUpdate, EndRelease, ExportFormat,
+    ExportOptions, InfluenceDirection, InfluenceQuantity, InfluenceTrainRequest, Material, OpenCae, OpenCaeOptions,
+    PatternFactor, Section, SpectrumCombination, SpectrumPoint, Units, angle_section_report, channel_standard_section_report,
+    ellipse_section_report, i_standard_section_report, library_json, polygon_section_report, principal_section_report,
+    section_report, t_section_report, triangle_section_report, tube_standard_section_report, z_section_report,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1600,9 +1600,10 @@ fn tension_only(ctx: CallContext) -> Result<JsValue> {
 /// The optional fourth argument is a JSON object with a `scale` number that
 /// multiplies the nodal displacements of the SVG deformed shape (default `1`),
 /// a `stations` integer that sets the sampled rows of the CSV `forces.csv`
-/// table (default 11) or of an SVG contour (default 11), and a `contour` string
+/// table (default 11) or of an SVG contour (default 11), a `contour` string
 /// (`axial`, `shear`, `moment` or `displacement`) that turns an SVG export into
-/// a result contour with a colour bar.
+/// a result contour with a colour bar, and a `drawing` string (`forces`) that
+/// turns an SVG export into a dedicated engineering drawing sheet.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -1612,6 +1613,7 @@ fn export(ctx: CallContext) -> Result<JsValue> {
     let mut scale = 1.0;
     let mut stations = None;
     let mut contour = None;
+    let mut drawing = None;
     if let Some(options) = options.as_ref() {
         scale = number_field(options, "scale")?.unwrap_or(1.0);
         stations = usize_field(options, "stations")?;
@@ -1620,11 +1622,17 @@ fn export(ctx: CallContext) -> Result<JsValue> {
             .and_then(Value::as_str)
             .map(|value| value.parse::<ContourQuantity>().map_err(fail))
             .transpose()?;
+        drawing = options
+            .get("drawing")
+            .and_then(Value::as_str)
+            .map(|value| value.parse::<DrawingKind>().map_err(fail))
+            .transpose()?;
     }
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let report =
-        session.export_with_options(format, Path::new(&target), ExportOptions { scale, stations, contour }).map_err(fail)?;
+    let report = session
+        .export_with_options(format, Path::new(&target), ExportOptions { scale, stations, contour, drawing })
+        .map_err(fail)?;
     respond(&ctx, &report)
 }
 

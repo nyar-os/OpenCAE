@@ -554,6 +554,9 @@ export class CaeDocument {
      * CSV `forces.csv` table and defaults to `11`. `options.contour` colours an
      * SVG export by `axial`, `shear`, `moment` or `displacement` and adds a
      * colour bar; other formats reject it with `export/invalid-contour`.
+     * `options.drawing` selects a dedicated SVG engineering drawing such as
+     * the `forces` shear/moment sheet; it is SVG-only and cannot combine with
+     * `contour`.
      */
     export(format: ExportFormat, target: string, options: ExportOptions = {}): ExportReport {
         this.assertOpen();

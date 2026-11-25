@@ -36,6 +36,15 @@ export type ExportFormat = 'csv' | 'vtk' | 'md' | 'html' | 'svg';
  */
 export type ContourQuantity = 'axial' | 'shear' | 'moment' | 'displacement';
 
+/**
+ * Dedicated SVG engineering drawing kind.
+ *
+ * `forces` writes a sheet with the shear `V(x)` and bending-moment `M(x)`
+ * diagram of every beam-like member, annotated with the sampled extremes and
+ * the zero-shear crossings.
+ */
+export type DrawingKind = 'forces';
+
 /** Options of `export()`. */
 export interface ExportOptions {
     /**
@@ -54,6 +63,12 @@ export interface ExportOptions {
      * every other format rejects it with `export/invalid-contour`.
      */
     readonly contour?: ContourQuantity;
+    /**
+     * Selects a dedicated SVG engineering drawing instead of the deformed-shape
+     * or contour drawing. Only SVG accepts it; it cannot combine with `contour`,
+     * and every other format rejects it with `export/invalid-drawing`.
+     */
+    readonly drawing?: DrawingKind;
 }
 
 /** Session options. Constructing a session opens no file. */

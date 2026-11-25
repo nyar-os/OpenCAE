@@ -23,6 +23,7 @@ import type {
     Analysis,
     ContourQuantity,
     Dimension,
+    DrawingKind,
     ElementKind,
     ExportFormat,
     InfluenceQuantity,
@@ -350,6 +351,17 @@ function contourOption(ctx: CommandContext, b: Bound): ContourQuantity | undefin
         return value;
     }
     throw failure(ctx, 'cli/invalid-option', 'unknownContour', { value });
+}
+
+function drawingOption(ctx: CommandContext, b: Bound): DrawingKind | undefined {
+    const value = b.raw('--drawing');
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === 'forces') {
+        return value;
+    }
+    throw failure(ctx, 'cli/invalid-option', 'unknownDrawing', { value });
 }
 
 function parsePolygonPoints(ctx: CommandContext, value: string): readonly PolygonPoint[] {
@@ -2211,20 +2223,22 @@ cli
     .option('--scale <n>', 'cli.opt.scale')
     .option('--stations <n>', 'cli.opt.stations')
     .option('--contour <quantity>', 'cli.opt.contour')
+    .option('--drawing <kind>', 'cli.opt.drawing')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement]',
+                'export <file> --format csv|vtk|md|svg --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces]',
             );
             const format = exportFormat(ctx, b.required('--format'));
             const out = b.required('--out');
             const scale = b.number('--scale');
             const stations = b.raw('--stations') === undefined ? undefined : stationsOption(ctx, b);
             const contour = contourOption(ctx, b);
+            const drawing = drawingOption(ctx, b);
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
-                const result = document.export(format, out, { scale, stations, contour });
+                const result = document.export(format, out, { scale, stations, contour, drawing });
                 ctx.stdout(b.message('exported', { format: result.format, path: result.path }));
                 return 0;
             });

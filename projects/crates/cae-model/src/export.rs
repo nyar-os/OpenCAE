@@ -5,7 +5,7 @@ use science_mesh::{Cell, CellKind, Field, Mesh, MeshError};
 use crate::{
     CaeError,
     model::{ElementKind, Model, Units},
-    solver::{ModalSolution, Solution, solve_internal_forces},
+    solver::{ElementDiagram, ModalSolution, Solution, solve_internal_forces},
     validate::{Issue, Severity},
 };
 
@@ -517,9 +517,283 @@ impl FromStr for ContourQuantity {
     }
 }
 
-/// Writes a deterministic, self-contained SVG drawing of the model and its
-/// deformed shape.
+/// Engineering drawing kind an SVG export can produce instead of the plain
+/// deformed-shape or contour drawing.
 ///
+/// Every kind is a dedicated multi-panel or annotated drawing built from the
+/// same solver reports the CSV and JSON results use, so the printed numbers
+/// cannot drift from the analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawingKind {
+    /// Shear `V(x)` and bending-moment `M(x)` diagrams per beam-like member.
+    Forces,
+}
+
+impl DrawingKind {
+    /// Returns the short identifier used by the CLI, the addon and the SDK.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Forces => "forces",
+        }
+    }
+
+    /// Returns the title drawn at the top of the SVG.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Forces => "OpenCAE shear and moment diagrams",
+        }
+    }
+
+    /// Default file name used when the export target is a directory.
+    pub const fn default_file_name(self) -> &'static str {
+        match self {
+            Self::Forces => "forces.svg",
+        }
+    }
+}
+
+impl FromStr for DrawingKind {
+    type Err = CaeError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "forces" => Ok(Self::Forces),
+            other => Err(CaeError::new(
+                "export/invalid-drawing",
+                format!("unsupported drawing kind `{other}`; valid values are `forces`"),
+            )),
+        }
+    }
+}
+
+/// Writes a deterministic SVG sheet of shear and bending-moment diagrams.
+///
+/// One panel per `beam` or `beam3d` member (in model element order) shows the
+/// `V(x)` curve above the `M(x)` curve, both sampled at `stations` points per
+/// member from the same [`solve_internal_forces`] report that fills
+/// `forces.csv`. The member axis runs from the `from` node (`x = 0`) to the
+/// `to` node (`x = L`). Each panel marks the largest-absolute shear and
+/// moment with their values and positions, and every zero-shear crossing with
+/// a green marker and its position. Signs follow the documented convention
+/// printed in the sheet footer: `dV/dx = q` with the local `+y` load
+/// intensity, `dM/dx = V` and sagging positive. `beam3d` panels plot the
+/// local `y` shear and the local `z` bending moment. Values are labelled with
+/// four significant digits. A model without any beam-like member is rejected
+/// with `export/no-beam-diagram` instead of writing an empty sheet.
+///
+/// When `path` ends in `.svg` it is used as the output file, otherwise `path`
+/// is treated as a directory and `forces.svg` is created inside it.
+pub fn export_forces_svg(model: &Model, stations: usize, path: &Path) -> Result<(), CaeError> {
+    let diagrams = solve_internal_forces(model, stations)?;
+    let panels: Vec<&ElementDiagram> = diagrams.elements.iter().filter(|element| element.kind != ElementKind::Truss).collect();
+    if panels.is_empty() {
+        return Err(CaeError::new(
+            "export/no-beam-diagram",
+            "the model has no beam or frame members, so there is no shear or moment diagram to draw",
+        ));
+    }
+    let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+        path.to_path_buf()
+    }
+    else {
+        path.join(DrawingKind::Forces.default_file_name())
+    };
+
+    const VIEW_WIDTH: f64 = 960.0;
+    const VIEW_HEIGHT: f64 = 720.0;
+    const LEFT: f64 = 40.0;
+    const RIGHT: f64 = 920.0;
+    const TOP: f64 = 56.0;
+    const BOTTOM: f64 = 640.0;
+    let columns = if panels.len() == 1 { 1 } else { 2 };
+    let rows = panels.len().div_ceil(columns);
+    let panel_width = (RIGHT - LEFT) / columns as f64;
+    let panel_height = (BOTTOM - TOP) / rows as f64;
+
+    let mut text = String::new();
+    text.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let heading = DrawingKind::Forces.title();
+    let _ = writeln!(
+        text,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {VIEW_WIDTH} {VIEW_HEIGHT}\" width=\"960\" height=\"720\" \
+         role=\"img\" aria-labelledby=\"ocae-svg-title\">"
+    );
+    let _ = writeln!(text, "<title id=\"ocae-svg-title\">{heading}</title>");
+    text.push_str("<rect x=\"0\" y=\"0\" width=\"960\" height=\"720\" fill=\"#ffffff\"/>\n");
+    let _ = writeln!(
+        text,
+        "<text x=\"480\" y=\"30\" text-anchor=\"middle\" font-family=\"system-ui, sans-serif\" font-size=\"20\" \
+         fill=\"#111827\">{heading}</text>"
+    );
+    text.push_str("<g font-family=\"system-ui, sans-serif\">\n");
+
+    let moment_unit = ContourQuantity::Moment.unit(model.units.unwrap_or(Units::Millimeter));
+    for (index, panel) in panels.iter().enumerate() {
+        if !panel.length.is_finite() || panel.length <= 0.0 {
+            continue;
+        }
+        let column = index % columns;
+        let row = index / columns;
+        let px = LEFT + column as f64 * panel_width;
+        let py = TOP + row as f64 * panel_height;
+        let plot_left = px + 64.0;
+        let plot_right = px + panel_width - 24.0;
+        let half_height = panel_height * 0.14;
+
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"13\" fill=\"#111827\">{} · {} → {} · L = {}</text>",
+            px + 8.0,
+            py + 16.0,
+            xml_escape(&panel.id),
+            xml_escape(&panel.from),
+            xml_escape(&panel.to),
+            format_contour_value(panel.length),
+        );
+
+        let frame = CurveFrame { plot_left, plot_right, half_height };
+        write_force_curve(
+            &mut text,
+            &frame,
+            py + panel_height * 0.32,
+            panel,
+            &CurveStyle { name: "V", axis_label: "V(x) [N]", color: "#2563eb" },
+            |station| station.shear,
+        );
+        write_force_curve(
+            &mut text,
+            &frame,
+            py + panel_height * 0.74,
+            panel,
+            &CurveStyle { name: "M", axis_label: &format!("M(x) [{moment_unit}]"), color: "#b91c1c" },
+            |station| station.moment,
+        );
+    }
+
+    let _ = writeln!(
+        text,
+        "<text x=\"40\" y=\"676\" font-size=\"12\" fill=\"#374151\">sign convention: dV/dx = q (local +y), dM/dx = V, sagging \
+         positive; beam3d panels plot the local y shear and local z bending moment.</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<text x=\"40\" y=\"696\" font-size=\"12\" fill=\"#374151\">sampled at {stations} stations per member; extremes and \
+         zero-shear crossings labelled with four significant digits.</text>"
+    );
+    text.push_str("</g>\n</svg>\n");
+
+    write_atomic(&target, &text)
+}
+
+/// Plot geometry of one quantity curve inside a force diagram panel.
+struct CurveFrame {
+    plot_left: f64,
+    plot_right: f64,
+    half_height: f64,
+}
+
+/// Label and colour of one quantity curve inside a force diagram panel.
+struct CurveStyle<'a> {
+    name: &'a str,
+    axis_label: &'a str,
+    color: &'a str,
+}
+
+/// Draws one sampled quantity of a panel as a curve over its zero line.
+///
+/// The curve is scaled so the largest absolute sampled value fills
+/// `half_height` above and below the baseline; a uniform zero field draws a
+/// flat line. The extremum station gets a filled dot and a `max |{name}| =
+/// {value} @ x={position}` label; every zero crossing of the quantity gets a
+/// green dot and a `{name}=0 @ x={position}` label. Exact zeros are detected
+/// after snapping round-off below `1e-12` of the largest magnitude, sign
+/// changes between neighbouring stations are located by linear interpolation.
+fn write_force_curve(
+    text: &mut String,
+    frame: &CurveFrame,
+    baseline: f64,
+    panel: &ElementDiagram,
+    style: &CurveStyle<'_>,
+    value: impl Fn(&crate::solver::SectionForces) -> f64,
+) {
+    let CurveFrame { plot_left, plot_right, half_height } = *frame;
+    let CurveStyle { name, axis_label, color } = *style;
+    let limit = panel.stations.iter().map(|station| value(station).abs()).fold(0.0, f64::max);
+    let snap = |raw: f64| if limit > 0.0 && raw.abs() <= 1.0e-12 * limit { 0.0 } else { raw };
+    let scale = if limit > 0.0 { half_height / limit } else { 0.0 };
+    let map_x = |position: f64| plot_left + (position / panel.length).clamp(0.0, 1.0) * (plot_right - plot_left);
+    let map_y = |raw: f64| baseline - snap(raw) * scale;
+
+    let _ = writeln!(
+        text,
+        "<line x1=\"{plot_left:.2}\" y1=\"{baseline:.2}\" x2=\"{plot_right:.2}\" y2=\"{baseline:.2}\" stroke=\"#d1d5db\" \
+         stroke-width=\"1\"/>"
+    );
+    let _ = writeln!(
+        text,
+        "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"12\" fill=\"#374151\">{axis_label}</text>",
+        plot_left,
+        baseline - half_height - 8.0
+    );
+
+    let mut points = String::new();
+    for station in &panel.stations {
+        let _ = write!(points, "{:.2},{:.2} ", map_x(station.position), map_y(value(station)));
+    }
+    let _ = writeln!(text, "<polyline points=\"{}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"2\"/>", points.trim_end(),);
+
+    let mut extreme: Option<(f64, f64)> = None;
+    for station in &panel.stations {
+        let raw = snap(value(station));
+        if extreme.is_none_or(|(best, _)| raw.abs() > best.abs()) {
+            extreme = Some((raw, station.position));
+        }
+    }
+    if let Some((best, position)) = extreme {
+        let x = map_x(position);
+        let y = map_y(best);
+        let _ = writeln!(text, "<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"3\" fill=\"{color}\"/>");
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"11\" fill=\"#111827\">max |{name}| = {} @ x={}</text>",
+            (x + 6.0).min(plot_right - 90.0),
+            (y - 6.0).max(baseline - half_height - 2.0),
+            format_contour_value(best.abs()),
+            format_contour_value(position),
+        );
+    }
+
+    let mut previous: Option<(f64, f64)> = None;
+    for station in &panel.stations {
+        let raw = snap(value(station));
+        let crossing = match previous {
+            None => None,
+            Some((before, before_position)) => {
+                if raw == 0.0 && before != 0.0 {
+                    Some(station.position)
+                }
+                else if before * raw < 0.0 {
+                    Some(before_position + (station.position - before_position) * before / (before - raw))
+                }
+                else {
+                    None
+                }
+            }
+        };
+        if let Some(position) = crossing {
+            let x = map_x(position);
+            let _ = writeln!(text, "<circle cx=\"{x:.2}\" cy=\"{baseline:.2}\" r=\"3.5\" fill=\"#16a34a\"/>");
+            let _ = writeln!(
+                text,
+                "<text x=\"{:.2}\" y=\"{:.2}\" font-size=\"11\" fill=\"#166534\">{name}=0 @ x={}</text>",
+                (x - 6.0).max(plot_left),
+                baseline + half_height + 14.0,
+                format_contour_value(position),
+            );
+        }
+        previous = Some((raw, station.position));
+    }
+}
 /// Two-dimensional nodes are projected onto the global X–Y plane. In a
 /// three-dimensional document the Z axis is drawn as an oblique axis
 /// (`x + 0.5·cos30°·z`, `y + 0.5·sin30°·z`) so pure Z members stay visible
