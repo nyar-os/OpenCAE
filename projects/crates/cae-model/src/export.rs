@@ -520,8 +520,10 @@ impl FromStr for ContourQuantity {
 /// Writes a deterministic, self-contained SVG drawing of the model and its
 /// deformed shape.
 ///
-/// Every node is projected onto the global X–Y plane, so a three-dimensional
-/// model is drawn as its XY projection with Z ignored. The undeformed members
+/// Two-dimensional nodes are projected onto the global X–Y plane. In a
+/// three-dimensional document the Z axis is drawn as an oblique axis
+/// (`x + 0.5·cos30°·z`, `y + 0.5·sin30°·z`) so pure Z members stay visible
+/// instead of collapsing to a point. The undeformed members
 /// are thin grey lines, the deformed shape after a static solve is a blue
 /// polyline scaled by `scale`, nodes are black dots annotated with their node
 /// id at the upper right, supported nodes are green triangles and nodal loads
@@ -576,12 +578,23 @@ pub fn export_svg_with_contour(
         path.join("model.svg")
     };
 
-    let undeformed: Vec<(f64, f64)> = model.nodes.iter().map(|node| (node.x, node.y)).collect();
+    // A three-dimensional document draws Z as a cabinet oblique axis at 30°
+    // with a 0.5 foreshortening, so a member along Z becomes an inclined line
+    // instead of a zero-length point. The map is linear, therefore contour
+    // segments interpolated along the projected centreline match the projected
+    // 3D centreline. Two-dimensional documents keep z = 0 and the plain XY view.
+    let depth = if model.dimension == 3 { 0.5 } else { 0.0 };
+    let oblique_x = depth * (std::f64::consts::FRAC_PI_6).cos();
+    let oblique_y = depth * (std::f64::consts::FRAC_PI_6).sin();
+    let project_point = |x: f64, y: f64, z: f64| (x + oblique_x * z, y + oblique_y * z);
+    let undeformed: Vec<(f64, f64)> = model.nodes.iter().map(|node| project_point(node.x, node.y, node.z)).collect();
     let deformed: Vec<(f64, f64)> = model
         .nodes
         .iter()
         .zip(&solution.nodes)
-        .map(|(node, result)| (node.x + scale * result.ux, node.y + scale * result.uy))
+        .map(|(node, result)| {
+            project_point(node.x + scale * result.ux, node.y + scale * result.uy, node.z + scale * result.uz)
+        })
         .collect();
     let series = contour.map(|quantity| contour_series(model, solution, &deformed, quantity, stations)).transpose()?;
 
@@ -722,7 +735,7 @@ pub fn export_svg_with_contour(
         );
     }
     for load in &model.loads {
-        let magnitude = (load.fx * load.fx + load.fy * load.fy).sqrt();
+        let magnitude = (load.fx * load.fx + load.fy * load.fy + load.fz * load.fz).sqrt();
         if magnitude <= 0.0 || !magnitude.is_finite() {
             continue;
         }
@@ -731,8 +744,15 @@ pub fn export_svg_with_contour(
             continue;
         };
         let (cx, cy) = project(undeformed[index].0, undeformed[index].1);
-        let direction_x = load.fx / magnitude;
-        let direction_y = -load.fy / magnitude;
+        // The force is a vector, so the same linear map projects its
+        // direction; a pure Z load becomes an inclined arrow in 3D.
+        let (vector_x, vector_y) = project_point(load.fx, load.fy, load.fz);
+        let vector_length = (vector_x * vector_x + vector_y * vector_y).sqrt();
+        if vector_length <= 0.0 || !vector_length.is_finite() {
+            continue;
+        }
+        let direction_x = vector_x / vector_length;
+        let direction_y = -vector_y / vector_length;
         let arrow_length = 34.0;
         let x1 = cx - direction_x * arrow_length;
         let y1 = cy - direction_y * arrow_length;
@@ -742,8 +762,8 @@ pub fn export_svg_with_contour(
              stroke-width=\"2\" marker-end=\"url(#ocae-load-arrow)\"/>"
         );
     }
-    for node in &model.nodes {
-        let (cx, cy) = project(node.x, node.y);
+    for (node, &(x, y)) in model.nodes.iter().zip(&undeformed) {
+        let (cx, cy) = project(x, y);
         let _ = writeln!(
             text,
             "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" \
@@ -786,9 +806,15 @@ pub fn export_svg_with_contour(
         "<line x1=\"520\" y1=\"{legend_y}\" x2=\"550\" y2=\"{legend_y}\" stroke=\"#dc2626\" stroke-width=\"2\" \
          marker-end=\"url(#ocae-load-arrow)\"/>\n<text x=\"558\" y=\"{legend_text_y}\">load</text>"
     );
+    let projection_label = if model.dimension == 3 {
+        "projection: XY, oblique Z (30°, 0.5)"
+    }
+    else {
+        "projection: XY"
+    };
     let _ = writeln!(
         text,
-        "<text x=\"920\" y=\"{legend_text_y}\" text-anchor=\"end\">projection: XY (Z ignored)</text>\n</g>\n</svg>\n"
+        "<text x=\"920\" y=\"{legend_text_y}\" text-anchor=\"end\">{projection_label}</text>\n</g>\n</svg>\n"
     );
 
     write_atomic(&target, &text)

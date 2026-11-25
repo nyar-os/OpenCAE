@@ -1,8 +1,8 @@
 //! Integration tests for the deterministic SVG export.
 //!
-//! The drawing is projected onto the global X–Y plane, so both two- and
-//! three-dimensional models are covered, and repeated exports must be
-//! byte-identical.
+//! The drawing is projected onto the global X–Y plane, with the Z axis drawn
+//! as an oblique axis in three-dimensional documents, so both model kinds are
+//! covered and repeated exports must be byte-identical.
 
 use std::{
     fs,
@@ -101,7 +101,7 @@ fn svg_export_draws_the_model_and_is_byte_identical() {
     assert!(text.contains("scale 1.50"), "missing scale: {text}");
     assert!(text.contains("<polygon"), "missing support marker: {text}");
     assert!(text.contains("ocae-load-arrow"), "missing load arrow marker: {text}");
-    assert!(text.contains("projection: XY (Z ignored)"), "missing projection note: {text}");
+    assert!(text.contains("projection: XY</text>"), "missing projection note: {text}");
 
     session
         .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 1.5, ..ExportOptions::default() })
@@ -131,8 +131,57 @@ fn svg_export_annotates_each_node_id() {
     assert_eq!(text, repeated, "repeated exports with node labels must be byte-identical");
 }
 
+/// Portal frame with two pure-Z columns, an X beam, a Y arm and a Z tip load.
+fn space_frame(path: &Path) -> OpenCae {
+    let mut session = OpenCae::new(OpenCaeOptions::default());
+    session.create(path, OpenCaeOptions { units: Some(Units::Millimeter), dimension: Some(3) }).expect("create");
+    session.add_node("b1", 0.0, 0.0, Some(0.0)).expect("b1");
+    session.add_node("b2", 4000.0, 0.0, Some(0.0)).expect("b2");
+    session.add_node("t1", 0.0, 0.0, Some(3000.0)).expect("t1");
+    session.add_node("t2", 4000.0, 0.0, Some(3000.0)).expect("t2");
+    session.add_node("a1", 4000.0, 2000.0, Some(3000.0)).expect("a1");
+    session.set_material(210_000.0, 10_000.0, Some("steel".to_string())).expect("material");
+    for (id, from, to) in [("col1", "b1", "t1"), ("col2", "b2", "t2"), ("beam1", "t1", "t2"), ("arm", "t2", "a1")] {
+        session
+            .add_frame_element(id, from, to, None, None, Some(8.3e7), None, Some(1.6e7), None, None, None, None, None, None)
+            .expect(id);
+    }
+    session.add_support_frame("b1", true, true, true, true, true, true).expect("support b1");
+    session.add_support_frame("b2", true, true, true, true, true, true).expect("support b2");
+    session.add_load_frame("a1", None, None, Some(-20_000.0), None, None, None).expect("load a1");
+    session
+}
+
+/// Extracts the endpoint coordinates of every undeformed dashed member line.
+fn dashed_member_lines(text: &str) -> Vec<(f64, f64, f64, f64)> {
+    let attribute = |line: &str, name: &str| -> f64 {
+        let needle = format!("{name}=\"");
+        let start = line.find(&needle).unwrap_or_else(|| panic!("missing {name} in {line}")) + needle.len();
+        let end = line[start..].find('"').expect("closing quote");
+        line[start..start + end].parse().expect("coordinate")
+    };
+
+    text.lines()
+        .filter(|line| line.starts_with("<line ") && line.contains("stroke-dasharray") && attribute(line, "y1") < 660.0)
+        .map(|line| (attribute(line, "x1"), attribute(line, "y1"), attribute(line, "x2"), attribute(line, "y2")))
+        .collect()
+}
+
+/// Extracts the `x`/`y` anchor of the label drawn for a node id.
+fn node_label(text: &str, id: &str) -> (f64, f64) {
+    let needle = format!(">{id}</text>");
+    let line = text.lines().find(|line| line.contains(&needle)).unwrap_or_else(|| panic!("missing label {id}"));
+    let attribute = |name: &str| -> f64 {
+        let needle = format!("{name}=\"");
+        let start = line.find(&needle).expect(name) + needle.len();
+        let end = line[start..].find('"').expect("closing quote");
+        line[start..start + end].parse().expect("coordinate")
+    };
+    (attribute("x"), attribute("y"))
+}
+
 #[test]
-fn svg_export_projects_three_dimensional_models_onto_xy() {
+fn svg_export_projects_three_dimensional_models_obliquely() {
     let directory = temporary_dir("projection");
     let path = directory.join("space.ocae");
     let session = three_dimensional_bar(&path);
@@ -144,6 +193,72 @@ fn svg_export_projects_three_dimensional_models_onto_xy() {
     assert!(text.contains("<polygon"));
     assert!(text.contains("scale 1.00"));
     assert!(text.contains("OpenCAE model and deformed shape"));
+    assert!(text.contains("projection: XY, oblique Z (30°, 0.5)"), "missing oblique note: {text}");
+}
+
+#[test]
+fn svg_export_keeps_pure_z_members_visible_in_frames() {
+    let directory = temporary_dir("frame3d");
+    let path = directory.join("frame.ocae");
+    let session = space_frame(&path);
+    let target = directory.join("frame.svg");
+
+    session
+        .export_with_options(ExportFormat::Svg, &target, ExportOptions { scale: 200.0, ..ExportOptions::default() })
+        .expect("svg export");
+    let text = fs::read_to_string(&target).expect("frame.svg");
+    assert!(text.contains("projection: XY, oblique Z (30°, 0.5)"), "missing oblique note: {text}");
+
+    // One undeformed dashed line per member, and no member collapses to a
+    // point: the pure-Z columns must be drawn as inclined lines.
+    let lines = dashed_member_lines(&text);
+    assert_eq!(lines.len(), 4, "one undeformed line per member");
+    for &(x1, y1, x2, y2) in &lines {
+        assert!(x1 != x2 || y1 != y2, "a member degenerated to a point: {x1},{y1} -> {x2},{y2}");
+    }
+
+    // Nodes at different heights no longer share a screen position, so their
+    // labels do not overprint.
+    assert_ne!(node_label(&text, "b1"), node_label(&text, "t1"), "b1 and t1 labels overlap");
+    assert_ne!(node_label(&text, "b2"), node_label(&text, "t2"), "b2 and t2 labels overlap");
+
+    // A pure Z nodal load gets an arrow: one in the drawing plus the legend.
+    assert_eq!(text.matches("marker-end=\"url(#ocae-load-arrow)\"").count(), 2, "missing the Z load arrow");
+    assert_eq!(text.matches("<circle").count(), 5, "one dot per node");
+
+    // Every drawn coordinate stays inside the fixed viewBox.
+    for line in text.lines().filter(|line| line.starts_with("<line ") || line.starts_with("<circle")) {
+        for name in ["x1", "x2", "cx"] {
+            let needle = format!("{name}=\"");
+            if let Some(value) = line
+                .find(&needle)
+                .map(|start| &line[start + needle.len()..])
+                .and_then(|rest| rest.find('"').map(|end| rest[..end].parse::<f64>().expect("finite x")))
+            {
+                assert!((0.0..=960.0).contains(&value), "x coordinate {value} outside the viewBox");
+            }
+        }
+        for name in ["y1", "y2", "cy"] {
+            let needle = format!("{name}=\"");
+            if let Some(value) = line
+                .find(&needle)
+                .map(|start| &line[start + needle.len()..])
+                .and_then(|rest| rest.find('"').map(|end| rest[..end].parse::<f64>().expect("finite y")))
+            {
+                assert!((0.0..=720.0).contains(&value), "y coordinate {value} outside the viewBox");
+            }
+        }
+    }
+
+    // Contour exports of the same frame stay deterministic.
+    let contour = directory.join("frame-disp.svg");
+    let options = ExportOptions { scale: 200.0, contour: Some(ContourQuantity::Displacement), ..ExportOptions::default() };
+    session.export_with_options(ExportFormat::Svg, &contour, options).expect("contour export");
+    let first = fs::read_to_string(&contour).expect("frame-disp.svg");
+    session.export_with_options(ExportFormat::Svg, &contour, options).expect("repeat contour export");
+    let repeated = fs::read_to_string(&contour).expect("repeated frame-disp.svg");
+    assert_eq!(first, repeated, "repeated 3D contour exports must be byte-identical");
+    assert!(first.contains("contour: displacement (mm)"), "missing displacement legend: {first}");
 }
 
 #[test]
