@@ -1602,8 +1602,9 @@ fn tension_only(ctx: CallContext) -> Result<JsValue> {
 /// a `stations` integer that sets the sampled rows of the CSV `forces.csv`
 /// table (default 11) or of an SVG contour (default 11), a `contour` string
 /// (`axial`, `shear`, `moment` or `displacement`) that turns an SVG export into
-/// a result contour with a colour bar, and a `drawing` string (`forces`) that
-/// turns an SVG export into a dedicated engineering drawing sheet.
+/// a result contour with a colour bar, and a `drawing` string (`forces` or
+/// `displacement`) that turns an SVG export into a dedicated engineering
+/// drawing sheet.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;

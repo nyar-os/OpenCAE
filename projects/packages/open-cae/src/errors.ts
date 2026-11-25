@@ -97,6 +97,8 @@ export const errorCodes = [
     'export/no-solution',
     'export/invalid-scale',
     'export/invalid-contour',
+    'export/invalid-drawing',
+    'export/no-beam-diagram',
     'cli/unknown-command',
     'cli/missing-argument',
     'cli/missing-option',

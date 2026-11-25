@@ -41,9 +41,10 @@ export type ContourQuantity = 'axial' | 'shear' | 'moment' | 'displacement';
  *
  * `forces` writes a sheet with the shear `V(x)` and bending-moment `M(x)`
  * diagram of every beam-like member, annotated with the sampled extremes and
- * the zero-shear crossings.
+ * the zero-shear crossings. `displacement` writes the deformed shape with a
+ * scaled green arrow and the magnitude label at every displaced node.
  */
-export type DrawingKind = 'forces';
+export type DrawingKind = 'forces' | 'displacement';
 
 /** Options of `export()`. */
 export interface ExportOptions {

@@ -337,6 +337,7 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["io"]["inp"], "supported");
     assert_eq!(capabilities["io"]["svgContour"], "supported");
     assert_eq!(capabilities["io"]["svgForces"], "supported");
+    assert_eq!(capabilities["io"]["svgDisplacement"], "supported");
 }
 
 #[test]

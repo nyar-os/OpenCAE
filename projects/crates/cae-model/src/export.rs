@@ -527,6 +527,9 @@ impl FromStr for ContourQuantity {
 pub enum DrawingKind {
     /// Shear `V(x)` and bending-moment `M(x)` diagrams per beam-like member.
     Forces,
+    /// Nodal displacement vectors drawn at the deformed nodes with their
+    /// magnitudes labelled.
+    Displacement,
 }
 
 impl DrawingKind {
@@ -534,6 +537,7 @@ impl DrawingKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Forces => "forces",
+            Self::Displacement => "displacement",
         }
     }
 
@@ -541,6 +545,7 @@ impl DrawingKind {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Forces => "OpenCAE shear and moment diagrams",
+            Self::Displacement => "OpenCAE nodal displacement vectors",
         }
     }
 
@@ -548,6 +553,7 @@ impl DrawingKind {
     pub const fn default_file_name(self) -> &'static str {
         match self {
             Self::Forces => "forces.svg",
+            Self::Displacement => "displacements.svg",
         }
     }
 }
@@ -558,9 +564,10 @@ impl FromStr for DrawingKind {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "forces" => Ok(Self::Forces),
+            "displacement" => Ok(Self::Displacement),
             other => Err(CaeError::new(
                 "export/invalid-drawing",
-                format!("unsupported drawing kind `{other}`; valid values are `forces`"),
+                format!("unsupported drawing kind `{other}`; valid values are `forces`, `displacement`"),
             )),
         }
     }
@@ -794,6 +801,207 @@ fn write_force_curve(
         previous = Some((raw, station.position));
     }
 }
+/// Writes a deterministic SVG sheet of nodal displacement vectors.
+///
+/// The members of the deformed shape are drawn as blue polylines scaled by
+/// `scale`, the undeformed outline as dashed grey lines and the nodes as black
+/// dots with their ids, exactly like the plain SVG drawing. On top of that,
+/// every node with a non-zero displacement gets a green arrow starting at the
+/// deformed node position and pointing along the projected displacement vector
+/// `(ux, uy, uz)`. The arrow length is proportional to the displacement
+/// magnitude, normalised so the largest magnitude spans 34 px, and the tip is
+/// labelled with the magnitude and the displacement unit to four significant
+/// digits. The legend names the deformation scale, the proportionality of the
+/// arrows and the maximum magnitude, so the drawing and the `nodes.csv`
+/// results agree. `scale` must be finite and positive, otherwise the export
+/// fails with `export/invalid-scale`; an empty model fails with
+/// `export/no-solution`.
+///
+/// When `path` ends in `.svg` it is used as the output file, otherwise `path`
+/// is treated as a directory and `displacements.svg` is created inside it.
+pub fn export_displacement_svg(model: &Model, solution: &Solution, scale: f64, path: &Path) -> Result<(), CaeError> {
+    if model.nodes.is_empty() {
+        return Err(CaeError::new("export/no-solution", "the model has no nodes, so there is no displacement to draw"));
+    }
+    check_alignment(model, solution)?;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(CaeError::new(
+            "export/invalid-scale",
+            format!("the deformed-shape scale must be a finite positive number, but is {scale}"),
+        ));
+    }
+    let target = if path.extension().and_then(|extension| extension.to_str()) == Some("svg") {
+        path.to_path_buf()
+    }
+    else {
+        path.join(DrawingKind::Displacement.default_file_name())
+    };
+
+    let depth = if model.dimension == 3 { 0.5 } else { 0.0 };
+    let oblique_x = depth * (std::f64::consts::FRAC_PI_6).cos();
+    let oblique_y = depth * (std::f64::consts::FRAC_PI_6).sin();
+    let project_point = |x: f64, y: f64, z: f64| (x + oblique_x * z, y + oblique_y * z);
+    let undeformed: Vec<(f64, f64)> = model.nodes.iter().map(|node| project_point(node.x, node.y, node.z)).collect();
+    let deformed: Vec<(f64, f64)> = model
+        .nodes
+        .iter()
+        .zip(&solution.nodes)
+        .map(|(node, result)| project_point(node.x + scale * result.ux, node.y + scale * result.uy, node.z + scale * result.uz))
+        .collect();
+    let magnitudes: Vec<f64> = solution
+        .nodes
+        .iter()
+        .map(|result| (result.ux * result.ux + result.uy * result.uy + result.uz * result.uz).sqrt())
+        .collect();
+    let max_magnitude = magnitudes.iter().copied().fold(0.0, f64::max);
+    let unit = ContourQuantity::Displacement.unit(model.units.unwrap_or(Units::Millimeter));
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for &(x, y) in undeformed.iter().chain(&deformed) {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(CaeError::new("export/invalid-model", "node coordinates must be finite before an SVG can be drawn"));
+        }
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    let mut width = max_x - min_x;
+    let mut height = max_y - min_y;
+    if width <= 0.0 {
+        width = 1.0;
+        min_x -= 0.5;
+    }
+    if height <= 0.0 {
+        height = 1.0;
+        min_y -= 0.5;
+    }
+    let max_y = min_y + height;
+
+    const VIEW_WIDTH: f64 = 960.0;
+    const VIEW_HEIGHT: f64 = 720.0;
+    const SIDE_MARGIN: f64 = 40.0;
+    const TOP_MARGIN: f64 = 60.0;
+    const PLOT_BOTTOM: f64 = 630.0;
+    let available_width = VIEW_WIDTH - 2.0 * SIDE_MARGIN;
+    let available_height = PLOT_BOTTOM - TOP_MARGIN;
+    let factor = (available_width / width).min(available_height / height);
+    let origin_x = SIDE_MARGIN + (available_width - width * factor) / 2.0;
+    let origin_y = TOP_MARGIN + (available_height - height * factor) / 2.0;
+    let project = |x: f64, y: f64| (origin_x + (x - min_x) * factor, origin_y + (max_y - y) * factor);
+
+    let heading = DrawingKind::Displacement.title();
+    let mut text = String::new();
+    text.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        text,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {VIEW_WIDTH} {VIEW_HEIGHT}\" width=\"960\" height=\"720\" \
+         role=\"img\" aria-labelledby=\"ocae-svg-title\">"
+    );
+    let _ = writeln!(text, "<title id=\"ocae-svg-title\">{heading}</title>");
+    text.push_str("<rect x=\"0\" y=\"0\" width=\"960\" height=\"720\" fill=\"#ffffff\"/>\n");
+    let _ = writeln!(
+        text,
+        "<text x=\"480\" y=\"30\" text-anchor=\"middle\" font-family=\"system-ui, sans-serif\" font-size=\"20\" \
+         fill=\"#111827\">{heading}</text>"
+    );
+    text.push_str(
+        "<defs>\n<marker id=\"ocae-displacement-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" \
+         markerHeight=\"6\" orient=\"auto\" markerUnits=\"strokeWidth\">\n<path d=\"M0,0 L10,5 L0,10 z\" \
+         fill=\"#16a34a\"/>\n</marker>\n</defs>\n",
+    );
+    text.push_str("<g stroke-linecap=\"round\">\n");
+
+    for element in &model.elements {
+        let from = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.from)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.from))?;
+        let to = model
+            .nodes
+            .iter()
+            .position(|node| node.id == element.to)
+            .ok_or_else(|| missing_svg_node(&element.id, &element.to))?;
+        let (x1, y1) = project(deformed[from].0, deformed[from].1);
+        let (x2, y2) = project(deformed[to].0, deformed[to].1);
+        let _ = writeln!(
+            text,
+            "<polyline points=\"{x1:.2},{y1:.2} {x2:.2},{y2:.2}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\"/>"
+        );
+        let (x1, y1) = project(undeformed[from].0, undeformed[from].1);
+        let (x2, y2) = project(undeformed[to].0, undeformed[to].1);
+        let _ = writeln!(
+            text,
+            "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" stroke=\"#9ca3af\" stroke-width=\"1.2\" \
+             stroke-dasharray=\"4 3\"/>"
+        );
+    }
+    for (index, node) in model.nodes.iter().enumerate() {
+        let (cx, cy) = project(deformed[index].0, deformed[index].1);
+        let _ = writeln!(text, "<circle cx=\"{cx:.2}\" cy=\"{cy:.2}\" r=\"3\" fill=\"#111827\"/>");
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#374151\">{}</text>",
+            cx + 6.0,
+            cy - 6.0,
+            xml_escape(&node.id)
+        );
+    }
+    for (index, result) in solution.nodes.iter().enumerate() {
+        let magnitude = magnitudes[index];
+        if magnitude <= 0.0 || !magnitude.is_finite() {
+            continue;
+        }
+        let (cx, cy) = project(deformed[index].0, deformed[index].1);
+        // The displacement is a vector, so the same linear map projects its
+        // direction; a pure Z displacement becomes an inclined arrow in 3D.
+        let (vector_x, vector_y) = project_point(result.ux, result.uy, result.uz);
+        let vector_length = (vector_x * vector_x + vector_y * vector_y).sqrt();
+        if vector_length <= 0.0 || !vector_length.is_finite() {
+            continue;
+        }
+        let direction_x = vector_x / vector_length;
+        let direction_y = -vector_y / vector_length;
+        let arrow_length = 34.0 * (magnitude / max_magnitude);
+        let tx = cx + direction_x * arrow_length;
+        let ty = cy + direction_y * arrow_length;
+        let _ = writeln!(
+            text,
+            "<line x1=\"{cx:.2}\" y1=\"{cy:.2}\" x2=\"{tx:.2}\" y2=\"{ty:.2}\" stroke=\"#16a34a\" stroke-width=\"2\" \
+             marker-end=\"url(#ocae-displacement-arrow)\"/>"
+        );
+        let _ = writeln!(
+            text,
+            "<text x=\"{:.2}\" y=\"{:.2}\" font-family=\"system-ui, sans-serif\" font-size=\"11\" fill=\"#166534\">{} \
+             {unit}</text>",
+            tx + 4.0,
+            ty - 4.0,
+            format_contour_value(magnitude),
+        );
+    }
+    text.push_str("</g>\n");
+
+    text.push_str("<g font-family=\"system-ui, sans-serif\" font-size=\"13\" fill=\"#111827\">\n");
+    let _ = writeln!(
+        text,
+        "<line x1=\"40\" y1=\"686\" x2=\"70\" y2=\"686\" stroke=\"#16a34a\" stroke-width=\"2\"/>\n<text \
+         x=\"78\" y=\"690\">displacement vector</text>"
+    );
+    let _ = writeln!(
+        text,
+        "<text x=\"240\" y=\"690\">deformation × {:.2} · arrow length ∝ |u| · max |u| = {} {unit}</text>",
+        scale,
+        format_contour_value(max_magnitude),
+    );
+    text.push_str("</g>\n</svg>\n");
+
+    write_atomic(&target, &text)
+}
+
 /// Two-dimensional nodes are projected onto the global X–Y plane. In a
 /// three-dimensional document the Z axis is drawn as an oblique axis
 /// (`x + 0.5·cos30°·z`, `y + 0.5·sin30°·z`) so pure Z members stay visible

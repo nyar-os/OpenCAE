@@ -19,8 +19,8 @@ use crate::{
     abaqus::{ABAQUS_IMPORT_REPORT_FORMAT, ABAQUS_IMPORT_REPORT_VERSION, ImportLoss, import_abaqus_file},
     envelope::{EnvelopeReport, envelope_csv, solve_envelope},
     export::{
-        ContourQuantity, DrawingKind, export_csv_with_stations, export_forces_svg, export_html, export_md,
-        export_svg_with_contour, export_vtk, write_atomic,
+        ContourQuantity, DrawingKind, export_csv_with_stations, export_displacement_svg, export_forces_svg, export_html,
+        export_md, export_svg_with_contour, export_vtk, write_atomic,
     },
     library::material_preset,
     model::{ElementKind, ElementSplit, Material, Model, PatternFactor, Section, Units},
@@ -1638,6 +1638,10 @@ impl OpenCae {
                     Some(DrawingKind::Forces) => {
                         export_forces_svg(model, options.stations.unwrap_or(11), target)?;
                         DrawingKind::Forces.default_file_name()
+                    }
+                    Some(DrawingKind::Displacement) => {
+                        export_displacement_svg(model, &solution, options.scale, target)?;
+                        DrawingKind::Displacement.default_file_name()
                     }
                 };
                 let file = if target.extension().and_then(|extension| extension.to_str()) == Some("svg") {

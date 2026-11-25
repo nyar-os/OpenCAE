@@ -11,8 +11,8 @@ use std::{
 };
 
 use cae_model::{
-    ContourQuantity, DrawingKind, ElementKind, ExportFormat, ExportOptions, Model, OpenCae, OpenCaeOptions, Units, solve,
-    solve_internal_forces,
+    ContourQuantity, DrawingKind, ElementKind, ExportFormat, ExportOptions, Model, OpenCae, OpenCaeOptions, Units,
+    export_displacement_svg, solve, solve_internal_forces,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -61,6 +61,84 @@ fn centre_loaded_beam() -> Model {
 
 fn forces_options() -> ExportOptions {
     ExportOptions { drawing: Some(DrawingKind::Forces), ..ExportOptions::default() }
+}
+
+fn displacement_options() -> ExportOptions {
+    ExportOptions { drawing: Some(DrawingKind::Displacement), ..ExportOptions::default() }
+}
+
+#[test]
+fn displacement_drawing_labels_the_tension_bar_tip() {
+    let directory = temporary_dir("displacement-bar");
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", 1000.0, 0.0).expect("n2");
+    model.add_element("e1", "n1", "n2", None).expect("bar");
+    model.set_material(Some("steel".to_string()), 210_000.0, 100.0);
+    model.add_support_full("n1", true, true, false, false).expect("pin");
+    model.add_support_full("n2", false, true, false, false).expect("guide");
+    model.add_load("n2", Some(10_000.0), None).expect("tension");
+    let session = save_session(&model, &directory, "bar");
+    let target = directory.join("displacements.svg");
+
+    let report = session.export_with_options(ExportFormat::Svg, &target, displacement_options()).expect("displacement export");
+    assert_eq!(report.files, vec![target.display().to_string()]);
+    let text = fs::read_to_string(&target).expect("displacements.svg");
+    assert!(text.contains("OpenCAE nodal displacement vectors"), "missing title: {text}");
+    // Analytic tip displacement u = FL/EA = 10000·1000/(210000·100) = 0.4762 mm.
+    assert!(text.contains("0.4762"), "missing the tip magnitude label: {text}");
+    assert!(text.contains("max |u| = 0.4762"), "missing the legend maximum: {text}");
+    assert!(text.contains("mm"), "missing the displacement unit: {text}");
+    assert!(text.contains("deformation × 1.00"), "missing the scale note: {text}");
+
+    session.export_with_options(ExportFormat::Svg, &target, displacement_options()).expect("repeat export");
+    let repeated = fs::read_to_string(&target).expect("repeated displacements.svg");
+    assert_eq!(text, repeated, "repeated displacement drawings must be byte-identical");
+}
+
+#[test]
+fn displacement_drawing_labels_the_cantilever_tip() {
+    let directory = temporary_dir("displacement-cantilever");
+    let mut model = Model::new(Units::Millimeter);
+    model.add_node("n1", 0.0, 0.0).expect("n1");
+    model.add_node("n2", 1000.0, 0.0).expect("n2");
+    model.add_element_kind("b1", "n1", "n2", None, ElementKind::Beam, Some(1.0e6), None).expect("beam");
+    model.add_support_full("n1", true, true, false, true).expect("fixed");
+    model.add_load("n2", None, Some(-1000.0)).expect("tip load");
+    let session = save_session(&model, &directory, "cantilever");
+    let target = directory.join("displacements.svg");
+
+    session.export_with_options(ExportFormat::Svg, &target, displacement_options()).expect("displacement export");
+    let text = fs::read_to_string(&target).expect("displacements.svg");
+    // Analytic tip deflection u = PL³/(3EI) = 1000·10⁹/(3·210000·10⁶) = 1.587 mm.
+    assert!(text.contains("max |u| = 1.587"), "missing the tip magnitude label: {text}");
+    // The fixed support has no arrow.
+    assert_eq!(text.matches("marker-end=\"url(#ocae-displacement-arrow)\"").count(), 1, "one arrow for the free tip: {text}");
+}
+
+#[test]
+fn displacement_drawing_rejects_an_empty_model() {
+    let directory = temporary_dir("displacement-empty");
+    let model = uniformly_loaded_beam();
+    let solution = solve(&model).expect("solve");
+    let empty = Model::new(Units::Millimeter);
+    let error = export_displacement_svg(&empty, &solution, 1.0, &directory.join("displacements.svg")).expect_err("empty model");
+    assert_eq!(error.code, "export/no-solution");
+}
+
+#[test]
+fn displacement_drawing_rejects_invalid_scale() {
+    let directory = temporary_dir("displacement-scale");
+    let model = uniformly_loaded_beam();
+    let session = save_session(&model, &directory, "beam");
+    let error = session
+        .export_with_options(
+            ExportFormat::Svg,
+            &directory.join("displacements.svg"),
+            ExportOptions { drawing: Some(DrawingKind::Displacement), scale: 0.0, ..ExportOptions::default() },
+        )
+        .expect_err("zero scale must be rejected");
+    assert_eq!(error.code, "export/invalid-scale");
 }
 
 #[test]
