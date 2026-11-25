@@ -185,6 +185,20 @@ pub struct Material {
     /// beam stress recovery through the extreme-fibre distance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section: Option<Section>,
+    /// Shear modulus `G` in the document stress unit.
+    ///
+    /// Spatial `beam3d` members need it for torsional stiffness `GJ`. When it
+    /// is omitted the solver derives `G = E / (2 (1 + nu))` from
+    /// [`Material::youngs_modulus`] and [`Material::poissons_ratio`]. It must
+    /// be positive and finite when supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shear_modulus: Option<f64>,
+    /// Poisson's ratio `nu`, used only to derive the shear modulus when
+    /// [`Material::shear_modulus`] is not supplied.
+    ///
+    /// Valid values are finite and inside `(-1, 0.5)`; the default is `0.3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poissons_ratio: Option<f64>,
 }
 
 fn default_material_name() -> String {
@@ -195,8 +209,9 @@ fn default_material_name() -> String {
 ///
 /// [`ElementKind::Truss`] carries axial force only. [`ElementKind::Beam`] is the
 /// two-dimensional Euler-Bernoulli beam with three degrees of freedom per
-/// node (`ux`, `uy`, `rz`); three-dimensional beams are not implemented and are
-/// rejected with `capability/not-implemented`.
+/// node (`ux`, `uy`, `rz`). [`ElementKind::Beam3D`] is the spatial frame member
+/// with six degrees of freedom per node (`ux`, `uy`, `uz`, `rx`, `ry`, `rz`)
+/// and is only valid in `dimension = 3` documents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ElementKind {
     /// Two-force truss member (axial stiffness only).
@@ -206,14 +221,20 @@ pub enum ElementKind {
     /// Two-dimensional Euler-Bernoulli beam.
     #[serde(rename = "beam")]
     Beam,
+    /// A spatial Euler-Bernoulli frame member with six degrees of freedom per
+    /// node: axial force, torsion, biaxial bending and biaxial shear.
+    #[serde(rename = "beam3d")]
+    Beam3D,
 }
 
 impl ElementKind {
-    /// Returns the short identifier stored in documents (`"truss"` or `"beam"`).
+    /// Returns the short identifier stored in documents (`"truss"`, `"beam"`
+    /// or `"beam3d"`).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Truss => "truss",
             Self::Beam => "beam",
+            Self::Beam3D => "beam3d",
         }
     }
 }
@@ -225,9 +246,10 @@ impl FromStr for ElementKind {
         match value {
             "truss" => Ok(Self::Truss),
             "beam" => Ok(Self::Beam),
+            "beam3d" => Ok(Self::Beam3D),
             other => Err(CaeError::new(
                 "cli/invalid-option",
-                format!("unknown element type `{other}`; valid values are `truss` or `beam`"),
+                format!("unknown element type `{other}`; valid values are `truss`, `beam` or `beam3d`"),
             )),
         }
     }
@@ -318,7 +340,8 @@ impl EndRelease {
     }
 }
 
-/// A structural member: a truss bar or a two-dimensional Euler-Bernoulli beam.
+/// A structural member: a truss bar, a two-dimensional Euler-Bernoulli beam
+/// or a spatial `beam3d` frame member.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Element {
@@ -338,8 +361,40 @@ pub struct Element {
     pub kind: ElementKind,
     /// Second moment of area `I` about the out-of-plane axis; required and
     /// strictly positive for beam elements.
+    ///
+    /// For `beam3d` members this is the strong-axis inertia `Izz` about the
+    /// local `z` axis; bending then happens in the local `x-y` plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inertia: Option<f64>,
+    /// Weak-axis second moment of area `Iyy` about the local `y` axis; only
+    /// valid on `beam3d` members.
+    ///
+    /// When omitted for a `beam3d` member the strong-axis [`Element::inertia`]
+    /// is used, which models a section with equal biaxial stiffness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia_weak: Option<f64>,
+    /// Saint-Venant torsion constant `J`; required and strictly positive for
+    /// `beam3d` members, which carry torsion `T = GJ/L·Δθx`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub torsion: Option<f64>,
+    /// Reference vector that orients the local axes of a `beam3d` member.
+    ///
+    /// The local `x` axis runs from the `from` to the `to` node. The local `z`
+    /// axis is the component of this vector perpendicular to `x`, normalised;
+    /// the local `y` axis completes the right-handed triad as `z × x`. The
+    /// default is `(0, 0, 1)`, falling back to `(0, 1, 0)` for vertical
+    /// members. The vector must be finite and non-zero, and must not be
+    /// parallel to the member axis. Only valid on `beam3d` members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation_vector: Option<[f64; 3]>,
+    /// Rotation angle in radians of the local `y`/`z` axes about the member
+    /// axis of a `beam3d` member, applied after
+    /// [`Element::orientation_vector`].
+    ///
+    /// A positive angle rotates `y` towards `z` (right-hand rule about the
+    /// local `x` axis). Only valid on `beam3d` members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation_angle: Option<f64>,
     /// Distributed load per unit length at the `from` end in the element's
     /// local `+y` direction; only valid on beam elements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -366,6 +421,20 @@ pub struct Element {
     /// End of the loaded segment as a fraction of the element length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distributed_load_to: Option<f64>,
+    /// Distributed load per unit length at the `from` end in the element's
+    /// local `+z` direction; only valid on `beam3d` members.
+    ///
+    /// Together with [`Element::distributed_load_z_end`] this defines a
+    /// linearly varying transverse load over the full span. When the start
+    /// value is omitted it is `0`, and when the end value is omitted the load
+    /// is uniform. Partial-span loading is only available for the local `y`
+    /// direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distributed_load_z: Option<f64>,
+    /// Distributed load per unit length at the `to` end in the element's local
+    /// `+z` direction; only valid on `beam3d` members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distributed_load_z_end: Option<f64>,
     /// Uniform temperature change `ΔT` of the member (kelvin or degrees
     /// Celsius difference).
     ///
@@ -405,8 +474,8 @@ pub struct Element {
     pub perimeter: Option<f64>,
     /// Optional bending-moment releases at the beam ends.
     ///
-    /// Only valid on beam elements; a member with both ends released carries no
-    /// end moments.
+    /// Only valid on two-dimensional beam elements; a member with both ends
+    /// released carries no end moments. `beam3d` members reject releases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<EndRelease>,
     /// Marks a truss member as tension-only (a cable).
@@ -554,8 +623,16 @@ pub struct Support {
     /// `true` constrains translation along Z. Only valid in three dimensions.
     #[serde(default)]
     pub dz: bool,
-    /// `true` constrains rotation about Z. Only valid in two dimensions and
-    /// only at nodes touched by at least one beam element.
+    /// `true` constrains rotation about X. Only valid in three dimensions at
+    /// nodes touched by at least one `beam3d` element.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub rx: bool,
+    /// `true` constrains rotation about Y. Only valid in three dimensions at
+    /// nodes touched by at least one `beam3d` element.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ry: bool,
+    /// `true` constrains rotation about Z. Valid at beam nodes in two
+    /// dimensions and at `beam3d` nodes in three dimensions.
     #[serde(default)]
     pub rz: bool,
     /// Enforced non-zero values of the constrained degrees of freedom.
@@ -600,9 +677,18 @@ pub struct Load {
     #[serde(default)]
     pub fz: f64,
     /// Concentrated moment about Z (counter-clockwise positive). Defaults to
-    /// zero and is only valid at beam nodes in two dimensions.
+    /// zero and is only valid at beam nodes in two dimensions and at `beam3d`
+    /// nodes in three dimensions.
     #[serde(default)]
     pub mz: f64,
+    /// Concentrated moment about X in the document moment unit. Omitted from
+    /// JSON when `None`; only valid at `beam3d` nodes in three dimensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mx: Option<f64>,
+    /// Concentrated moment about Y in the document moment unit. Omitted from
+    /// JSON when `None`; only valid at `beam3d` nodes in three dimensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub my: Option<f64>,
 }
 
 /// A named collection of concentrated nodal loads.
@@ -769,6 +855,8 @@ impl Model {
                 allowable_stress: None,
                 alpha: None,
                 conductivity: None,
+                shear_modulus: None,
+                poissons_ratio: None,
                 section: None,
             },
             nodes: Vec::new(),
@@ -965,9 +1053,13 @@ impl Model {
 
     /// Appends a structural element of the requested kind.
     ///
-    /// Beam elements require a two-dimensional document and a strictly
-    /// positive `inertia`; a distributed load is only valid on beams. Invalid
-    /// combinations are rejected before the file is written.
+    /// Two-dimensional beam elements require a two-dimensional document and a
+    /// strictly positive `inertia`; a distributed load is only valid on beams.
+    /// `beam3d` members require a three-dimensional document and are routed to
+    /// [`Model::add_frame_element`] without torsion or orientation data, so
+    /// either the material section must provide `J` or the dedicated entry
+    /// point must be used. Invalid combinations are rejected before the file is
+    /// written.
     #[allow(clippy::too_many_arguments)]
     pub fn add_element_kind(
         &mut self,
@@ -1028,7 +1120,7 @@ impl Model {
                     return Err(CaeError::new(
                         "capability/not-implemented",
                         format!(
-                            "3D beam elements are not implemented; element `{id}` can only use beam in a dimension=2 document"
+                            "kind `beam` is the two-dimensional beam formulation; use `beam3d` for spatial frame members in a dimension=3 document (element `{id}`)"
                         ),
                     ));
                 }
@@ -1060,6 +1152,23 @@ impl Model {
                     ));
                 }
             }
+            ElementKind::Beam3D => {
+                return self.add_frame_element(
+                    id,
+                    from,
+                    to,
+                    material,
+                    inertia,
+                    None,
+                    None,
+                    None,
+                    None,
+                    distributed_load,
+                    distributed_load_end,
+                    None,
+                    None,
+                );
+            }
         }
         if distributed_load.is_some_and(|value| !value.is_finite())
             || distributed_load_end.is_some_and(|value| !value.is_finite())
@@ -1076,10 +1185,184 @@ impl Model {
             material,
             kind,
             inertia,
+            inertia_weak: None,
+            torsion: None,
+            orientation_vector: None,
+            orientation_angle: None,
             distributed_load,
             distributed_load_end,
             distributed_load_from: None,
             distributed_load_to: None,
+            distributed_load_z: None,
+            distributed_load_z_end: None,
+            temperature: None,
+            temperature_gradient: None,
+            convection: None,
+            perimeter: None,
+            release: None,
+            tension_only: false,
+        });
+        self.bump_revision();
+        Ok(())
+    }
+
+    /// Appends a spatial `beam3d` frame member.
+    ///
+    /// The document must be three-dimensional. `inertia` is the strong-axis
+    /// second moment of area `Izz` and defaults to the material section's
+    /// strong-axis value; `inertia_weak` is `Iyy` and defaults to `inertia`;
+    /// `torsion` is the Saint-Venant constant `J` and defaults to the material
+    /// section's torsion constant. Both `inertia` and `torsion` must resolve to
+    /// positive finite values, otherwise the element is rejected with
+    /// `element/invalid-inertia` or `element/invalid-torsion`.
+    ///
+    /// `orientation_vector` and `orientation_angle` orient the local axes as
+    /// described by [`Element::orientation_vector`] and
+    /// [`Element::orientation_angle`]; an explicit vector that is parallel to
+    /// the member axis is rejected with `element/invalid-orientation`.
+    /// `distributed_load` / `distributed_load_end` act in the local `+y`
+    /// direction and `distributed_load_z` / `distributed_load_z_end` in the
+    /// local `+z` direction; all must be finite.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_frame_element(
+        &mut self,
+        id: impl Into<String>,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        material: Option<ElementMaterial>,
+        inertia: Option<f64>,
+        inertia_weak: Option<f64>,
+        torsion: Option<f64>,
+        orientation_vector: Option<[f64; 3]>,
+        orientation_angle: Option<f64>,
+        distributed_load: Option<f64>,
+        distributed_load_end: Option<f64>,
+        distributed_load_z: Option<f64>,
+        distributed_load_z_end: Option<f64>,
+    ) -> Result<(), CaeError> {
+        let id = id.into();
+        let from = from.into();
+        let to = to.into();
+        if self.elements.iter().any(|element| element.id == id) {
+            return Err(CaeError::new("element/duplicate-id", format!("element `{id}` already exists")));
+        }
+        if from == to {
+            return Err(CaeError::new(
+                "element/degenerate",
+                format!("element `{id}` must not have identical start and end nodes"),
+            ));
+        }
+        let start = self
+            .node(&from)
+            .ok_or_else(|| CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{from}`")))?;
+        let end = self
+            .node(&to)
+            .ok_or_else(|| CaeError::new("element/unknown-node", format!("element `{id}` references unknown node `{to}`")))?;
+        if start.x == end.x && start.y == end.y && start.z == end.z {
+            return Err(CaeError::new("element/zero-length", format!("element `{id}` has zero length")));
+        }
+        if self.dimension != 3 {
+            return Err(CaeError::new(
+                "document/dimension-mismatch",
+                format!("element `{id}` uses beam3d and therefore requires a dimension=3 document"),
+            ));
+        }
+        let section = self.material.section.and_then(|section| section.properties().ok());
+        let strong = inertia.or(section.as_ref().map(|properties| properties.inertia_strong));
+        if !strong.is_some_and(positive_finite) {
+            return Err(CaeError::new(
+                "element/invalid-inertia",
+                match inertia {
+                    Some(value) => {
+                        format!("beam3d element `{id}` inertia must be positive and finite (currently {value})")
+                    }
+                    None => format!(
+                        "beam3d element `{id}` requires an explicit positive inertia or a material section that provides one"
+                    ),
+                },
+            ));
+        }
+        if inertia_weak.is_some_and(|value| !positive_finite(value)) {
+            return Err(CaeError::new(
+                "element/invalid-inertia",
+                format!("beam3d element `{id}` inertiaWeak must be positive and finite"),
+            ));
+        }
+        let torsion_constant = torsion.or(section.as_ref().map(|properties| properties.torsion_constant));
+        if !torsion_constant.is_some_and(positive_finite) {
+            return Err(CaeError::new(
+                "element/invalid-torsion",
+                match torsion {
+                    Some(value) => {
+                        format!("beam3d element `{id}` torsion constant J must be positive and finite (currently {value})")
+                    }
+                    None => format!(
+                        "beam3d element `{id}` requires an explicit positive torsion constant J or a material section that provides one"
+                    ),
+                },
+            ));
+        }
+        if let Some(vector) = orientation_vector {
+            if !vector.iter().all(|value| value.is_finite()) {
+                return Err(CaeError::new(
+                    "element/invalid-orientation",
+                    format!("orientation vector of element `{id}` must be finite"),
+                ));
+            }
+            let norm = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
+            if norm <= 0.0 {
+                return Err(CaeError::new(
+                    "element/invalid-orientation",
+                    format!("orientation vector of element `{id}` must not be zero"),
+                ));
+            }
+            let length = (end.x - start.x).hypot(end.y - start.y).hypot(end.z - start.z);
+            let axis = [(end.x - start.x) / length, (end.y - start.y) / length, (end.z - start.z) / length];
+            let dot = (vector[0] * axis[0] + vector[1] * axis[1] + vector[2] * axis[2]) / norm;
+            let perpendicular = (1.0 - dot * dot).max(0.0).sqrt();
+            if perpendicular < 1e-9 {
+                return Err(CaeError::new(
+                    "element/invalid-orientation",
+                    format!("orientation vector of element `{id}` must not be parallel to the member axis"),
+                ));
+            }
+        }
+        if orientation_angle.is_some_and(|value| !value.is_finite()) {
+            return Err(CaeError::new(
+                "element/invalid-orientation",
+                format!("orientation angle of element `{id}` must be finite"),
+            ));
+        }
+        for (name, value) in [
+            ("w", distributed_load),
+            ("wEnd", distributed_load_end),
+            ("wz", distributed_load_z),
+            ("wzEnd", distributed_load_z_end),
+        ] {
+            if value.is_some_and(|value| !value.is_finite()) {
+                return Err(CaeError::new(
+                    "element/invalid-distributed-load",
+                    format!("distributed load {name} of element `{id}` must be finite"),
+                ));
+            }
+        }
+        self.elements.push(Element {
+            id,
+            from,
+            to,
+            material,
+            kind: ElementKind::Beam3D,
+            inertia,
+            inertia_weak,
+            torsion,
+            orientation_vector,
+            orientation_angle,
+            distributed_load,
+            distributed_load_end,
+            distributed_load_from: None,
+            distributed_load_to: None,
+            distributed_load_z,
+            distributed_load_z_end,
             temperature: None,
             temperature_gradient: None,
             convection: None,
@@ -1880,11 +2163,6 @@ impl Model {
                 "a two-dimensional document cannot apply a Z load (node `{node}`); set dimension to 3 first"
             )));
         }
-        if self.dimension == 3 && mz.is_some_and(|value| value != 0.0) {
-            return Err(dimension_mismatch(format!(
-                "a three-dimensional document cannot apply an mz moment (node `{node}`); beam elements are two-dimensional only"
-            )));
-        }
         let position = if let Some(index) = self.patterns.iter().position(|entry| entry.name == pattern) {
             index
         }
@@ -1914,6 +2192,8 @@ impl Model {
                 fy: fy.unwrap_or(0.0),
                 fz: fz.unwrap_or(0.0),
                 mz: mz.unwrap_or(0.0),
+                mx: None,
+                my: None,
             });
         }
         self.bump_revision();
@@ -1966,7 +2246,8 @@ impl Model {
 
     /// Adds or merges a support entry, optionally constraining rotation about Z.
     ///
-    /// `rz` only takes effect at nodes touched by a beam element; validation
+    /// `rz` only takes effect at nodes touched by a beam element in two
+    /// dimensions or by a `beam3d` element in three dimensions; validation
     /// reports `support/inactive-dof` otherwise.
     pub fn add_support_full(
         &mut self,
@@ -1974,6 +2255,27 @@ impl Model {
         dx: bool,
         dy: bool,
         dz: bool,
+        rz: bool,
+    ) -> Result<(), CaeError> {
+        self.add_support_frame(node, dx, dy, dz, false, false, rz)
+    }
+
+    /// Adds or merges a support entry for a node of a spatial frame.
+    ///
+    /// `rx`, `ry` and `rz` constrain rotations about the global axes and only
+    /// take effect at nodes touched by a `beam3d` element; validation reports
+    /// `support/inactive-dof` otherwise. A fully fixed frame support sets all
+    /// six flags, a spatial hinge constrains the translations plus two
+    /// rotations, and a spatial roller constrains translations only.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_support_frame(
+        &mut self,
+        node: impl Into<String>,
+        dx: bool,
+        dy: bool,
+        dz: bool,
+        rx: bool,
+        ry: bool,
         rz: bool,
     ) -> Result<(), CaeError> {
         let node = node.into();
@@ -1985,19 +2287,21 @@ impl Model {
                 "a two-dimensional document cannot constrain Z translation of node `{node}`; set dimension to 3 first"
             )));
         }
-        if self.dimension == 3 && rz {
+        if self.dimension != 3 && (rx || ry) {
             return Err(dimension_mismatch(format!(
-                "a three-dimensional document cannot constrain rz rotation of node `{node}`; beam elements are two-dimensional only"
+                "a two-dimensional document cannot constrain the rx or ry rotation of node `{node}`; set dimension to 3 first"
             )));
         }
         if let Some(support) = self.supports.iter_mut().find(|support| support.node == node) {
             support.dx |= dx;
             support.dy |= dy;
             support.dz |= dz;
+            support.rx |= rx;
+            support.ry |= ry;
             support.rz |= rz;
         }
         else {
-            self.supports.push(Support { node, dx, dy, dz, rz, prescribed: None, spring: None, direction: None });
+            self.supports.push(Support { node, dx, dy, dz, rx, ry, rz, prescribed: None, spring: None, direction: None });
         }
         self.bump_revision();
         Ok(())
@@ -2048,6 +2352,8 @@ impl Model {
                 dx: false,
                 dy: false,
                 dz: false,
+                rx: false,
+                ry: false,
                 rz: false,
                 prescribed: None,
                 spring: None,
@@ -2114,7 +2420,7 @@ impl Model {
         }
         if self.dimension == 3 && merged.kr != 0.0 {
             return Err(dimension_mismatch(format!(
-                "a three-dimensional document cannot apply a kr spring to node `{node}`; beam elements are two-dimensional only"
+                "a three-dimensional document cannot apply a kr spring to node `{node}`; rotational springs are only available at two-dimensional beam nodes"
             )));
         }
         let position = match self.supports.iter().position(|support| support.node == node) {
@@ -2125,6 +2431,8 @@ impl Model {
                     dx: false,
                     dy: false,
                     dz: false,
+                    rx: false,
+                    ry: false,
                     rz: false,
                     prescribed: None,
                     spring: None,
@@ -2176,7 +2484,7 @@ impl Model {
         }
         if self.dimension == 3 && rz.is_some_and(|value| value != 0.0) {
             return Err(dimension_mismatch(format!(
-                "a three-dimensional document cannot prescribe an rz rotation for node `{node}`; beam elements are two-dimensional only"
+                "a three-dimensional document cannot prescribe an rz rotation for node `{node}`; prescribed rotations are only available at two-dimensional beam nodes"
             )));
         }
         let position = match self.supports.iter().position(|support| support.node == node) {
@@ -2187,6 +2495,8 @@ impl Model {
                     dx: false,
                     dy: false,
                     dz: false,
+                    rx: false,
+                    ry: false,
                     rz: false,
                     prescribed: None,
                     spring: None,
@@ -2240,14 +2550,36 @@ impl Model {
 
     /// Adds or updates a concentrated load including an optional moment `mz`.
     ///
-    /// A non-zero `mz` only takes effect at beam nodes in two dimensions;
-    /// validation reports `load/inactive-dof` otherwise.
+    /// A non-zero `mz` only takes effect at beam nodes in two dimensions and
+    /// at `beam3d` nodes in three dimensions; validation reports
+    /// `load/inactive-dof` otherwise.
     pub fn add_load_full(
         &mut self,
         node: impl Into<String>,
         fx: Option<f64>,
         fy: Option<f64>,
         fz: Option<f64>,
+        mz: Option<f64>,
+    ) -> Result<(), CaeError> {
+        self.add_load_frame(node, fx, fy, fz, None, None, mz)
+    }
+
+    /// Adds or updates a concentrated load with all three moment components.
+    ///
+    /// `mx`, `my` and `mz` only take effect at `beam3d` nodes in three
+    /// dimensions (`mz` additionally at two-dimensional beam nodes);
+    /// validation reports `load/inactive-dof` otherwise. A non-zero moment in
+    /// a two-dimensional document is rejected for `mx` and `my` with
+    /// `document/dimension-mismatch`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_load_frame(
+        &mut self,
+        node: impl Into<String>,
+        fx: Option<f64>,
+        fy: Option<f64>,
+        fz: Option<f64>,
+        mx: Option<f64>,
+        my: Option<f64>,
         mz: Option<f64>,
     ) -> Result<(), CaeError> {
         let node = node.into();
@@ -2259,9 +2591,9 @@ impl Model {
                 "a two-dimensional document cannot apply a Z load (node `{node}`); set dimension to 3 first"
             )));
         }
-        if self.dimension == 3 && mz.is_some_and(|value| value != 0.0) {
+        if self.dimension != 3 && (mx.is_some_and(|value| value != 0.0) || my.is_some_and(|value| value != 0.0)) {
             return Err(dimension_mismatch(format!(
-                "a three-dimensional document cannot apply an mz moment (node `{node}`); beam elements are two-dimensional only"
+                "a two-dimensional document cannot apply an mx or my moment (node `{node}`); set dimension to 3 first"
             )));
         }
         if let Some(load) = self.loads.iter_mut().find(|load| load.node == node) {
@@ -2274,6 +2606,12 @@ impl Model {
             if let Some(fz) = fz {
                 load.fz = fz;
             }
+            if mx.is_some() {
+                load.mx = mx;
+            }
+            if my.is_some() {
+                load.my = my;
+            }
             if let Some(mz) = mz {
                 load.mz = mz;
             }
@@ -2285,6 +2623,8 @@ impl Model {
                 fy: fy.unwrap_or(0.0),
                 fz: fz.unwrap_or(0.0),
                 mz: mz.unwrap_or(0.0),
+                mx,
+                my,
             });
         }
         self.bump_revision();
@@ -2393,6 +2733,8 @@ impl Model {
                 fy: target.fy + extra.fy,
                 fz: target.fz + extra.fz,
                 mz: target.mz + extra.mz,
+                mx: target.mx.zip(extra.mx).map(|(a, b)| a + b).or(target.mx).or(extra.mx),
+                my: target.my.zip(extra.my).map(|(a, b)| a + b).or(target.my).or(extra.my),
             }),
             (Some(mut only), None) | (None, Some(mut only)) => {
                 only.node = into.to_string();
@@ -2510,13 +2852,22 @@ fn merge_supports(target: Support, extra: Support) -> Result<Support, CaeError> 
         dx: target.dx || extra.dx,
         dy: target.dy || extra.dy,
         dz: target.dz || extra.dz,
+        rx: target.rx || extra.rx,
+        ry: target.ry || extra.ry,
         rz: target.rz || extra.rz,
         prescribed,
         spring,
         direction,
     };
     if merged.direction.is_some()
-        && (merged.dx || merged.dy || merged.dz || merged.rz || merged.prescribed.is_some() || merged.spring.is_some())
+        && (merged.dx
+            || merged.dy
+            || merged.dz
+            || merged.rx
+            || merged.ry
+            || merged.rz
+            || merged.prescribed.is_some()
+            || merged.spring.is_some())
     {
         return Err(conflict("an inclined direction cannot be combined with another constraint frame"));
     }
@@ -2548,7 +2899,7 @@ fn dimension_mismatch(message: impl Into<String>) -> CaeError {
     CaeError::new("document/dimension-mismatch", message)
 }
 
-fn positive_finite(value: f64) -> bool {
+pub(crate) fn positive_finite(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
 
@@ -2577,4 +2928,23 @@ pub(crate) fn rotation_nodes(model: &Model) -> std::collections::HashSet<&str> {
             nodes
         })
         .collect()
+}
+
+/// Identifiers of nodes touched by at least one spatial `beam3d` member.
+///
+/// These nodes own the six degrees of freedom `ux`, `uy`, `uz`, `rx`, `ry`
+/// and `rz`; every other node in the document keeps its translational degrees
+/// of freedom only.
+pub(crate) fn spatial_beam_nodes(model: &Model) -> std::collections::HashSet<&str> {
+    model
+        .elements
+        .iter()
+        .filter(|element| element.kind == ElementKind::Beam3D)
+        .flat_map(|element| [element.from.as_str(), element.to.as_str()])
+        .collect()
+}
+
+/// Returns `true` when the document contains at least one `beam3d` member.
+pub(crate) fn has_spatial_beams(model: &Model) -> bool {
+    model.elements.iter().any(|element| element.kind == ElementKind::Beam3D)
 }

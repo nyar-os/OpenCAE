@@ -43,6 +43,8 @@ fn material(alpha: Option<f64>) -> Material {
         allowable_stress: None,
         alpha,
         conductivity: None,
+        shear_modulus: None,
+        poissons_ratio: None,
         section: None,
     }
 }
@@ -158,6 +160,8 @@ fn temperature_edits_reject_invalid_input_and_round_trip() {
         allowable_stress: None,
         alpha: Some(ALPHA),
         conductivity: None,
+        shear_modulus: None,
+        poissons_ratio: None,
         section: None,
     };
     session.set_material_data(document).expect("material with alpha");
@@ -182,6 +186,8 @@ fn gradient_material(alpha: Option<f64>, section: Option<Section>) -> Material {
         allowable_stress: None,
         alpha,
         conductivity: None,
+        shear_modulus: None,
+        poissons_ratio: None,
         section,
     }
 }

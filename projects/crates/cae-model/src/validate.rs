@@ -4,7 +4,7 @@ use boost_check::{CheckReport, Issue as CheckIssue, Severity as CheckSeverity};
 use serde::Serialize;
 
 use crate::{
-    model::{ElementKind, FORMAT, Model, Units, VERSION, rotation_nodes},
+    model::{ElementKind, FORMAT, Model, Units, VERSION, rotation_nodes, spatial_beam_nodes},
     solver::check_stability,
 };
 
@@ -154,15 +154,33 @@ impl Model {
                 ),
             ));
         }
+        if self.material.shear_modulus.is_some_and(|value| !positive_finite(value)) {
+            report.push(check_error(
+                "material/invalid-shear",
+                format!(
+                    "shear modulus of material `{}` must be positive and finite (currently {:?})",
+                    self.material.name, self.material.shear_modulus
+                ),
+            ));
+        }
+        if self.material.poissons_ratio.is_some_and(|value| !value.is_finite() || value <= -1.0 || value >= 0.5) {
+            report.push(check_error(
+                "material/invalid-poisson",
+                format!(
+                    "Poisson's ratio of material `{}` must be finite and inside (-1, 0.5) (currently {:?})",
+                    self.material.name, self.material.poissons_ratio
+                ),
+            ));
+        }
         if self.ambient_temperature.is_some_and(|value| !value.is_finite()) {
             report.push(check_error(
                 "heat/invalid-ambient",
                 format!("ambient temperature must be finite (currently {:?})", self.ambient_temperature),
             ));
         }
-        let section_inertia = match self.material.section {
+        let section_properties = match self.material.section {
             Some(section) => match section.properties() {
-                Ok(properties) => Some(properties.inertia_strong),
+                Ok(properties) => Some(properties),
                 Err(error) => {
                     report.push(check_error(&error.code, error.message));
                     None
@@ -170,6 +188,8 @@ impl Model {
             },
             None => None,
         };
+        let section_inertia = section_properties.map(|properties| properties.inertia_strong);
+        let section_torsion = section_properties.map(|properties| properties.torsion_constant);
 
         let mut node_ids = HashSet::new();
         for (index, node) in self.nodes.iter().enumerate() {
@@ -318,12 +338,90 @@ impl Model {
                     ));
                 }
             }
+            if element.kind == ElementKind::Beam3D {
+                if self.dimension != 3 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!("beam3d element `{}` requires a dimension=3 document", element.id),
+                    ));
+                }
+                let usable_inertia = match element.inertia {
+                    Some(value) => positive_finite(value),
+                    None => section_inertia.is_some_and(positive_finite),
+                };
+                if !usable_inertia {
+                    report.push(check_error(
+                        "element/invalid-inertia",
+                        match element.inertia {
+                            Some(value) => format!(
+                                "beam3d element `{}` inertia must be positive and finite (currently {value})",
+                                element.id
+                            ),
+                            None => format!(
+                                "beam3d element `{}` requires an explicit positive inertia or a material section that provides one",
+                                element.id
+                            ),
+                        },
+                    ));
+                }
+                if element.inertia_weak.is_some_and(|value| !positive_finite(value)) {
+                    report.push(check_error(
+                        "element/invalid-inertia",
+                        format!("beam3d element `{}` inertiaWeak must be positive and finite", element.id),
+                    ));
+                }
+                let usable_torsion = match element.torsion {
+                    Some(value) => positive_finite(value),
+                    None => section_torsion.is_some_and(positive_finite),
+                };
+                if !usable_torsion {
+                    report.push(check_error(
+                        "element/invalid-torsion",
+                        match element.torsion {
+                            Some(value) => format!(
+                                "beam3d element `{}` torsion constant J must be positive and finite (currently {value})",
+                                element.id
+                            ),
+                            None => format!(
+                                "beam3d element `{}` requires an explicit positive torsion constant J or a material section that provides one",
+                                element.id
+                            ),
+                        },
+                    ));
+                }
+                if element.orientation_vector.is_some_and(|vector| !vector.iter().all(|value| value.is_finite()))
+                    || element.orientation_angle.is_some_and(|value| !value.is_finite())
+                {
+                    report.push(check_error(
+                        "element/invalid-orientation",
+                        format!("orientation data of beam3d element `{}` must be finite", element.id),
+                    ));
+                }
+                if element.release.is_some() {
+                    report.push(check_error(
+                        "element/release-requires-beam",
+                        format!(
+                            "end releases are only implemented for two-dimensional beam elements (element `{}`)",
+                            element.id
+                        ),
+                    ));
+                }
+                if element.temperature_gradient.is_some() {
+                    report.push(check_error(
+                        "element/gradient-requires-beam",
+                        format!(
+                            "temperature gradients are only implemented for two-dimensional beam elements (element `{}`)",
+                            element.id
+                        ),
+                    ));
+                }
+            }
             if element.distributed_load.is_some()
                 || element.distributed_load_end.is_some()
                 || element.distributed_load_from.is_some()
                 || element.distributed_load_to.is_some()
             {
-                if element.kind != ElementKind::Beam {
+                if element.kind == ElementKind::Truss {
                     report.push(check_error(
                         "element/distributed-load-requires-beam",
                         format!(
@@ -338,6 +436,25 @@ impl Model {
                     report.push(check_error(
                         "element/invalid-distributed-load",
                         format!("distributed load w of element `{}` must be finite", element.id),
+                    ));
+                }
+            }
+            if element.distributed_load_z.is_some() || element.distributed_load_z_end.is_some() {
+                if element.kind != ElementKind::Beam3D {
+                    report.push(check_error(
+                        "element/distributed-load-requires-beam",
+                        format!(
+                            "element `{}` is not a beam3d member; distributed load wz can only be applied to beam3d members",
+                            element.id
+                        ),
+                    ));
+                }
+                if element.distributed_load_z.is_some_and(|value| !value.is_finite())
+                    || element.distributed_load_z_end.is_some_and(|value| !value.is_finite())
+                {
+                    report.push(check_error(
+                        "element/invalid-distributed-load",
+                        format!("distributed load wz of element `{}` must be finite", element.id),
                     ));
                 }
             }
@@ -507,6 +624,7 @@ impl Model {
         }
 
         let rotation_nodes = rotation_nodes(self);
+        let spatial_nodes = spatial_beam_nodes(self);
         for support in &self.supports {
             if self.node(&support.node).is_none() {
                 report.push(check_error("support/unknown-node", format!("support references unknown node `{}`", support.node)));
@@ -553,16 +671,36 @@ impl Model {
                 }
             }
             if support.rz {
-                if self.dimension == 3 {
+                if self.dimension == 3 && !spatial_nodes.contains(support.node.as_str()) {
                     report.push(check_error(
-                        "document/dimension-mismatch",
-                        format!("node `{}` in a three-dimensional document cannot constrain rz rotation; beam elements are two-dimensional only", support.node),
+                        "support/inactive-dof",
+                        format!("node `{}` has no rz rotational degree of freedom: it has no beam3d element", support.node),
                     ));
                 }
-                else if !rotation_nodes.contains(support.node.as_str()) {
+                else if self.dimension == 2 && !rotation_nodes.contains(support.node.as_str()) {
                     report.push(check_error(
                         "support/inactive-dof",
                         format!("node `{}` has no rz rotational degree of freedom: it has no beam element, or every beam end at the node is released", support.node),
+                    ));
+                }
+            }
+            for (name, constrained) in [("rx", support.rx), ("ry", support.ry)] {
+                if !constrained {
+                    continue;
+                }
+                if self.dimension != 3 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!(
+                            "node `{}` in a two-dimensional document cannot constrain the {name} rotation; set dimension to 3",
+                            support.node
+                        ),
+                    ));
+                }
+                else if !spatial_nodes.contains(support.node.as_str()) {
+                    report.push(check_error(
+                        "support/inactive-dof",
+                        format!("node `{}` has no {name} rotational degree of freedom: it has no beam3d element", support.node),
                     ));
                 }
             }
@@ -692,16 +830,40 @@ impl Model {
                 ));
             }
             if load.mz != 0.0 {
-                if self.dimension == 3 {
+                if self.dimension == 3 && !spatial_nodes.contains(load.node.as_str()) {
                     report.push(check_error(
-                        "document/dimension-mismatch",
-                        format!("node `{}` in a three-dimensional document cannot carry an mz moment; beam elements are two-dimensional only", load.node),
+                        "load/inactive-dof",
+                        format!(
+                            "node `{}` has no rz rotational degree of freedom for the mz moment: it has no beam3d element",
+                            load.node
+                        ),
                     ));
                 }
-                else if !rotation_nodes.contains(load.node.as_str()) {
+                else if self.dimension == 2 && !rotation_nodes.contains(load.node.as_str()) {
                     report.push(check_error(
                         "load/inactive-dof",
                         format!("node `{}` has no rotational degree of freedom for the mz moment: it has no beam element, or every beam end at the node is released", load.node),
+                    ));
+                }
+            }
+            for (name, moment) in [("mx", load.mx), ("my", load.my)] {
+                let Some(value) = moment.filter(|value| *value != 0.0)
+                else {
+                    continue;
+                };
+                if self.dimension != 3 {
+                    report.push(check_error(
+                        "document/dimension-mismatch",
+                        format!("node `{}` in a two-dimensional document cannot carry a {name} moment (currently {value}); set dimension to 3", load.node),
+                    ));
+                }
+                else if !spatial_nodes.contains(load.node.as_str()) {
+                    report.push(check_error(
+                        "load/inactive-dof",
+                        format!(
+                            "node `{}` has no rotational degree of freedom for the {name} moment: it has no beam3d element",
+                            load.node
+                        ),
                     ));
                 }
             }
@@ -730,13 +892,16 @@ impl Model {
                     ));
                 }
                 if load.mz != 0.0 {
-                    if self.dimension == 3 {
+                    if self.dimension == 3 && !spatial_nodes.contains(load.node.as_str()) {
                         report.push(check_error(
-                            "document/dimension-mismatch",
-                            format!("node `{}` in a three-dimensional document cannot carry an mz moment; beam elements are two-dimensional only", load.node),
+                            "load/inactive-dof",
+                            format!(
+                                "node `{}` has no rz rotational degree of freedom for the mz moment: it has no beam3d element",
+                                load.node
+                            ),
                         ));
                     }
-                    else if !rotation_nodes.contains(load.node.as_str()) {
+                    else if self.dimension == 2 && !rotation_nodes.contains(load.node.as_str()) {
                         report.push(check_error(
                             "load/inactive-dof",
                             format!("node `{}` has no rotational degree of freedom for the mz moment: it has no beam element, or every beam end at the node is released", load.node),

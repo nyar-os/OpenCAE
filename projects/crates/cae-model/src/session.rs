@@ -532,6 +532,60 @@ impl OpenCae {
         })
     }
 
+    /// Appends a spatial `beam3d` frame member and saves the document.
+    ///
+    /// The member needs a three-dimensional document, a positive `inertia`
+    /// (strong-axis, local `x–y` bending) and a positive `torsion` constant `J`.
+    /// `inertia_weak` (local `x–z` bending) defaults to `inertia`. The local
+    /// frame follows the model conventions: `x` runs from `from` to `to`, the
+    /// default reference vector is `(0, 0, 1)` with a `(0, 1, 0)` fallback for
+    /// vertical members, and `orientation_vector` or `orientation_angle` rotate
+    /// the section about the member axis. `distributed_load` and
+    /// `distributed_load_end` act along the local `+y` axis, `distributed_load_z`
+    /// and `distributed_load_z_end` along the local `+z` axis.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_frame_element(
+        &mut self,
+        id: &str,
+        from: &str,
+        to: &str,
+        youngs_modulus: Option<f64>,
+        area: Option<f64>,
+        inertia: Option<f64>,
+        inertia_weak: Option<f64>,
+        torsion: Option<f64>,
+        orientation_vector: Option<[f64; 3]>,
+        orientation_angle: Option<f64>,
+        distributed_load: Option<f64>,
+        distributed_load_end: Option<f64>,
+        distributed_load_z: Option<f64>,
+        distributed_load_z_end: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| {
+            let material = if youngs_modulus.is_some() || area.is_some() {
+                Some(crate::ElementMaterial { youngs_modulus, area })
+            }
+            else {
+                None
+            };
+            model.add_frame_element(
+                id,
+                from,
+                to,
+                material,
+                inertia,
+                inertia_weak,
+                torsion,
+                orientation_vector,
+                orientation_angle,
+                distributed_load,
+                distributed_load_end,
+                distributed_load_z,
+                distributed_load_z_end,
+            )
+        })
+    }
+
     /// Sets or clears the uniform temperature change of an existing element and
     /// saves the document.
     ///
@@ -697,6 +751,8 @@ impl OpenCae {
             let mut material = preset.material(units, area, section);
             material.alpha = document.model.material.alpha;
             material.conductivity = document.model.material.conductivity;
+            material.shear_modulus = document.model.material.shear_modulus;
+            material.poissons_ratio = document.model.material.poissons_ratio;
             if let Some(stress) = allowable_stress {
                 material.allowable_stress = Some(stress);
             }
@@ -753,6 +809,32 @@ impl OpenCae {
             ));
         }
         self.edit(|model| model.add_support_full(node, dx, dy, dz, rz))
+    }
+
+    /// Adds or merges a support entry for a spatial frame node and saves the
+    /// document.
+    ///
+    /// `rx`, `ry` and `rz` constrain rotations and are only meaningful at nodes
+    /// touched by a `beam3d` member. At least one component must constrain a
+    /// degree of freedom.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_support_frame(
+        &mut self,
+        node: &str,
+        dx: bool,
+        dy: bool,
+        dz: bool,
+        rx: bool,
+        ry: bool,
+        rz: bool,
+    ) -> Result<DocumentSummary, CaeError> {
+        if !dx && !dy && !dz && !rx && !ry && !rz {
+            return Err(CaeError::new(
+                "support/no-freedom",
+                "specify at least one of dx, dy, dz, rx, ry or rz; otherwise the support constrains no degree of freedom",
+            ));
+        }
+        self.edit(|model| model.add_support_frame(node, dx, dy, dz, rx, ry, rz))
     }
 
     /// Adds or merges an inclined roller support and saves the document.
@@ -930,6 +1012,25 @@ impl OpenCae {
         mz: Option<f64>,
     ) -> Result<DocumentSummary, CaeError> {
         self.edit(|model| model.add_load_full(node, fx, fy, fz, mz))
+    }
+
+    /// Adds or updates a concentrated load with all force and moment components
+    /// and saves the document.
+    ///
+    /// `mx` and `my` are only meaningful at nodes touched by a `beam3d` member;
+    /// `mz` additionally works at two-dimensional beam nodes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_load_frame(
+        &mut self,
+        node: &str,
+        fx: Option<f64>,
+        fy: Option<f64>,
+        fz: Option<f64>,
+        mx: Option<f64>,
+        my: Option<f64>,
+        mz: Option<f64>,
+    ) -> Result<DocumentSummary, CaeError> {
+        self.edit(|model| model.add_load_frame(node, fx, fy, fz, mx, my, mz))
     }
 
     /// Removes a node and saves the document.

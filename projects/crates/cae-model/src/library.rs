@@ -93,6 +93,8 @@ impl MaterialPreset {
             allowable_stress: self.allowable_stress(units),
             alpha: None,
             conductivity: None,
+            shear_modulus: None,
+            poissons_ratio: None,
             section,
         }
     }

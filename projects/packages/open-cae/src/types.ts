@@ -14,7 +14,7 @@ export type Units = 'mm' | 'm';
 export type Dimension = 2 | 3;
 
 /** Element formulation. Beams are two-dimensional only. */
-export type ElementKind = 'truss' | 'beam';
+export type ElementKind = 'truss' | 'beam' | 'beam3d';
 
 /** Analysis performed by `solve()`. */
 export type Analysis = 'static' | 'modal' | 'buckling' | 'tensionOnly';
@@ -125,6 +125,13 @@ export interface Material {
      * length-consistent conductivity.
      */
     readonly conductivity?: number;
+    /**
+     * Shear modulus `G` used by `beam3d` torsion. When omitted it is derived
+     * as `E / (2 (1 + nu))` from `poissonsRatio` (default `0.3`).
+     */
+    readonly shearModulus?: number;
+    /** Poisson's ratio `nu` inside `(-1, 0.5)`, used to derive `shearModulus`. */
+    readonly poissonsRatio?: number;
     /** Parametric section geometry, when declared. */
     readonly section?: Section;
 }
@@ -428,8 +435,12 @@ export interface NodeDisplacement {
     readonly ux: number;
     readonly uy: number;
     readonly uz: number;
-    /** Rotation about Z; non-zero only at beam nodes in two dimensions. */
+    /** Rotation about Z; non-zero at beam nodes in two dimensions and at `beam3d` nodes. */
     readonly rz: number;
+    /** Rotation about X; only present at `beam3d` nodes. */
+    readonly rx?: number;
+    /** Rotation about Y; only present at `beam3d` nodes. */
+    readonly ry?: number;
     readonly magnitude: number;
 }
 
@@ -439,8 +450,12 @@ export interface NodeReaction {
     readonly fx: number;
     readonly fy: number;
     readonly fz: number;
-    /** Reaction moment about Z; non-zero only at beam nodes in two dimensions. */
+    /** Reaction moment about Z; non-zero at beam nodes in two dimensions and at `beam3d` nodes. */
     readonly mz: number;
+    /** Reaction moment about X; only present at `beam3d` nodes. */
+    readonly mx?: number;
+    /** Reaction moment about Y; only present at `beam3d` nodes. */
+    readonly my?: number;
 }
 
 /**
@@ -457,6 +472,29 @@ export interface EndForces {
     readonly m2: number;
 }
 
+/**
+ * Local end forces of a spatial `beam3d` member in the member's local frame.
+ *
+ * `x` runs along the member, `z` follows the orientation convention. `v` is
+ * the local `y` shear and `m` the local `z` bending moment in [`EndForces`];
+ * here the full biaxial set is reported: `N` axial, `T` torsion about the
+ * local `x` axis, `Vy`/`Vz` transverse shears and `My`/`Mz` bending moments.
+ */
+export interface SpatialEndForces {
+    readonly n1: number;
+    readonly t1: number;
+    readonly vy1: number;
+    readonly vz1: number;
+    readonly my1: number;
+    readonly mz1: number;
+    readonly n2: number;
+    readonly t2: number;
+    readonly vy2: number;
+    readonly vz2: number;
+    readonly my2: number;
+    readonly mz2: number;
+}
+
 /** Member result. Axial force is positive in tension. */
 export interface ElementResult {
     readonly id: string;
@@ -468,6 +506,8 @@ export interface ElementResult {
     readonly stress: number;
     readonly strain: number;
     readonly endForces: EndForces;
+    /** Full six-component end forces; only present for `beam3d` members. */
+    readonly spatial?: SpatialEndForces;
     readonly maxAbsMoment: number;
 }
 
@@ -491,6 +531,10 @@ export interface SupportReaction {
     readonly fz: number;
     /** Reaction moment about Z. */
     readonly mz: number;
+    /** Reaction moment about X; only present at `beam3d` supports. */
+    readonly mx?: number;
+    /** Reaction moment about Y; only present at `beam3d` supports. */
+    readonly my?: number;
 }
 
 /** Translational resultant `(fx, fy, fz)`. */
@@ -500,16 +544,28 @@ export interface ForceResultant {
     readonly fz: number;
 }
 
+/** Rotational resultant `(mx, my, mz)` about the document origin. */
+export interface MomentResultant {
+    readonly mx: number;
+    readonly my: number;
+    readonly mz: number;
+}
+
 /**
  * Support reactions and the global force equilibrium check.
  * `unbalanced = reaction + applied` and `balanced` is true when every
- * component is within `tolerance`.
+ * component is within `tolerance`. For documents with `beam3d` members the
+ * moment resultants about the origin (including the `r × F` contributions)
+ * are reported as well.
  */
 export interface ReactionSummary {
     readonly supports: readonly SupportReaction[];
     readonly reaction: ForceResultant;
     readonly applied: ForceResultant;
     readonly unbalanced: ForceResultant;
+    readonly reactionMoment?: MomentResultant;
+    readonly appliedMoment?: MomentResultant;
+    readonly unbalancedMoment?: MomentResultant;
     readonly tolerance: number;
     readonly balanced: boolean;
 }
@@ -652,6 +708,12 @@ export interface SectionForces {
     readonly axialForce: number;
     readonly shear: number;
     readonly moment: number;
+    /** Torsion about the local `x` axis; only present for `beam3d` members. */
+    readonly torque?: number;
+    /** Shear along the local `z` axis; only present for `beam3d` members. */
+    readonly shearZ?: number;
+    /** Bending moment about the local `y` axis; only present for `beam3d` members. */
+    readonly momentY?: number;
 }
 
 /** Sampled internal forces of one element. */
@@ -1743,6 +1805,31 @@ export interface ElementAddRequest {
      * removes members that carry compression. Only valid for `truss` elements.
      */
     readonly tensionOnly?: boolean;
+    /**
+     * Weak-axis second moment of area (local `x–z` bending) for `beam3d`;
+     * defaults to `inertia`.
+     */
+    readonly inertiaWeak?: number;
+    /**
+     * Saint-Venant torsion constant `J` for `beam3d`; required unless the
+     * material section provides one.
+     */
+    readonly torsion?: number;
+    /**
+     * Reference vector `[x, y, z]` defining the local `z` axis for `beam3d`.
+     * The default is `(0, 0, 1)` with a `(0, 1, 0)` fallback for vertical
+     * members; the vector must not be parallel to the member axis.
+     */
+    readonly orientationVector?: readonly [number, number, number];
+    /** Rotation of the section about the member axis in radians for `beam3d`. */
+    readonly orientationAngle?: number;
+    /**
+     * Distributed load per unit length at the start node in the element's
+     * local `+z` direction. Only valid on `beam3d`.
+     */
+    readonly distributedLoadZ?: number;
+    /** Distributed load per unit length at the end node along local `+z`. */
+    readonly distributedLoadZEnd?: number;
 }
 
 /** Bending-moment release (hinge) at the ends of a two-dimensional beam. */
@@ -1863,6 +1950,10 @@ export interface MaterialSetRequest {
     readonly alpha?: number;
     /** Thermal conductivity `k` in `W/(m·K)`, used only by `heat()`. */
     readonly conductivity?: number;
+    /** Shear modulus `G` used by `beam3d` torsion; derived from `poissonsRatio` when omitted. */
+    readonly shearModulus?: number;
+    /** Poisson's ratio `nu` inside `(-1, 0.5)`, used to derive `shearModulus`. */
+    readonly poissonsRatio?: number;
     /** Parametric section geometry. */
     readonly section?: Section;
 }
@@ -1876,8 +1967,12 @@ export interface SupportAddRequest {
     readonly dx?: boolean;
     readonly dy?: boolean;
     readonly dz?: boolean;
-    /** Rotation about Z; only valid at beam nodes in two dimensions. */
+    /** Rotation about Z; only valid at beam nodes in two dimensions and at `beam3d` nodes. */
     readonly rz?: boolean;
+    /** Rotation about X; only valid at `beam3d` nodes. */
+    readonly rx?: boolean;
+    /** Rotation about Y; only valid at `beam3d` nodes. */
+    readonly ry?: boolean;
     /**
      * Enforced displacement along X; implies `dx`. Non-zero values model a
      * support settlement or a driven displacement.
@@ -1914,6 +2009,10 @@ export interface LoadAddRequest {
     readonly fz?: number;
     /** Concentrated moment about Z; only valid at beam nodes. */
     readonly mz?: number;
+    /** Concentrated moment about X; only valid at `beam3d` nodes. */
+    readonly mx?: number;
+    /** Concentrated moment about Y; only valid at `beam3d` nodes. */
+    readonly my?: number;
 }
 
 /** Request of `setGravity()`. The zero vector clears gravity. */

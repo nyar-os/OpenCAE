@@ -238,9 +238,9 @@ function analysisOption(ctx: CommandContext, b: Bound, dimension: Dimension): An
         switch (element) {
             case 'truss':
             case 'beam':
-                break;
+            case 'beam3d':
             case 'frame':
-                throw new NotImplementedError('3D frame element');
+                break;
             default:
                 throw failure(ctx, 'cli/invalid-option', 'unknownElement', { value: element });
         }
@@ -714,8 +714,14 @@ elementCommand
     .option('--A <A>', 'cli.opt.A')
     .option('--kind <kind>', 'cli.opt.kind')
     .option('--I <I>', 'cli.opt.I')
+    .option('--inertia-weak <Iy>', 'cli.opt.inertia-weak')
+    .option('--torsion <J>', 'cli.opt.torsion')
+    .option('--orientation-vector <x,y,z>', 'cli.opt.orientation-vector')
+    .option('--orientation-angle <theta>', 'cli.opt.orientation-angle')
     .option('--w <w>', 'cli.opt.w')
     .option('--w2 <w2>', 'cli.opt.w2')
+    .option('--distributed-load-z <wz>', 'cli.opt.distributed-load-z')
+    .option('--distributed-load-z-end <wz2>', 'cli.opt.distributed-load-z-end')
     .option('--dt <dT>', 'cli.opt.dt')
     .option('--dt-grad <dT>', 'cli.opt.dt-grad')
     .option('--w-from <s>', 'cli.opt.w-from')
@@ -727,7 +733,7 @@ elementCommand
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam] [--I <I>] [--w <w>] [--w2 <w2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]',
+                'element add <file> --id <id> --from <node> --to <node> [--kind truss|beam|beam3d] [--I <I>] [--inertia-weak <Iy>] [--torsion <J>] [--orientation-vector <x,y,z>] [--orientation-angle <theta>] [--w <w>] [--w2 <w2>] [--distributed-load-z <wz>] [--distributed-load-z-end <wz2>] [--dt <dT>] [--dt-grad <dT>] [--w-from <s>] [--w-to <s>] [--convection <h>] [--perimeter <P>] [--tension-only]',
             );
             const id = b.required('--id');
             const from = b.required('--from');
@@ -736,8 +742,14 @@ elementCommand
             const area = b.number('--A');
             const kind = elementKindOption(ctx, b);
             const inertia = b.number('--I');
+            const inertiaWeak = b.number('--inertia-weak');
+            const torsion = b.number('--torsion');
+            const orientationVector = orientationVectorOption(ctx, b);
+            const orientationAngle = b.number('--orientation-angle');
             const distributedLoad = b.number('--w');
             const distributedLoadEnd = b.number('--w2');
+            const distributedLoadZ = b.number('--distributed-load-z');
+            const distributedLoadZEnd = b.number('--distributed-load-z-end');
             const temperature = b.number('--dt');
             const temperatureGradient = b.number('--dt-grad');
             const distributedLoadFrom = b.number('--w-from');
@@ -757,8 +769,14 @@ elementCommand
                     area,
                     kind,
                     inertia,
+                    inertiaWeak,
+                    torsion,
+                    orientationVector,
+                    orientationAngle,
                     distributedLoad,
                     distributedLoadEnd,
+                    distributedLoadZ,
+                    distributedLoadZEnd,
                     distributedLoadFrom,
                     distributedLoadTo,
                     temperature,
@@ -1006,10 +1024,22 @@ function elementKindOption(ctx: CommandContext, b: Bound): ElementKind | undefin
     if (value === undefined) {
         return undefined;
     }
-    if (value === 'truss' || value === 'beam') {
+    if (value === 'truss' || value === 'beam' || value === 'beam3d') {
         return value;
     }
     throw failure(ctx, 'cli/invalid-option', 'unknownElement', { value });
+}
+
+function orientationVectorOption(ctx: CommandContext, b: Bound): readonly [number, number, number] | undefined {
+    const value = b.raw('--orientation-vector');
+    if (value === undefined) {
+        return undefined;
+    }
+    const parts = value.split(',').map((entry) => Number(entry.trim()));
+    if (parts.length !== 3 || !parts.every((axis) => Number.isFinite(axis))) {
+        throw failure(ctx, 'cli/invalid-option', 'invalidOrientationVector', { value });
+    }
+    return [parts[0] as number, parts[1] as number, parts[2] as number];
 }
 
 const materialCommand = cli.command('material', 'cli.cmd.material').actionCtx(groupAction('material', 'set or preset'));
@@ -1022,6 +1052,8 @@ materialCommand
     .option('--allowable <s>', 'cli.opt.allowable')
     .option('--alpha <a>', 'cli.opt.alpha')
     .option('--conductivity <k>', 'cli.opt.conductivity')
+    .option('--shear-modulus <G>', 'cli.opt.shear-modulus')
+    .option('--poissons-ratio <nu>', 'cli.opt.poissons-ratio')
     .option('--section <shape>', 'cli.opt.section')
     .option('--width <w>', 'cli.opt.width')
     .option('--height <h>', 'cli.opt.height')
@@ -1036,7 +1068,7 @@ materialCommand
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
-            const file = b.file('material set <file> --E <E> --A <A> [--density <rho>] [--name <name>]');
+            const file = b.file('material set <file> --E <E> --A <A> [--density <rho>] [--name <name>] [--shear-modulus <G>] [--poissons-ratio <nu>]');
             const youngsModulus = b.requiredNumber('--E');
             const area = b.requiredNumber('--A');
             const density = b.number('--density');
@@ -1044,6 +1076,8 @@ materialCommand
             const allowableStress = b.number('--allowable');
             const alpha = b.number('--alpha');
             const conductivity = b.number('--conductivity');
+            const shearModulus = b.number('--shear-modulus');
+            const poissonsRatio = b.number('--poissons-ratio');
             const section = b.section();
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
@@ -1055,6 +1089,8 @@ materialCommand
                     allowableStress,
                     alpha,
                     conductivity,
+                    shearModulus,
+                    poissonsRatio,
                     section,
                 });
                 ctx.stdout(
@@ -1395,17 +1431,21 @@ supportCommand
     .option('--dy', 'cli.opt.dy')
     .option('--dz', 'cli.opt.dz')
     .option('--rz', 'cli.opt.rz')
+    .option('--rx', 'cli.opt.rx')
+    .option('--ry', 'cli.opt.ry')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
+                'support add <file> --node <node> [--dx] [--dy] [--dz] [--rz] [--rx] [--ry] [--direction <nx,ny>] [--ux <v>] [--uy <v>] [--uz <v>] [--rotation <v>] [--kx <k>] [--ky <k>] [--kz <k>] [--kr <k>]',
             );
             const node = b.required('--node');
             const dx = b.flag('--dx');
             const dy = b.flag('--dy');
             const dz = b.flag('--dz');
             const rz = b.flag('--rz');
+            const rx = b.flag('--rx');
+            const ry = b.flag('--ry');
             const ux = b.number('--ux');
             const uy = b.number('--uy');
             const uz = b.number('--uz');
@@ -1421,6 +1461,8 @@ supportCommand
                 (dx ||
                     dy ||
                     dz ||
+                    rx ||
+                    ry ||
                     rz ||
                     ux !== undefined ||
                     uy !== undefined ||
@@ -1435,6 +1477,8 @@ supportCommand
                 !dx &&
                 !dy &&
                 !dz &&
+                !rx &&
+                !ry &&
                 !rz &&
                 ux === undefined &&
                 uy === undefined &&
@@ -1451,6 +1495,8 @@ supportCommand
                     dx,
                     dy,
                     dz,
+                    rx,
+                    ry,
                     rz,
                     ux,
                     uy,
@@ -1468,6 +1514,8 @@ supportCommand
                         dx: String(dx),
                         dy: String(dy),
                         dz: String(dz),
+                        rx: String(rx),
+                        ry: String(ry),
                         rz: String(rz),
                         revision: String(summary.revision),
                     }),
@@ -1501,18 +1549,22 @@ loadCommand
     .option('--fy <fy>', 'cli.opt.fy')
     .option('--fz <fz>', 'cli.opt.fz')
     .option('--mz <mz>', 'cli.opt.mz')
+    .option('--mx <mx>', 'cli.opt.mx')
+    .option('--my <my>', 'cli.opt.my')
     .actionCtx(async (options, _args, ctx) =>
         attempt(ctx, async () => {
             const b = bind(ctx, options);
-            const file = b.file('load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>]');
+            const file = b.file('load add <file> --node <node> [--fx <fx>] [--fy <fy>] [--fz <fz>] [--mz <mz>] [--mx <mx>] [--my <my>]');
             const node = b.required('--node');
             const fx = b.number('--fx');
             const fy = b.number('--fy');
             const fz = b.number('--fz');
             const mz = b.number('--mz');
+            const mx = b.number('--mx');
+            const my = b.number('--my');
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
-                const summary = document.addLoad({ node, fx, fy, fz, mz });
+                const summary = document.addLoad({ node, fx, fy, fz, mz, mx, my });
                 ctx.stdout(b.message('loadAdded', { node, revision: String(summary.revision) }));
                 return 0;
             });
@@ -1771,7 +1823,7 @@ cli
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'solve <file> [--out report.json] [--analysis static|modal|buckling|tension-only] [--modes N] [--iterations N] [--tolerance t] [--element truss|beam] [--dimension 2|3]',
+                'solve <file> [--out report.json] [--analysis static|modal|buckling|tension-only] [--modes N] [--iterations N] [--tolerance t] [--element truss|beam|beam3d] [--dimension 2|3]',
             );
             return withSession(async (session) => {
                 const document = await openDocument(session, file);
@@ -2236,7 +2288,9 @@ cli
     .command('frame|frame3d', 'cli.cmd.frame')
     .actionCtx(async (_options, _args, ctx) =>
         attempt(ctx, () => {
-            throw new NotImplementedError('3D frame element');
+            throw failure(ctx, 'cli/unknown-command', 'unknownCommand', {
+                command: ctx.commandPath[1] ?? 'frame',
+            });
         }),
     );
 

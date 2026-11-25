@@ -143,11 +143,11 @@ fn session_round_trip_preserves_patterns_and_combinations() {
         vec![
             LoadPattern {
                 name: "live".to_string(),
-                loads: vec![Load { node: "n2".to_string(), fx: 1000.0, fy: 0.0, fz: 0.0, mz: 0.0 }],
+                loads: vec![Load { node: "n2".to_string(), fx: 1000.0, fy: 0.0, fz: 0.0, mx: None, my: None, mz: 0.0 }],
             },
             LoadPattern {
                 name: "wind".to_string(),
-                loads: vec![Load { node: "n2".to_string(), fx: -400.0, fy: 0.0, fz: 0.0, mz: 0.0 }],
+                loads: vec![Load { node: "n2".to_string(), fx: -400.0, fy: 0.0, fz: 0.0, mx: None, my: None, mz: 0.0 }],
             },
         ]
     );

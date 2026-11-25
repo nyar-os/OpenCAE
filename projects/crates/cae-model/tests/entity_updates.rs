@@ -35,6 +35,8 @@ fn material(alpha: Option<f64>, section: Option<Section>) -> Material {
         allowable_stress: None,
         alpha,
         conductivity: None,
+        shear_modulus: None,
+        poissons_ratio: None,
         section,
     }
 }

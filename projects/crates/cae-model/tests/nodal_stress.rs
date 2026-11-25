@@ -30,6 +30,8 @@ fn material(section: Section) -> Material {
         allowable_stress: Some(235.0),
         alpha: None,
         conductivity: None,
+        shear_modulus: None,
+        poissons_ratio: None,
         section: Some(section),
     }
 }

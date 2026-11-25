@@ -175,6 +175,8 @@ fn restrained_thermal_bar() -> Model {
             allowable_stress: None,
             alpha: Some(ALPHA),
             conductivity: None,
+            shear_modulus: None,
+            poissons_ratio: None,
             section: None,
         })
         .expect("material");

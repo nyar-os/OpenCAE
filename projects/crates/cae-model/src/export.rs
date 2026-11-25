@@ -35,6 +35,11 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CaeError> {
 /// support (`node,fx,fy,fz,mz`) using the signs of the reaction summary.
 /// `forces.csv` writes the sampled internal forces at the default 11 stations
 /// per element; use [`export_csv_with_stations`] to change the sampling.
+///
+/// For documents that contain `beam3d` members the tables gain the extra
+/// columns `rx,ry` (`nodes.csv`), `mx,my` (`reactions.csv`) and
+/// `torque,shearZ,momentY` (`forces.csv`); two-dimensional exports are
+/// unchanged.
 pub fn export_csv(model: &Model, solution: &Solution, directory: &Path) -> Result<(), CaeError> {
     export_csv_with_stations(model, solution, directory, 11)
 }
@@ -52,18 +57,32 @@ pub fn export_csv_with_stations(model: &Model, solution: &Solution, directory: &
         CaeError::new("io/write", format!("cannot create export directory `{}`: {error}", directory.display()))
     })?;
 
-    let mut nodes = String::from("id,x,y,z,ux,uy,uz\n");
+    // `beam3d` documents carry rotational components that the two-dimensional
+    // tables never see; they are appended as extra columns only when present,
+    // so existing truss and beam exports stay byte-identical.
+    let spatial_nodes = solution.nodes.iter().any(|displacement| displacement.rx.is_some());
+    let mut nodes = String::from("id,x,y,z,ux,uy,uz");
+    if spatial_nodes {
+        nodes.push_str(",rx,ry");
+    }
+    nodes.push('\n');
     for (node, displacement) in model.nodes.iter().zip(&solution.nodes) {
         let _ = writeln!(
             nodes,
-            "{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{}{}",
             csv_field(&node.id),
             node.x,
             node.y,
             node.z,
             displacement.ux,
             displacement.uy,
-            displacement.uz
+            displacement.uz,
+            if spatial_nodes {
+                format!(",{},{}", displacement.rx.unwrap_or_default(), displacement.ry.unwrap_or_default())
+            }
+            else {
+                String::new()
+            }
         );
     }
 
@@ -82,18 +101,43 @@ pub fn export_csv_with_stations(model: &Model, solution: &Solution, directory: &
         );
     }
 
-    let mut reactions = String::from("node,fx,fy,fz,mz\n");
+    let spatial_reactions = solution.reaction_summary.supports.iter().any(|support| support.mx.is_some());
+    let mut reactions = String::from("node,fx,fy,fz,mz");
+    if spatial_reactions {
+        reactions.push_str(",mx,my");
+    }
+    reactions.push('\n');
     for support in &solution.reaction_summary.supports {
-        let _ = writeln!(reactions, "{},{},{},{},{}", csv_field(&support.node), support.fx, support.fy, support.fz, support.mz);
+        let _ = writeln!(
+            reactions,
+            "{},{},{},{},{}{}",
+            csv_field(&support.node),
+            support.fx,
+            support.fy,
+            support.fz,
+            support.mz,
+            if spatial_reactions {
+                format!(",{},{}", support.mx.unwrap_or_default(), support.my.unwrap_or_default())
+            }
+            else {
+                String::new()
+            }
+        );
     }
 
     let diagrams = solve_internal_forces(model, stations)?;
-    let mut forces = String::from("element,from,to,kind,position,axialForce,shear,moment\n");
+    let spatial_forces =
+        diagrams.elements.iter().any(|element| element.stations.iter().any(|station| station.torque.is_some()));
+    let mut forces = String::from("element,from,to,kind,position,axialForce,shear,moment");
+    if spatial_forces {
+        forces.push_str(",torque,shearZ,momentY");
+    }
+    forces.push('\n');
     for element in &diagrams.elements {
         for station in &element.stations {
             let _ = writeln!(
                 forces,
-                "{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{}{}",
                 csv_field(&element.id),
                 csv_field(&element.from),
                 csv_field(&element.to),
@@ -101,7 +145,18 @@ pub fn export_csv_with_stations(model: &Model, solution: &Solution, directory: &
                 station.position,
                 station.axial_force,
                 station.shear,
-                station.moment
+                station.moment,
+                if spatial_forces {
+                    format!(
+                        ",{},{},{}",
+                        station.torque.unwrap_or_default(),
+                        station.shear_z.unwrap_or_default(),
+                        station.moment_y.unwrap_or_default()
+                    )
+                }
+                else {
+                    String::new()
+                }
             );
         }
     }
@@ -213,9 +268,10 @@ pub fn export_md(
     let _ = writeln!(text, "| Elements | {} |", model.elements.len());
     let _ = writeln!(
         text,
-        "| Element types | truss {} / beam {} |",
+        "| Element types | truss {} / beam {} / beam3d {} |",
         model.elements.iter().filter(|element| element.kind == ElementKind::Truss).count(),
-        model.elements.iter().filter(|element| element.kind == ElementKind::Beam).count()
+        model.elements.iter().filter(|element| element.kind == ElementKind::Beam).count(),
+        model.elements.iter().filter(|element| element.kind == ElementKind::Beam3D).count()
     );
     let _ = writeln!(text, "| Support entries | {} |", model.supports.len());
     let _ = writeln!(text, "| Concentrated load entries | {} |", model.loads.len());
@@ -274,31 +330,57 @@ pub fn export_md(
     );
     let _ = writeln!(text, "| Total strain energy | {} |", format_float(solution.strain_energy));
 
+    // `beam3d` results carry rotational components that the two-dimensional
+    // tables never see; they are appended as extra columns only when present.
+    let spatial_nodes = solution.nodes.iter().any(|node| node.rx.is_some());
     text.push_str("\n## Nodal Displacements\n\n");
-    text.push_str("| Node | ux | uy | uz | rz | Magnitude |\n| --- | --- | --- | --- | --- | --- |\n");
+    text.push_str(if spatial_nodes {
+        "| Node | ux | uy | uz | rx | ry | rz | Magnitude |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    }
+    else {
+        "| Node | ux | uy | uz | rz | Magnitude |\n| --- | --- | --- | --- | --- | --- |\n"
+    });
     for node in &solution.nodes {
         let _ = writeln!(
             text,
-            "| {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {}{} | {} |",
             escape_markdown(&node.id),
             format_float(node.ux),
             format_float(node.uy),
             format_float(node.uz),
+            if spatial_nodes {
+                format!("{} | {} | ", node.rx.unwrap_or_default(), node.ry.unwrap_or_default())
+            }
+            else {
+                String::new()
+            },
             format_float(node.rz),
             format_float(node.magnitude)
         );
     }
 
+    let spatial_reactions = solution.reactions.iter().any(|reaction| reaction.mx.is_some());
     text.push_str("\n## Nodal Reactions\n\n");
-    text.push_str("| Node | fx | fy | fz | mz |\n| --- | --- | --- | --- | --- |\n");
+    text.push_str(if spatial_reactions {
+        "| Node | fx | fy | fz | mx | my | mz |\n| --- | --- | --- | --- | --- | --- | --- |\n"
+    }
+    else {
+        "| Node | fx | fy | fz | mz |\n| --- | --- | --- | --- | --- |\n"
+    });
     for reaction in &solution.reactions {
         let _ = writeln!(
             text,
-            "| {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {}{} |",
             escape_markdown(&reaction.node),
             format_float(reaction.fx),
             format_float(reaction.fy),
             format_float(reaction.fz),
+            if spatial_reactions {
+                format!("{} | {} | ", reaction.mx.unwrap_or_default(), reaction.my.unwrap_or_default())
+            }
+            else {
+                String::new()
+            },
             format_float(reaction.mz)
         );
     }
@@ -1014,9 +1096,10 @@ pub fn export_html(
     let _ = writeln!(text, "<tr><td>Elements</td><td>{}</td></tr>", model.elements.len());
     let _ = writeln!(
         text,
-        "<tr><td>Element types</td><td>truss {} / beam {}</td></tr>",
+        "<tr><td>Element types</td><td>truss {} / beam {} / beam3d {}</td></tr>",
         model.elements.iter().filter(|element| element.kind == ElementKind::Truss).count(),
-        model.elements.iter().filter(|element| element.kind == ElementKind::Beam).count()
+        model.elements.iter().filter(|element| element.kind == ElementKind::Beam).count(),
+        model.elements.iter().filter(|element| element.kind == ElementKind::Beam3D).count()
     );
     let _ = writeln!(text, "<tr><td>Support entries</td><td>{}</td></tr>", model.supports.len());
     let _ = writeln!(text, "<tr><td>Concentrated load entries</td><td>{}</td></tr>", model.loads.len());
@@ -1083,35 +1166,64 @@ pub fn export_html(
     let _ = writeln!(text, "<tr><td>Total strain energy</td><td>{}</td></tr>", format_float(solution.strain_energy));
     text.push_str("</table>\n</section>\n");
 
-    text.push_str(
-        "<section>\n<h2>Nodal Displacements</h2>\n<table>\n\
-         <tr><th>Node</th><th>ux</th><th>uy</th><th>uz</th><th>rz</th><th>Magnitude</th></tr>\n",
-    );
+    let spatial_nodes = solution.nodes.iter().any(|node| node.rx.is_some());
+    text.push_str("<section>\n<h2>Nodal Displacements</h2>\n<table>\n");
+    text.push_str(if spatial_nodes {
+        "<tr><th>Node</th><th>ux</th><th>uy</th><th>uz</th><th>rx</th><th>ry</th><th>rz</th><th>Magnitude</th></tr>\n"
+    }
+    else {
+        "<tr><th>Node</th><th>ux</th><th>uy</th><th>uz</th><th>rz</th><th>Magnitude</th></tr>\n"
+    });
     for node in &solution.nodes {
         let _ = writeln!(
             text,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}<td>{}</td><td>{}</td></tr>",
             escape_html(&node.id),
             format_float(node.ux),
             format_float(node.uy),
             format_float(node.uz),
+            if spatial_nodes {
+                format!(
+                    "<td>{}</td><td>{}</td>",
+                    format_float(node.rx.unwrap_or_default()),
+                    format_float(node.ry.unwrap_or_default())
+                )
+            }
+            else {
+                String::new()
+            },
             format_float(node.rz),
             format_float(node.magnitude)
         );
     }
     text.push_str("</table>\n</section>\n");
 
-    text.push_str(
-        "<section>\n<h2>Nodal Reactions</h2>\n<table>\n<tr><th>Node</th><th>fx</th><th>fy</th><th>fz</th><th>mz</th></tr>\n",
-    );
+    let spatial_reactions = solution.reactions.iter().any(|reaction| reaction.mx.is_some());
+    text.push_str("<section>\n<h2>Nodal Reactions</h2>\n<table>\n");
+    text.push_str(if spatial_reactions {
+        "<tr><th>Node</th><th>fx</th><th>fy</th><th>fz</th><th>mx</th><th>my</th><th>mz</th></tr>\n"
+    }
+    else {
+        "<tr><th>Node</th><th>fx</th><th>fy</th><th>fz</th><th>mz</th></tr>\n"
+    });
     for reaction in &solution.reactions {
         let _ = writeln!(
             text,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}<td>{}</td></tr>",
             escape_html(&reaction.node),
             format_float(reaction.fx),
             format_float(reaction.fy),
             format_float(reaction.fz),
+            if spatial_reactions {
+                format!(
+                    "<td>{}</td><td>{}</td>",
+                    format_float(reaction.mx.unwrap_or_default()),
+                    format_float(reaction.my.unwrap_or_default())
+                )
+            }
+            else {
+                String::new()
+            },
             format_float(reaction.mz)
         );
     }

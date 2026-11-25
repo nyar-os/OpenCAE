@@ -33,6 +33,8 @@ fn cantilever(section: Option<Section>, tip_axial: Option<f64>) -> Model {
             allowable_stress: Some(235.0),
             alpha: None,
             conductivity: None,
+            shear_modulus: None,
+            poissons_ratio: None,
             section,
         })
         .expect("material");

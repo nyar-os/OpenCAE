@@ -182,8 +182,14 @@ fn validation_reports_required_error_codes() {
         material: None,
         kind: cae_model::ElementKind::Truss,
         inertia: None,
+        inertia_weak: None,
+        torsion: None,
+        orientation_vector: None,
+        orientation_angle: None,
         distributed_load: None,
         distributed_load_end: None,
+        distributed_load_z: None,
+        distributed_load_z_end: None,
         distributed_load_from: None,
         distributed_load_to: None,
         temperature: None,
@@ -309,8 +315,8 @@ fn capability_matrix_is_explicit_about_unsupported_features() {
     assert_eq!(capabilities["solver"]["truss2d"], "supported");
     assert_eq!(capabilities["solver"]["truss3d"], "supported");
     assert_eq!(capabilities["solver"]["beam2d"], "supported");
-    assert_eq!(capabilities["solver"]["beam3d"], "unsupported");
-    assert_eq!(capabilities["solver"]["frame3d"], "unsupported");
+    assert_eq!(capabilities["solver"]["beam3d"], "supported");
+    assert_eq!(capabilities["solver"]["frame3d"], "supported");
     assert_eq!(capabilities["solver"]["modal"], "supported");
     assert_eq!(capabilities["solver"]["selfWeight"], "supported");
     assert_eq!(capabilities["solver"]["prescribedDisplacement"], "supported");

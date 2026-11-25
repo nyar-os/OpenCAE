@@ -274,15 +274,23 @@ fn node_remove(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &summary)
 }
 
-/// Adds a truss or beam element to a document and saves it.
+/// Adds a truss, beam or spatial frame element to a document and saves it.
 ///
-/// The request accepts `kind` (`"truss"` or `"beam"`, default `"truss"`),
-/// `inertia` (required for beams), `distributedLoad` (beam transverse load per
-/// unit length in local `+y` at the start node), `distributedLoadEnd` (the
-/// value at the end node, forming a linearly varying load), `temperature`
-/// (uniform temperature change in kelvin), `temperatureGradient` (linear
-/// difference between the local `+y` and `-y` extreme fibres), `convection`
-/// (surface convection `h`) and `perimeter` (exposed perimeter).
+/// The request accepts `kind` (`"truss"`, `"beam"` or `"beam3d"`, default
+/// `"truss"`), `inertia` (required for beams; the strong-axis value for
+/// `beam3d`), `distributedLoad` (transverse load per unit length in local `+y`
+/// at the start node), `distributedLoadEnd` (the value at the end node, forming
+/// a linearly varying load), `temperature` (uniform temperature change in
+/// kelvin), `temperatureGradient` (linear difference between the local `+y` and
+/// `-y` extreme fibres), `convection` (surface convection `h`) and `perimeter`
+/// (exposed perimeter).
+///
+/// `beam3d` additionally accepts `inertiaWeak` (weak-axis inertia, defaults to
+/// `inertia`), `torsion` (Saint-Venant constant `J`, required unless the
+/// material section provides one), `orientationVector` (`[x, y, z]` reference
+/// vector for the local axes), `orientationAngle` (rotation of the section
+/// about the member axis in radians), `distributedLoadZ` and
+/// `distributedLoadZEnd` (transverse load per unit length along local `+z`).
 #[function]
 fn element_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -303,22 +311,61 @@ fn element_add(ctx: CallContext) -> Result<JsValue> {
     let convection = number_field(&request, "convection")?;
     let perimeter = number_field(&request, "perimeter")?;
     let tension_only = request.get("tensionOnly").and_then(Value::as_bool).unwrap_or(false);
+    let inertia_weak = number_field(&request, "inertiaWeak")?;
+    let torsion = number_field(&request, "torsion")?;
+    let orientation_vector = vector3_field(&request, "orientationVector")?;
+    let orientation_angle = number_field(&request, "orientationAngle")?;
+    let distributed_load_z = number_field(&request, "distributedLoadZ")?;
+    let distributed_load_z_end = number_field(&request, "distributedLoadZEnd")?;
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let mut summary = session
-        .add_element_thermal(
-            &id,
-            &from,
-            &to,
-            youngs_modulus,
-            area,
-            kind,
-            inertia,
-            distributed_load,
-            distributed_load_end,
-            temperature,
-        )
-        .map_err(fail)?;
+    let mut summary = if kind == ElementKind::Beam3D {
+        session
+            .add_frame_element(
+                &id,
+                &from,
+                &to,
+                youngs_modulus,
+                area,
+                inertia,
+                inertia_weak,
+                torsion,
+                orientation_vector,
+                orientation_angle,
+                distributed_load,
+                distributed_load_end,
+                distributed_load_z,
+                distributed_load_z_end,
+            )
+            .map_err(fail)?
+    }
+    else {
+        if inertia_weak.is_some() || torsion.is_some() || orientation_vector.is_some() || orientation_angle.is_some() {
+            return Err(argument_error(
+                "`inertiaWeak`, `torsion`, `orientationVector` and `orientationAngle` are only valid for kind `beam3d`",
+            ));
+        }
+        if distributed_load_z.is_some() || distributed_load_z_end.is_some() {
+            return Err(argument_error("`distributedLoadZ` and `distributedLoadZEnd` are only valid for kind `beam3d`"));
+        }
+        session
+            .add_element_thermal(
+                &id,
+                &from,
+                &to,
+                youngs_modulus,
+                area,
+                kind,
+                inertia,
+                distributed_load,
+                distributed_load_end,
+                temperature,
+            )
+            .map_err(fail)?
+    };
+    if kind == ElementKind::Beam3D && temperature.is_some() {
+        session.set_element_temperature(&id, temperature).map_err(fail)?;
+    }
     if temperature_gradient.is_some() {
         session.set_element_temperature_gradient(&id, temperature_gradient).map_err(fail)?;
     }
@@ -498,8 +545,8 @@ fn node_merge(ctx: CallContext) -> Result<JsValue> {
 /// Replaces the global material of a document and saves it.
 ///
 /// The request accepts `youngsModulus`, `area`, optional `density`, `name`,
-/// `allowableStress` and a parametric `section` object. Values that are omitted
-/// keep their current document value.
+/// `allowableStress`, `shearModulus`, `poissonsRatio` and a parametric
+/// `section` object. Values that are omitted keep their current document value.
 #[function]
 fn material_set(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -510,6 +557,8 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
     let allowable_stress = number_field(&request, "allowableStress")?;
     let alpha = number_field(&request, "alpha")?;
     let conductivity = number_field(&request, "conductivity")?;
+    let shear_modulus = number_field(&request, "shearModulus")?;
+    let poissons_ratio = number_field(&request, "poissonsRatio")?;
     let section = section_field(&request)?;
     let name = request.get("name").and_then(Value::as_str).map(str::to_string);
     let mut session = OpenCae::new(OpenCaeOptions::default());
@@ -522,6 +571,8 @@ fn material_set(ctx: CallContext) -> Result<JsValue> {
         allowable_stress: allowable_stress.or(summary.material.allowable_stress),
         alpha: alpha.or(summary.material.alpha),
         conductivity: conductivity.or(summary.material.conductivity),
+        shear_modulus: shear_modulus.or(summary.material.shear_modulus),
+        poissons_ratio: poissons_ratio.or(summary.material.poissons_ratio),
         section: section.or(summary.material.section),
     };
     let summary = session.set_material_data(material).map_err(fail)?;
@@ -577,6 +628,20 @@ fn section_properties(ctx: CallContext) -> Result<JsValue> {
     };
     let report = section_report(section, units).map_err(fail)?;
     respond(&ctx, &report)
+}
+
+fn vector3_field(request: &Value, name: &str) -> Result<Option<[f64; 3]>> {
+    match request.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(values)) if values.len() == 3 => {
+            let mut vector = [0.0_f64; 3];
+            for (slot, value) in vector.iter_mut().zip(values) {
+                *slot = value.as_f64().ok_or_else(|| argument_error(&format!("`{name}` must be an array of three numbers")))?;
+            }
+            Ok(Some(vector))
+        }
+        Some(_) => Err(argument_error(&format!("`{name}` must be an array of three numbers"))),
+    }
 }
 
 fn section_field(request: &Value) -> Result<Option<Section>> {
@@ -819,7 +884,8 @@ fn polygon_points_field(request: &Value) -> Result<Vec<(f64, f64)>> {
 /// imply the matching constraint; when they are present the entry is written
 /// through the prescribed-displacement path. `kx`, `ky`, `kz` and `kr` add
 /// linear elastic spring stiffness without constraining the matching degree of
-/// freedom.
+/// freedom. `rx` and `ry` constrain the additional rotations of a `beam3d`
+/// node; they require a three-dimensional document with frame members.
 #[function]
 fn support_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -829,6 +895,8 @@ fn support_add(ctx: CallContext) -> Result<JsValue> {
     let dy = boolean_field(&request, "dy")?;
     let dz = boolean_field(&request, "dz")?;
     let rz = boolean_field(&request, "rz")?;
+    let rx = boolean_field(&request, "rx")?;
+    let ry = boolean_field(&request, "ry")?;
     let ux = number_field(&request, "ux")?;
     let uy = number_field(&request, "uy")?;
     let uz = number_field(&request, "uz")?;
@@ -850,15 +918,18 @@ fn support_add(ctx: CallContext) -> Result<JsValue> {
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
     if let Some((nx, ny)) = direction {
-        if dx || dy || dz || rz || prescribed || spring {
+        if dx || dy || dz || rz || rx || ry || prescribed || spring {
             return Err(argument_error(
-                "`direction` is an independent inclined-support constraint and cannot be combined with `dx`, `dy`, `dz`, `rz`, a prescribed displacement or a spring",
+                "`direction` is an independent inclined-support constraint and cannot be combined with `dx`, `dy`, `dz`, `rx`, `ry`, `rz`, a prescribed displacement or a spring",
             ));
         }
         let summary = session.add_support_direction(&node, nx, ny).map_err(fail)?;
         return respond(&ctx, &summary);
     }
-    if dx || dy || dz || rz {
+    if rx || ry {
+        session.add_support_frame(&node, dx, dy, dz, rx, ry, rz).map_err(fail)?;
+    }
+    else if dx || dy || dz || rz {
         session.add_support_full(&node, dx, dy, dz, rz).map_err(fail)?;
     }
     if prescribed {
@@ -882,6 +953,9 @@ fn support_remove(ctx: CallContext) -> Result<JsValue> {
 }
 
 /// Adds or updates a concentrated load of a document and saves it.
+///
+/// `mx` and `my` are nodal couples about the global `x` and `y` axes and are
+/// only meaningful at nodes touched by a `beam3d` member.
 #[function]
 fn load_add(ctx: CallContext) -> Result<JsValue> {
     let path = text(&ctx, 0)?;
@@ -891,9 +965,16 @@ fn load_add(ctx: CallContext) -> Result<JsValue> {
     let fy = number_field(&request, "fy")?;
     let fz = number_field(&request, "fz")?;
     let mz = number_field(&request, "mz")?;
+    let mx = number_field(&request, "mx")?;
+    let my = number_field(&request, "my")?;
     let mut session = OpenCae::new(OpenCaeOptions::default());
     session.open(Path::new(&path)).map_err(fail)?;
-    let summary = session.add_load_full(&node, fx, fy, fz, mz).map_err(fail)?;
+    let summary = if mx.is_some() || my.is_some() {
+        session.add_load_frame(&node, fx, fy, fz, mx, my, mz).map_err(fail)?
+    }
+    else {
+        session.add_load_full(&node, fx, fy, fz, mz).map_err(fail)?
+    };
     respond(&ctx, &summary)
 }
 
@@ -945,7 +1026,7 @@ fn element_kind_field(request: &Value) -> Result<ElementKind> {
     match request.get("kind") {
         None | Some(Value::Null) => Ok(ElementKind::Truss),
         Some(Value::String(raw)) => raw.parse::<ElementKind>().map_err(fail),
-        Some(_) => Err(argument_error("`kind` must be `truss` or `beam`")),
+        Some(_) => Err(argument_error("`kind` must be `truss`, `beam` or `beam3d`")),
     }
 }
 

@@ -82,6 +82,8 @@ fn load_case_summary_reports_gravity_dominated_cases() {
             allowable_stress: None,
             alpha: None,
             conductivity: None,
+            shear_modulus: None,
+            poissons_ratio: None,
             section: None,
         })
         .expect("material");

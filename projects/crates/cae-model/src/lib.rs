@@ -1,5 +1,5 @@
-//! OpenCAE: an honest small-displacement finite element solver for trusses and
-//! two-dimensional beams.
+//! OpenCAE: an honest small-displacement finite element solver for trusses,
+//! two-dimensional beams and spatial frames.
 //!
 //! This crate implements a deliberately verifiable subset of structural
 //! analysis:
@@ -7,6 +7,11 @@
 //! * two- or three-dimensional truss members carrying axial force only;
 //! * two-dimensional Euler-Bernoulli beams with axial, shear and bending
 //!   stiffness, uniform transverse loads and endpoint moments;
+//! * spatial `beam3d` frame members with six degrees of freedom per node
+//!   (axial, torsion and bending about both section axes), local-to-global
+//!   coordinate transforms with an orientation reference vector and angle,
+//!   transverse loads along local `+y` and `+z`, nodal couples and end-force
+//!   results `N`, `T`, `Vy`, `Vz`, `My`, `Mz`;
 //! * linear elastic material behaviour and a single static load case;
 //! * self-weight body loads;
 //! * uniform member temperature changes with linear thermal expansion
@@ -36,9 +41,9 @@
 //! * direct stiffness assembly with a dense, partially pivoted Gaussian
 //!   elimination solver written in this crate.
 //!
-//! Three-dimensional beams, frames, material nonlinearity, transient heat
-//! transfer (radiation and time stepping), contact and solver-specific import
-//! and export formats (STEP, Nastran, ...) are **not** implemented. A documented
+//! Material nonlinearity, transient heat transfer (radiation and time
+//! stepping), contact and solver-specific import and export formats (STEP,
+//! Nastran, ...) are **not** implemented. A documented
 //! subset of Abaqus `.inp` files can be imported with [`import_abaqus_file`];
 //! every recognised but unrepresented feature is reported as an
 //! [`ImportLoss`]. See [`CAPABILITIES_JSON`] for the machine-readable
@@ -100,18 +105,18 @@ pub use crate::{
         InfluenceSample, InfluenceTrainExtreme, InfluenceTrainRequest, InfluenceTrainSolution, InternalForceSolution,
         LOAD_CASE_REPORT_FORMAT, LOAD_CASE_REPORT_VERSION, LoadCaseResult, LoadCaseSummary, MATRIX_REPORT_FORMAT,
         MATRIX_REPORT_VERSION, MODAL_REPORT_FORMAT, MODAL_REPORT_VERSION, MODEL_SUMMARY_FORMAT, MODEL_SUMMARY_VERSION,
-        MatrixDof, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape, ModelSummaryReport, NODAL_STRESS_REPORT_FORMAT,
-        NODAL_STRESS_REPORT_VERSION, NONLINEAR_REPORT_FORMAT, NONLINEAR_REPORT_VERSION, NodalStressGoverning,
-        NodalStressSolution, NodeDisplacement, NodeEnvelope, NodeFrequencyResponse, NodeReaction, NodeStress,
-        NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, RESPONSE_SPECTRUM_REPORT_FORMAT, RESPONSE_SPECTRUM_REPORT_VERSION,
-        ReactionComponent, ReactionSummary, ResponseSpectrumSolution, STRESS_REPORT_FORMAT, STRESS_REPORT_VERSION,
-        SectionComponent, SectionForces, Solution, SpectrumCombination, SpectrumMode, SpectrumPoint, StationStress,
-        StressGoverning, StressSolution, SupportReaction, SystemMatrices, TENSION_ONLY_REPORT_FORMAT,
-        TENSION_ONLY_REPORT_VERSION, TensionOnlyElement, TensionOnlySolution, solve, solve_buckling,
-        solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection, solve_frequency_response,
-        solve_heat, solve_influence_line, solve_influence_line_train, solve_internal_forces, solve_matrices, solve_modal,
-        solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress, solve_tension_only, summarize_load_cases,
-        summarize_model,
+        MatrixDof, MaxAxialForce, MaxMoment, ModalSolution, Mode, ModeShape, ModelSummaryReport, MomentResultant,
+        NODAL_STRESS_REPORT_FORMAT, NODAL_STRESS_REPORT_VERSION, NONLINEAR_REPORT_FORMAT, NONLINEAR_REPORT_VERSION,
+        NodalStressGoverning, NodalStressSolution, NodeDisplacement, NodeEnvelope, NodeFrequencyResponse, NodeReaction,
+        NodeStress, NonlinearSolution, REPORT_FORMAT, REPORT_VERSION, RESPONSE_SPECTRUM_REPORT_FORMAT,
+        RESPONSE_SPECTRUM_REPORT_VERSION, ReactionComponent, ReactionSummary, ResponseSpectrumSolution, STRESS_REPORT_FORMAT,
+        STRESS_REPORT_VERSION, SectionComponent, SectionForces, Solution, SpatialEndForces, SpectrumCombination, SpectrumMode,
+        SpectrumPoint, StationStress, StressGoverning, StressSolution, SupportReaction, SystemMatrices,
+        TENSION_ONLY_REPORT_FORMAT, TENSION_ONLY_REPORT_VERSION, TensionOnlyElement, TensionOnlySolution, solve,
+        solve_buckling, solve_buckling_combinations, solve_combinations, solve_construction_stages, solve_deflection,
+        solve_frequency_response, solve_heat, solve_influence_line, solve_influence_line_train, solve_internal_forces,
+        solve_matrices, solve_modal, solve_nodal_stress, solve_nonlinear, solve_response_spectrum, solve_stress,
+        solve_tension_only, summarize_load_cases, summarize_model,
     },
     validate::{Issue, Severity},
 };
@@ -126,8 +131,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "truss2d": "supported",
     "truss3d": "supported",
     "beam2d": "supported",
-    "beam3d": "unsupported",
-    "frame3d": "unsupported",
+    "beam3d": "supported",
+    "frame3d": "supported",
     "modal": "supported",
     "selfWeight": "supported",
     "prescribedDisplacement": "supported",

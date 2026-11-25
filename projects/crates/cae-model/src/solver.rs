@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CaeError, Severity,
-    model::{Element, ElementKind, Load, LoadCombination, Model, PatternFactor, Units, rotation_nodes},
+    model::{
+        Element, ElementKind, Load, LoadCombination, Model, PatternFactor, Units, has_spatial_beams, rotation_nodes,
+        spatial_beam_nodes,
+    },
 };
 
 /// Version of the JSON result report produced by [`solve`].
@@ -130,8 +133,15 @@ pub struct NodeDisplacement {
     pub uy: f64,
     /// Translation along Z (always zero for two-dimensional models).
     pub uz: f64,
-    /// Rotation about Z (only non-zero at beam nodes in two dimensions).
+    /// Rotation about Z (only non-zero at beam nodes in two dimensions and at
+    /// `beam3d` nodes in three dimensions).
     pub rz: f64,
+    /// Rotation about X; only present at `beam3d` nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rx: Option<f64>,
+    /// Rotation about Y; only present at `beam3d` nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ry: Option<f64>,
     /// Translation magnitude.
     pub magnitude: f64,
 }
@@ -148,8 +158,52 @@ pub struct NodeReaction {
     pub fy: f64,
     /// Reaction along Z (always zero for two-dimensional models).
     pub fz: f64,
-    /// Reaction moment about Z (only non-zero at beam nodes in two dimensions).
+    /// Reaction moment about Z (only non-zero at beam nodes in two dimensions
+    /// and at `beam3d` nodes in three dimensions).
     pub mz: f64,
+    /// Reaction moment about X; only present at `beam3d` nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mx: Option<f64>,
+    /// Reaction moment about Y; only present at `beam3d` nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub my: Option<f64>,
+}
+
+/// Local end forces of a spatial `beam3d` member in the member's local frame.
+///
+/// `x` runs along the member, `z` follows the orientation convention of
+/// [`crate::model::Element::orientation_vector`]. The values are the
+/// generalized forces applied to the member ends by the nodes,
+/// `f = K·d − f_eq`. Axial force `N` follows [`EndForces`]; `T` is the torsion
+/// about the local `x` axis, `Vy`/`Vz` the transverse shears and `My`/`Mz` the
+/// bending moments about the local `y`/`z` axes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpatialEndForces {
+    /// Local axial end force at the start node.
+    pub n1: f64,
+    /// Local torsion end moment at the start node.
+    pub t1: f64,
+    /// Local shear force along `y` at the start node.
+    pub vy1: f64,
+    /// Local shear force along `z` at the start node.
+    pub vz1: f64,
+    /// Local bending moment about `y` at the start node.
+    pub my1: f64,
+    /// Local bending moment about `z` at the start node.
+    pub mz1: f64,
+    /// Local axial end force at the end node.
+    pub n2: f64,
+    /// Local torsion end moment at the end node.
+    pub t2: f64,
+    /// Local shear force along `y` at the end node.
+    pub vy2: f64,
+    /// Local shear force along `z` at the end node.
+    pub vz2: f64,
+    /// Local bending moment about `y` at the end node.
+    pub my2: f64,
+    /// Local bending moment about `z` at the end node.
+    pub mz2: f64,
 }
 
 /// Local end forces of an element, expressed in the element's local frame.
@@ -184,7 +238,7 @@ pub struct ElementResult {
     pub from: String,
     /// End node identifier.
     pub to: String,
-    /// Element formulation (`truss` or `beam`).
+    /// Element formulation (`truss`, `beam` or `beam3d`).
     pub kind: ElementKind,
     /// Element length.
     pub length: f64,
@@ -195,7 +249,14 @@ pub struct ElementResult {
     /// Axial strain `σ/E`.
     pub strain: f64,
     /// Local end forces at both ends.
+    ///
+    /// For `beam3d` members `v` is the local `y` shear and `m` the local `z`
+    /// bending moment; the full biaxial set is in [`ElementResult::spatial`].
     pub end_forces: EndForces,
+    /// Full six-component end forces of a spatial `beam3d` member; absent for
+    /// truss and two-dimensional beam elements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial: Option<SpatialEndForces>,
     /// Largest absolute bending moment at either end.
     pub max_abs_moment: f64,
 }
@@ -238,8 +299,14 @@ pub struct SupportReaction {
     pub fy: f64,
     /// Reaction force along Z (always zero in two dimensions).
     pub fz: f64,
-    /// Reaction moment about Z (only populated at beam supports in two dimensions).
+    /// Reaction moment about Z (only populated at beam supports in two dimensions and `beam3d` supports).
     pub mz: f64,
+    /// Reaction moment about X; only present at `beam3d` supports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mx: Option<f64>,
+    /// Reaction moment about Y; only present at `beam3d` supports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub my: Option<f64>,
 }
 
 /// Translational resultant `(fx, fy, fz)`.
@@ -254,12 +321,26 @@ pub struct ForceResultant {
     pub fz: f64,
 }
 
+/// Rotational resultant `(mx, my, mz)` of a spatial `beam3d` model.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MomentResultant {
+    /// Resultant moment about X.
+    pub mx: f64,
+    /// Resultant moment about Y.
+    pub my: f64,
+    /// Resultant moment about Z.
+    pub mz: f64,
+}
+
 /// Support reaction summary and global force equilibrium check.
 ///
 /// `applied` is the sum of every external translational load assembled by the
 /// solver, including nodal forces, consistent distributed loads and self-weight.
 /// `unbalanced` equals `reaction + applied`; `balanced` is true when every
 /// component is within `tolerance`, which scales with the largest resultant.
+/// The moment resultants are only present for spatial `beam3d` models, and
+/// `balanced` then also requires rotational equilibrium.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ReactionSummary {
@@ -271,9 +352,21 @@ pub struct ReactionSummary {
     pub applied: ForceResultant,
     /// Residual `reaction + applied`.
     pub unbalanced: ForceResultant,
+    /// Sum of the support reaction moments; only present for `beam3d` models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reaction_moment: Option<MomentResultant>,
+    /// Sum of the applied external moments (nodal and consistent end moments);
+    /// only present for `beam3d` models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_moment: Option<MomentResultant>,
+    /// Residual `reaction + applied` for the moment resultants; only present
+    /// for `beam3d` models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unbalanced_moment: Option<MomentResultant>,
     /// Absolute tolerance used by the equilibrium check.
     pub tolerance: f64,
-    /// `true` when every component of `unbalanced` is within `tolerance`.
+    /// `true` when every component of `unbalanced` (and `unbalancedMoment` for
+    /// spatial models) is within `tolerance`.
     pub balanced: bool,
 }
 
@@ -819,9 +912,25 @@ pub struct SectionForces {
     /// Axial force, positive in tension.
     pub axial_force: f64,
     /// Shear force.
+    ///
+    /// For `beam3d` members this is the local `y` shear; the local `z` shear is
+    /// reported in [`SectionForces::shear_z`].
     pub shear: f64,
     /// Bending moment.
+    ///
+    /// For `beam3d` members this is the local `z` bending moment; the local `y`
+    /// bending moment is reported in [`SectionForces::moment_y`].
     pub moment: f64,
+    /// Torsion about the local `x` axis; only present for `beam3d` members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub torque: Option<f64>,
+    /// Local `z` shear force; only present for `beam3d` members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shear_z: Option<f64>,
+    /// Bending moment about the local `y` axis; only present for `beam3d`
+    /// members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moment_y: Option<f64>,
 }
 
 /// Sampled internal forces of one element.
@@ -1372,6 +1481,9 @@ pub struct BucklingCombinationSolution {
 struct Layout {
     slots: usize,
     uses_rotation: bool,
+    /// `true` when the document contains at least one spatial `beam3d`
+    /// member; nodes touched by such members carry six degrees of freedom.
+    uses_spatial: bool,
     index: Vec<Option<usize>>,
     size: usize,
 }
@@ -1415,6 +1527,7 @@ enum ElementModel {
         thermal: f64,
     },
     Beam(Box<BeamLocal>),
+    Frame(Box<FrameLocal>),
 }
 
 struct BeamLocal {
@@ -1433,6 +1546,35 @@ struct BeamLocal {
     /// Uniform distributed axial load per unit length (gravity component).
     axial_uniform: f64,
     /// Distributed load limited to a fraction of the member length.
+    partial: Option<PartialLoad>,
+}
+
+/// Local model of a spatial `beam3d` member with six degrees of freedom per
+/// node ordered `(u, v, w, rx, ry, rz)` at the start node followed by the end
+/// node.
+struct FrameLocal {
+    /// Block-diagonal 12×12 rotation matrix mapping global to local degrees of
+    /// freedom; its rows are the local axes.
+    transform: [[f64; 12]; 12],
+    /// Full 12×12 local stiffness matrix.
+    stiffness: [[f64; 12]; 12],
+    /// Consistent local load vector.
+    load: [f64; 12],
+    /// Combined user and gravity transverse intensity along local `y` at the
+    /// start node.
+    transverse_y_start: f64,
+    /// Combined user and gravity transverse intensity along local `y` at the
+    /// end node.
+    transverse_y_end: f64,
+    /// Combined user and gravity transverse intensity along local `z` at the
+    /// start node.
+    transverse_z_start: f64,
+    /// Combined user and gravity transverse intensity along local `z` at the
+    /// end node.
+    transverse_z_end: f64,
+    /// Uniform distributed axial load per unit length (gravity component).
+    axial_uniform: f64,
+    /// Distributed load along local `y` limited to a fraction of the length.
     partial: Option<PartialLoad>,
 }
 
@@ -1645,6 +1787,7 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
     let global_displacement = system.to_global_vector(&displacement);
     let global_residual = system.to_global_vector(&residual(&system, &displacement));
     let layout = &system.layout;
+    let spatial = layout.uses_spatial;
     let nodes: Vec<NodeDisplacement> = model
         .nodes
         .iter()
@@ -1653,8 +1796,34 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
             let ux = node_value(layout, &global_displacement, index, 0);
             let uy = node_value(layout, &global_displacement, index, 1);
             let uz = if model.dimension == 3 { node_value(layout, &global_displacement, index, 2) } else { 0.0 };
-            let rz = if layout.uses_rotation { node_value(layout, &global_displacement, index, 2) } else { 0.0 };
-            NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
+            if spatial {
+                let rx = node_value(layout, &global_displacement, index, 3);
+                let ry = node_value(layout, &global_displacement, index, 4);
+                let rz = node_value(layout, &global_displacement, index, 5);
+                NodeDisplacement {
+                    id: node.id.clone(),
+                    ux,
+                    uy,
+                    uz,
+                    rz,
+                    rx: Some(rx),
+                    ry: Some(ry),
+                    magnitude: (ux * ux + uy * uy + uz * uz).sqrt(),
+                }
+            }
+            else {
+                let rz = if layout.uses_rotation { node_value(layout, &global_displacement, index, 2) } else { 0.0 };
+                NodeDisplacement {
+                    id: node.id.clone(),
+                    ux,
+                    uy,
+                    uz,
+                    rz,
+                    rx: None,
+                    ry: None,
+                    magnitude: (ux * ux + uy * uy + uz * uz).sqrt(),
+                }
+            }
         })
         .collect();
     let reactions = model
@@ -1665,8 +1834,16 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
             let fx = node_value(layout, &global_residual, index, 0);
             let fy = node_value(layout, &global_residual, index, 1);
             let fz = if model.dimension == 3 { node_value(layout, &global_residual, index, 2) } else { 0.0 };
-            let mz = if layout.uses_rotation { node_value(layout, &global_residual, index, 2) } else { 0.0 };
-            NodeReaction { node: node.id.clone(), fx, fy, fz, mz }
+            if spatial {
+                let mx = node_value(layout, &global_residual, index, 3);
+                let my = node_value(layout, &global_residual, index, 4);
+                let mz = node_value(layout, &global_residual, index, 5);
+                NodeReaction { node: node.id.clone(), fx, fy, fz, mz, mx: Some(mx), my: Some(my) }
+            }
+            else {
+                let mz = if layout.uses_rotation { node_value(layout, &global_residual, index, 2) } else { 0.0 };
+                NodeReaction { node: node.id.clone(), fx, fy, fz, mz, mx: None, my: None }
+            }
         })
         .collect();
     let reaction_summary = summarize_reactions(model, &system, &global_residual, &global_displacement);
@@ -1685,12 +1862,14 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
                 stress: 0.0,
                 strain: 0.0,
                 end_forces: EndForces { n1: 0.0, v1: 0.0, m1: 0.0, n2: 0.0, v2: 0.0, m2: 0.0 },
+                spatial: None,
                 max_abs_moment: 0.0,
             });
             continue;
         }
         let local_displacement: Vec<f64> =
             element.displacement_dofs.iter().map(|slot| slot.map(|dof| displacement[dof]).unwrap_or(0.0)).collect();
+        let mut spatial_forces = None;
         let (axial_force, end_forces, energy) = match &element.model {
             ElementModel::Truss { direction, axial_stiffness, components, thermal } => {
                 let mut axial = 0.0;
@@ -1730,11 +1909,48 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
                     energy,
                 )
             }
+            ElementModel::Frame(frame) => {
+                let mut local = [0.0; 12];
+                for (row, value) in local.iter_mut().enumerate() {
+                    *value = (0..12).map(|column| frame.transform[row][column] * local_displacement[column]).sum();
+                }
+                let mut forces = [0.0; 12];
+                for (row, value) in forces.iter_mut().enumerate() {
+                    *value = (0..12).map(|column| frame.stiffness[row][column] * local[column]).sum::<f64>() - frame.load[row];
+                }
+                let axial = 0.5 * (forces[6] - forces[0]);
+                let energy = 0.5
+                    * (0..12)
+                        .map(|row| local[row] * (0..12).map(|column| frame.stiffness[row][column] * local[column]).sum::<f64>())
+                        .sum::<f64>();
+                spatial_forces = Some(SpatialEndForces {
+                    n1: forces[0],
+                    t1: forces[3],
+                    vy1: forces[1],
+                    vz1: forces[2],
+                    my1: forces[4],
+                    mz1: forces[5],
+                    n2: forces[6],
+                    t2: forces[9],
+                    vy2: forces[7],
+                    vz2: forces[8],
+                    my2: forces[10],
+                    mz2: forces[11],
+                });
+                (
+                    axial,
+                    EndForces { n1: forces[0], v1: forces[1], m1: forces[5], n2: forces[6], v2: forces[7], m2: forces[11] },
+                    energy,
+                )
+            }
         };
         let stress = axial_force / element.area;
         let strain = stress / element.youngs_modulus;
         strain_energy += energy;
-        let max_abs_moment = end_forces.m1.abs().max(end_forces.m2.abs());
+        let max_abs_moment = match &spatial_forces {
+            Some(spatial) => spatial.my1.abs().max(spatial.my2.abs()).max(spatial.mz1.abs()).max(spatial.mz2.abs()),
+            None => end_forces.m1.abs().max(end_forces.m2.abs()),
+        };
         elements.push(ElementResult {
             id: element.id.clone(),
             from: model.nodes[element.from].id.clone(),
@@ -1745,6 +1961,7 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
             stress,
             strain,
             end_forces,
+            spatial: spatial_forces,
             max_abs_moment,
         });
     }
@@ -1764,11 +1981,19 @@ fn solve_assembled(model: &Model, system: System) -> Result<Solution, CaeError> 
         .max_by(|left, right| left.max_abs_moment.partial_cmp(&right.max_abs_moment).unwrap_or(std::cmp::Ordering::Equal))
         .map(|element| MaxMoment {
             element: element.id.clone(),
-            moment: if element.end_forces.m1.abs() >= element.end_forces.m2.abs() {
-                element.end_forces.m1
-            }
-            else {
-                element.end_forces.m2
+            moment: match &element.spatial {
+                Some(spatial) => [spatial.my1, spatial.my2, spatial.mz1, spatial.mz2]
+                    .into_iter()
+                    .max_by(|left, right| left.abs().partial_cmp(&right.abs()).unwrap_or(std::cmp::Ordering::Equal))
+                    .unwrap_or_default(),
+                None => {
+                    if element.end_forces.m1.abs() >= element.end_forces.m2.abs() {
+                        element.end_forces.m1
+                    }
+                    else {
+                        element.end_forces.m2
+                    }
+                }
             },
         })
         .ok_or_else(|| CaeError::new("model/no-elements", "the model requires at least 1 element"))?;
@@ -2060,6 +2285,7 @@ pub fn solve_heat(model: &Model) -> Result<HeatSolution, CaeError> {
 /// the same mechanism check as the ordinary static solver. Only truss elements
 /// can be tension-only; validation rejects the flag on beams.
 pub fn solve_tension_only(model: &Model, max_iterations: usize, tolerance: f64) -> Result<TensionOnlySolution, CaeError> {
+    reject_spatial(model, "tension-only analysis")?;
     if max_iterations == 0 {
         return Err(CaeError::new("analysis/invalid-options", "tension-only analysis requires at least one iteration"));
     }
@@ -2125,6 +2351,7 @@ pub fn solve_tension_only(model: &Model, max_iterations: usize, tolerance: f64) 
 /// masses and is diagonal; a density of zero without nodal masses therefore
 /// yields a zero mass matrix rather than an error.
 pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
+    reject_spatial(model, "system matrix export")?;
     if let Some(issue) = model.validate().into_iter().find(|issue| issue.severity == Severity::Error) {
         return Err(CaeError::new(issue.code, issue.message));
     }
@@ -2165,7 +2392,10 @@ pub fn solve_matrices(model: &Model) -> Result<SystemMatrices, CaeError> {
 }
 
 fn component_name(model: &Model, layout: &Layout, component: usize) -> &'static str {
-    if model.dimension == 3 {
+    if layout.uses_spatial {
+        ["ux", "uy", "uz", "rx", "ry", "rz"][component]
+    }
+    else if model.dimension == 3 {
         ["ux", "uy", "uz"][component]
     }
     else if layout.uses_rotation {
@@ -2183,6 +2413,7 @@ fn component_name(model: &Model, layout: &Layout, component: usize) -> &'static 
 /// one positive nodal `Node::mass`. When neither is available the analysis is
 /// rejected with `material/invalid-density` instead of being approximated.
 pub fn solve_modal(model: &Model, modes: usize) -> Result<ModalSolution, CaeError> {
+    reject_spatial(model, "modal analysis")?;
     if modes == 0 {
         return Err(CaeError::new("analysis/invalid-modes", "the number of modes must be at least 1"));
     }
@@ -2337,6 +2568,7 @@ pub fn solve_response_spectrum(
     combination: SpectrumCombination,
     damping: Option<f64>,
 ) -> Result<ResponseSpectrumSolution, CaeError> {
+    reject_spatial(model, "response-spectrum analysis")?;
     let translations = if model.dimension == 3 { 3 } else { 2 };
     if axis >= translations {
         return Err(CaeError::new(
@@ -2433,7 +2665,16 @@ pub fn solve_response_spectrum(
             let uy = values[1];
             let uz = if model.dimension == 3 { values[2] } else { 0.0 };
             let rz = if model.dimension == 2 { values[3] } else { 0.0 };
-            NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
+            NodeDisplacement {
+                id: node.id.clone(),
+                ux,
+                uy,
+                uz,
+                rz,
+                rx: None,
+                ry: None,
+                magnitude: (ux * ux + uy * uy + uz * uz).sqrt(),
+            }
         })
         .collect();
     let max_displacement = nodes
@@ -2536,6 +2777,7 @@ pub fn solve_frequency_response(
     end_hz: f64,
     points: usize,
 ) -> Result<FrequencyResponseSolution, CaeError> {
+    reject_spatial(model, "frequency-response analysis")?;
     if modes == 0 {
         return Err(CaeError::new("analysis/invalid-modes", "the number of modes must be at least 1"));
     }
@@ -2739,6 +2981,7 @@ pub fn solve_frequency_response(
 /// reference solve. Modes are normalized so that the largest absolute nodal
 /// value is one.
 pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, CaeError> {
+    reject_spatial(model, "buckling analysis")?;
     if modes == 0 {
         return Err(CaeError::new("analysis/invalid-modes", "buckling mode count must be at least 1"));
     }
@@ -2821,6 +3064,12 @@ pub fn solve_buckling(model: &Model, modes: usize) -> Result<BucklingSolution, C
                         geometric[row_dof * size + column_dof] += scale * sign * projector;
                     }
                 }
+            }
+            ElementModel::Frame(_) => {
+                return Err(CaeError::new(
+                    "capability/not-implemented",
+                    format!("buckling is not implemented for beam3d member `{}`", element.id),
+                ));
             }
         }
     }
@@ -2959,6 +3208,7 @@ pub fn solve_buckling_combinations(
     combinations: &[LoadCombination],
     modes: usize,
 ) -> Result<BucklingCombinationSolution, CaeError> {
+    reject_spatial(model, "buckling combinations")?;
     if modes == 0 {
         return Err(CaeError::new("analysis/invalid-modes", "buckling mode count must be at least 1"));
     }
@@ -3037,7 +3287,15 @@ pub fn solve_internal_forces(model: &Model, stations: usize) -> Result<InternalF
             ElementModel::Truss { .. } => {
                 for index in 0..stations {
                     let position = length * index as f64 / (stations - 1) as f64;
-                    samples.push(SectionForces { position, axial_force: result.axial_force, shear: 0.0, moment: 0.0 });
+                    samples.push(SectionForces {
+                        position,
+                        axial_force: result.axial_force,
+                        shear: 0.0,
+                        moment: 0.0,
+                        torque: None,
+                        shear_z: None,
+                        moment_y: None,
+                    });
                 }
             }
             ElementModel::Beam(beam) => {
@@ -3054,12 +3312,48 @@ pub fn solve_internal_forces(model: &Model, stations: usize) -> Result<InternalF
                         axial_force: -result.end_forces.n1 - axial_uniform * position,
                         shear,
                         moment,
+                        torque: None,
+                        shear_z: None,
+                        moment_y: None,
+                    });
+                }
+            }
+            ElementModel::Frame(frame) => {
+                let qy1 = frame.transverse_y_start;
+                let slope_y = (frame.transverse_y_end - qy1) / length;
+                let qz1 = frame.transverse_z_start;
+                let slope_z = (frame.transverse_z_end - qz1) / length;
+                let axial_uniform = frame.axial_uniform;
+                for index in 0..stations {
+                    let position = length * index as f64 / (stations - 1) as f64;
+                    let (force_y, moment_y_load) = beam_load_resultants(qy1, slope_y, frame.partial.as_ref(), length, position);
+                    let (force_z, moment_z_load) = beam_load_resultants(qz1, slope_z, None, length, position);
+                    let shear = result.end_forces.v1 + force_y;
+                    let moment = -result.end_forces.m1 + result.end_forces.v1 * position + position * force_y - moment_y_load;
+                    let shear_z = result.spatial.as_ref().map(|spatial| spatial.vz1 + force_z).unwrap_or_default();
+                    let moment_y = result
+                        .spatial
+                        .as_ref()
+                        .map_or(0.0, |spatial| -spatial.my1 - spatial.vz1 * position - position * force_z + moment_z_load);
+                    let torque = result.spatial.as_ref().map(|spatial| spatial.t1);
+                    samples.push(SectionForces {
+                        position,
+                        axial_force: -result.end_forces.n1 - axial_uniform * position,
+                        shear,
+                        moment,
+                        torque,
+                        shear_z: Some(shear_z),
+                        moment_y: Some(moment_y),
                     });
                 }
             }
         }
-        let max_abs_shear = samples.iter().fold(0.0_f64, |largest, sample| largest.max(sample.shear.abs()));
-        let max_abs_moment = samples.iter().fold(0.0_f64, |largest, sample| largest.max(sample.moment.abs()));
+        let max_abs_shear = samples
+            .iter()
+            .fold(0.0_f64, |largest, sample| largest.max(sample.shear.abs()).max(sample.shear_z.unwrap_or_default().abs()));
+        let max_abs_moment = samples
+            .iter()
+            .fold(0.0_f64, |largest, sample| largest.max(sample.moment.abs()).max(sample.moment_y.unwrap_or_default().abs()));
         elements.push(ElementDiagram {
             id: element.id.clone(),
             from: model.nodes[element.from].id.clone(),
@@ -3102,6 +3396,7 @@ impl InternalForceSolution {
 /// declares `allowableStress`, each element and the governing result also
 /// report `maxAbsStress / allowableStress`.
 pub fn solve_stress(model: &Model, stations: usize) -> Result<StressSolution, CaeError> {
+    reject_spatial(model, "stress recovery")?;
     if stations < 2 {
         return Err(CaeError::new(
             "analysis/invalid-stations",
@@ -3142,6 +3437,12 @@ pub fn solve_stress(model: &Model, stations: usize) -> Result<StressSolution, Ca
                     )
                 })?;
                 inertia / properties.extreme_fiber
+            }
+            ElementKind::Beam3D => {
+                return Err(CaeError::new(
+                    "capability/not-implemented",
+                    format!("stress recovery is not implemented for beam3d member `{}`", element.id),
+                ));
             }
         };
 
@@ -3225,6 +3526,7 @@ pub fn solve_stress(model: &Model, stations: usize) -> Result<StressSolution, Ca
 /// section rotation and the deformed global coordinates, so the result can be
 /// plotted directly. `stations` counts both ends and must be at least `2`.
 pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolution, CaeError> {
+    reject_spatial(model, "deflection control")?;
     if stations < 2 {
         return Err(CaeError::new(
             "analysis/invalid-stations",
@@ -3272,6 +3574,12 @@ pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolu
                 restore_released_rotations(beam, &mut local);
                 (local[0], local[1], local[2], local[3], local[4], local[5])
             }
+            ElementModel::Frame(_) => {
+                return Err(CaeError::new(
+                    "capability/not-implemented",
+                    format!("deflection control is not implemented for beam3d member `{}`", element.id),
+                ));
+            }
         };
 
         let mut flexural_rigidity = 0.0;
@@ -3309,7 +3617,7 @@ pub fn solve_deflection(model: &Model, stations: usize) -> Result<DeflectionSolu
                 let quadratic = (end_rotation * length - 3.0 * end_deflection) / (length * length);
                 (partial, rigidity, cubic, quadratic)
             }),
-            ElementModel::Truss { .. } => None,
+            ElementModel::Truss { .. } | ElementModel::Frame(_) => None,
         };
 
         let mut samples = Vec::with_capacity(stations);
@@ -3636,6 +3944,10 @@ pub fn summarize_model(model: &Model) -> Result<ModelSummaryReport, CaeError> {
                 beam_elements += 1;
                 beam_length += length;
             }
+            ElementKind::Beam3D => {
+                beam_elements += 1;
+                beam_length += length;
+            }
         }
         weighted_centroid[0] += element_mass * 0.5 * (start.x + end.x);
         weighted_centroid[1] += element_mass * 0.5 * (start.y + end.y);
@@ -3655,11 +3967,21 @@ pub fn summarize_model(model: &Model) -> Result<ModelSummaryReport, CaeError> {
     };
 
     let three_dimensional = model.dimension == 3;
+    let spatial_nodes = spatial_beam_nodes(model);
+    let uses_spatial = !spatial_nodes.is_empty();
     let rotations = if three_dimensional { std::collections::HashSet::new() } else { rotation_nodes(model) };
     let uses_rotation = !rotations.is_empty();
     let translational_dofs = model.nodes.len() * if three_dimensional { 3 } else { 2 };
-    let rotational_dofs = rotations.len();
-    let slots = if three_dimensional || uses_rotation { 3 } else { 2 };
+    let rotational_dofs = if uses_spatial { spatial_nodes.len() * 3 } else { rotations.len() };
+    let slots = if uses_spatial {
+        6
+    }
+    else if three_dimensional || uses_rotation {
+        3
+    }
+    else {
+        2
+    };
     let mut constrained = vec![false; model.nodes.len() * slots];
     for support in &model.supports {
         let Some(&position) = nodes.get(support.node.as_str())
@@ -3673,11 +3995,29 @@ pub fn summarize_model(model: &Model) -> Result<ModelSummaryReport, CaeError> {
         if support.dy {
             constrained[base + 1] = true;
         }
-        if three_dimensional && support.dz {
-            constrained[base + 2] = true;
+        if uses_spatial {
+            if three_dimensional && support.dz {
+                constrained[base + 2] = true;
+            }
+            if spatial_nodes.contains(support.node.as_str()) {
+                if support.rx {
+                    constrained[base + 3] = true;
+                }
+                if support.ry {
+                    constrained[base + 4] = true;
+                }
+                if support.rz {
+                    constrained[base + 5] = true;
+                }
+            }
         }
-        if !three_dimensional && support.rz && rotations.contains(support.node.as_str()) {
-            constrained[base + 2] = true;
+        else {
+            if three_dimensional && support.dz {
+                constrained[base + 2] = true;
+            }
+            if !three_dimensional && support.rz && rotations.contains(support.node.as_str()) {
+                constrained[base + 2] = true;
+            }
         }
         if support.direction.is_some() {
             constrained[base] = true;
@@ -4012,6 +4352,7 @@ pub fn solve_nonlinear(
     max_iterations: usize,
     tolerance: f64,
 ) -> Result<NonlinearSolution, CaeError> {
+    reject_spatial(model, "nonlinear analysis")?;
     if increments == 0 {
         return Err(CaeError::new("analysis/invalid-increments", "the nonlinear load increments must be at least 1"));
     }
@@ -4123,7 +4464,16 @@ pub fn solve_nonlinear(
             let ux = node_value(&system.layout, &displacement, index, 0);
             let uy = node_value(&system.layout, &displacement, index, 1);
             let uz = if model.dimension == 3 { node_value(&system.layout, &displacement, index, 2) } else { 0.0 };
-            NodeDisplacement { id: node.id.clone(), ux, uy, uz, rz: 0.0, magnitude: (ux * ux + uy * uy + uz * uz).sqrt() }
+            NodeDisplacement {
+                id: node.id.clone(),
+                ux,
+                uy,
+                uz,
+                rz: 0.0,
+                rx: None,
+                ry: None,
+                magnitude: (ux * ux + uy * uy + uz * uz).sqrt(),
+            }
         })
         .collect();
     let max_displacement = nodes
@@ -4216,6 +4566,8 @@ fn combination_model(model: &Model, combination: &LoadCombination) -> Result<Mod
                 fy: load.fy * entry.factor,
                 fz: load.fz * entry.factor,
                 mz: load.mz * entry.factor,
+                mx: load.mx.map(|value| value * entry.factor),
+                my: load.my.map(|value| value * entry.factor),
             });
         }
     }
@@ -4310,7 +4662,14 @@ pub(crate) fn unconstrained_nodes(model: &Model) -> Vec<String> {
         .iter()
         .filter(|node| {
             !model.supports.iter().any(|support| {
-                support.node == node.id && (support.dx || support.dy || support.dz || support.rz || support.direction.is_some())
+                support.node == node.id
+                    && (support.dx
+                        || support.dy
+                        || support.dz
+                        || support.rx
+                        || support.ry
+                        || support.rz
+                        || support.direction.is_some())
             })
         })
         .map(|node| node.id.clone())
@@ -4329,18 +4688,51 @@ pub(crate) fn check_stability(model: &Model) -> Result<(), Vec<String>> {
     solve_dense(reduced, forces, free.len()).map(|_| ()).map_err(|()| unconstrained_nodes(model))
 }
 
+/// Rejects analyses that are not implemented for spatial `beam3d` members.
+///
+/// Linear static analysis, load combinations, envelopes, construction stages
+/// and internal force sampling support `beam3d`; every other analysis keeps the
+/// explicit `capability/not-implemented` behaviour.
+fn reject_spatial(model: &Model, feature: &str) -> Result<(), CaeError> {
+    if has_spatial_beams(model) {
+        return Err(CaeError::new(
+            "capability/not-implemented",
+            format!("{feature} is not implemented for beam3d members; use linear static analysis instead"),
+        ));
+    }
+    Ok(())
+}
+
 fn build_layout(model: &Model) -> Layout {
     let three_dimensional = model.dimension == 3;
     let beams = rotation_nodes(model);
     let uses_rotation = !three_dimensional && !beams.is_empty();
-    let slots = if three_dimensional || uses_rotation { 3 } else { 2 };
+    let spatial_nodes = spatial_beam_nodes(model);
+    let uses_spatial = !spatial_nodes.is_empty();
+    let slots = if uses_spatial {
+        6
+    }
+    else if three_dimensional || uses_rotation {
+        3
+    }
+    else {
+        2
+    };
     let full_size = model.nodes.len() * slots;
     let mut active = vec![false; full_size];
     for (position, node) in model.nodes.iter().enumerate() {
         let base = position * slots;
         active[base] = true;
         active[base + 1] = true;
-        if three_dimensional || (uses_rotation && beams.contains(node.id.as_str())) {
+        if uses_spatial {
+            active[base + 2] = three_dimensional;
+            if spatial_nodes.contains(node.id.as_str()) {
+                for slot in 3..6 {
+                    active[base + slot] = true;
+                }
+            }
+        }
+        else if three_dimensional || (uses_rotation && beams.contains(node.id.as_str())) {
             active[base + 2] = true;
         }
     }
@@ -4352,7 +4744,7 @@ fn build_layout(model: &Model) -> Layout {
             size += 1;
         }
     }
-    Layout { slots, uses_rotation, index, size }
+    Layout { slots, uses_rotation, uses_spatial, index, size }
 }
 
 fn constrained(system: &System, dof: usize) -> bool {
@@ -4617,6 +5009,205 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
                     })),
                 });
             }
+            ElementKind::Beam3D => {
+                if model.dimension != 3 {
+                    return Err(CaeError::new(
+                        "document/dimension-mismatch",
+                        format!("beam3d element `{}` requires a three-dimensional document", element.id),
+                    ));
+                }
+                if element.release.is_some() {
+                    return Err(CaeError::new(
+                        "element/release-requires-beam",
+                        format!(
+                            "end releases are only implemented for two-dimensional beam elements (element `{}`)",
+                            element.id
+                        ),
+                    ));
+                }
+                if element.temperature_gradient.is_some() {
+                    return Err(CaeError::new(
+                        "element/gradient-requires-beam",
+                        format!(
+                            "temperature gradients are only implemented for two-dimensional beam elements (element `{}`)",
+                            element.id
+                        ),
+                    ));
+                }
+                let section = model.material.section.and_then(|section| section.properties().ok());
+                let inertia = element
+                    .inertia
+                    .or_else(|| section.map(|properties| properties.inertia_strong))
+                    .filter(|value| positive_finite(*value))
+                    .ok_or_else(|| {
+                        CaeError::new(
+                            "element/invalid-inertia",
+                            format!(
+                                "beam3d element `{}` requires a positive finite inertia, or a material section that provides one",
+                                element.id
+                            ),
+                        )
+                    })?;
+                let inertia_weak = element.inertia_weak.unwrap_or(inertia);
+                if !positive_finite(inertia_weak) {
+                    return Err(CaeError::new(
+                        "element/invalid-inertia",
+                        format!("beam3d element `{}` inertiaWeak must be positive and finite", element.id),
+                    ));
+                }
+                let torsion = element
+                    .torsion
+                    .or_else(|| section.map(|properties| properties.torsion_constant))
+                    .filter(|value| positive_finite(*value))
+                    .ok_or_else(|| {
+                        CaeError::new(
+                            "element/invalid-torsion",
+                            format!(
+                                "beam3d element `{}` requires a positive finite torsion constant J, or a material section that provides one",
+                                element.id
+                            ),
+                        )
+                    })?;
+                let shear_modulus = resolve_shear_modulus(model, youngs_modulus)?;
+                let axis = [delta[0] / length, delta[1] / length, delta[2] / length];
+                let rotation = frame_local_axes(element, &axis)
+                    .map_err(|error| CaeError::new(error.code, format!("{} (element `{}`)", error.message, element.id)))?;
+                let local_stiffness =
+                    frame_stiffness(youngs_modulus, shear_modulus, area, inertia, inertia_weak, torsion, length);
+                let transform = frame_transform(&rotation);
+                let mut local_load = [0.0_f64; 12];
+                for (name, value) in [
+                    ("w", element.distributed_load),
+                    ("wEnd", element.distributed_load_end),
+                    ("wz", element.distributed_load_z),
+                    ("wzEnd", element.distributed_load_z_end),
+                ] {
+                    if value.is_some_and(|value| !value.is_finite()) {
+                        return Err(CaeError::new(
+                            "element/invalid-distributed-load",
+                            format!("distributed load {name} of element `{}` must be finite", element.id),
+                        ));
+                    }
+                }
+                let user_start_y = element.distributed_load.unwrap_or(0.0);
+                let user_end_y = element.distributed_load_end.unwrap_or(user_start_y);
+                let user_start_z = element.distributed_load_z.unwrap_or(0.0);
+                let user_end_z = element.distributed_load_z_end.unwrap_or(user_start_z);
+                let mut load_start_y = 0.0;
+                let mut load_end_y = 0.0;
+                let mut load_start_z = 0.0;
+                let mut load_end_z = 0.0;
+                let mut axial_uniform = 0.0;
+                if let Some(gravity) = gravity {
+                    let mass_per_length = density * area;
+                    let g_local = [
+                        gravity[0] * rotation[0][0] + gravity[1] * rotation[0][1] + gravity[2] * rotation[0][2],
+                        gravity[0] * rotation[1][0] + gravity[1] * rotation[1][1] + gravity[2] * rotation[1][2],
+                        gravity[0] * rotation[2][0] + gravity[1] * rotation[2][1] + gravity[2] * rotation[2][2],
+                    ];
+                    load_start_y += mass_per_length * g_local[1];
+                    load_end_y += mass_per_length * g_local[1];
+                    load_start_z += mass_per_length * g_local[2];
+                    load_end_z += mass_per_length * g_local[2];
+                    axial_uniform = mass_per_length * g_local[0];
+                    let axial = axial_uniform * length;
+                    local_load[0] += 0.5 * axial;
+                    local_load[6] += 0.5 * axial;
+                }
+                let partial = match (element.distributed_load_from, element.distributed_load_to) {
+                    (Some(start), Some(end)) => {
+                        if !start.is_finite() || !end.is_finite() || start < 0.0 || end > 1.0 || start >= end {
+                            return Err(CaeError::new(
+                                "element/invalid-load-span",
+                                format!(
+                                    "load span of element `{}` must satisfy 0 <= start < end <= 1 (currently {start}..{end})",
+                                    element.id
+                                ),
+                            ));
+                        }
+                        let partial = PartialLoad { start, end, load_start: user_start_y, load_end: user_end_y };
+                        add_partial_transverse_frame(&mut local_load, partial, length);
+                        Some(partial)
+                    }
+                    (None, None) => {
+                        load_start_y += user_start_y;
+                        load_end_y += user_end_y;
+                        load_start_z += user_start_z;
+                        load_end_z += user_end_z;
+                        None
+                    }
+                    _ => {
+                        return Err(CaeError::new(
+                            "element/invalid-load-span",
+                            format!(
+                                "element `{}` must declare both the start and the end fraction of a distributed load span",
+                                element.id
+                            ),
+                        ));
+                    }
+                };
+                if load_start_y != 0.0 || load_end_y != 0.0 {
+                    add_linear_transverse_frame_y(&mut local_load, load_start_y, load_end_y, length);
+                }
+                if load_start_z != 0.0 || load_end_z != 0.0 {
+                    add_linear_transverse_frame_z(&mut local_load, load_start_z, load_end_z, length);
+                }
+                if thermal != 0.0 {
+                    local_load[0] -= thermal;
+                    local_load[6] += thermal;
+                }
+                let displacement_dofs: Vec<Option<usize>> =
+                    (0..12).map(|slot| layout.dof((if slot < 6 { from } else { to }) * layout.slots + slot % 6).ok()).collect();
+                if element_active {
+                    let mut global_stiffness = [[0.0_f64; 12]; 12];
+                    for (row, row_values) in global_stiffness.iter_mut().enumerate() {
+                        for (column, value) in row_values.iter_mut().enumerate() {
+                            *value = (0..12)
+                                .map(|a| {
+                                    (0..12)
+                                        .map(|b| transform[a][row] * local_stiffness[a][b] * transform[b][column])
+                                        .sum::<f64>()
+                                })
+                                .sum();
+                        }
+                    }
+                    for (row, &row_dof) in displacement_dofs.iter().enumerate() {
+                        let Some(row_dof) = row_dof
+                        else {
+                            continue;
+                        };
+                        for (column, &column_dof) in displacement_dofs.iter().enumerate() {
+                            if let Some(column_dof) = column_dof {
+                                stiffness[row_dof * size + column_dof] += global_stiffness[row][column];
+                            }
+                        }
+                        let load: f64 = (0..12).map(|a| transform[a][row] * local_load[a]).sum();
+                        forces[row_dof] += load;
+                    }
+                }
+                elements.push(AssemblyElement {
+                    id: element.id.clone(),
+                    from,
+                    to,
+                    kind: element.kind,
+                    length,
+                    youngs_modulus,
+                    area,
+                    active: element_active,
+                    displacement_dofs,
+                    model: ElementModel::Frame(Box::new(FrameLocal {
+                        transform,
+                        stiffness: local_stiffness,
+                        load: local_load,
+                        transverse_y_start: load_start_y,
+                        transverse_y_end: load_end_y,
+                        transverse_z_start: load_start_z,
+                        transverse_z_end: load_end_z,
+                        axial_uniform,
+                        partial,
+                    })),
+                });
+            }
             ElementKind::Truss => {
                 if element.distributed_load.is_some() || element.distributed_load_end.is_some() {
                     return Err(CaeError::new(
@@ -4691,11 +5282,25 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
             let base = node * layout.slots;
             forces[layout.dof(base)?] += load.fx;
             forces[layout.dof(base + 1)?] += load.fy;
-            if model.dimension == 3 {
+            if layout.uses_spatial {
                 forces[layout.dof(base + 2)?] += load.fz;
+                if let (Some(dof), Some(value)) = (layout.dof(base + 3).ok(), load.mx) {
+                    forces[dof] += value;
+                }
+                if let (Some(dof), Some(value)) = (layout.dof(base + 4).ok(), load.my) {
+                    forces[dof] += value;
+                }
+                if let Ok(dof) = layout.dof(base + 5) {
+                    forces[dof] += load.mz;
+                }
             }
-            if layout.uses_rotation {
-                forces[layout.dof(base + 2)?] += load.mz;
+            else {
+                if model.dimension == 3 {
+                    forces[layout.dof(base + 2)?] += load.fz;
+                }
+                if layout.uses_rotation {
+                    forces[layout.dof(base + 2)?] += load.mz;
+                }
             }
         }
     }
@@ -4721,6 +5326,17 @@ fn assemble_with_active(model: &Model, active_elements: Option<&[bool]>) -> Resu
         }
         if model.dimension == 3 && support.dz {
             mark(base + 2);
+        }
+        if layout.uses_spatial {
+            if support.rx {
+                mark(base + 3);
+            }
+            if support.ry {
+                mark(base + 4);
+            }
+            if support.rz {
+                mark(base + 5);
+            }
         }
         if layout.uses_rotation && support.rz {
             mark(base + 2);
@@ -4891,6 +5507,219 @@ fn beam_transform(c: f64, s: f64) -> [[f64; 6]; 6] {
     transform[4][4] = c;
     transform[5][5] = 1.0;
     transform
+}
+
+/// Resolves the shear modulus `G` used for torsional stiffness.
+///
+/// An explicit positive finite [`crate::model::Material::shear_modulus`] wins;
+/// otherwise `G = E / (2 (1 + nu))` with `nu` defaulting to `0.3`.
+fn resolve_shear_modulus(model: &Model, youngs_modulus: f64) -> Result<f64, CaeError> {
+    if let Some(value) = model.material.shear_modulus {
+        if value.is_finite() && value > 0.0 {
+            return Ok(value);
+        }
+        return Err(CaeError::new(
+            "material/invalid-shear",
+            format!("material shear modulus must be positive and finite (currently {value})"),
+        ));
+    }
+    let ratio = model.material.poissons_ratio.unwrap_or(0.3);
+    if !ratio.is_finite() || ratio <= -1.0 || ratio >= 0.5 {
+        return Err(CaeError::new(
+            "material/invalid-poisson",
+            format!("material Poisson's ratio must be finite and inside (-1, 0.5) (currently {ratio})"),
+        ));
+    }
+    let value = youngs_modulus / (2.0 * (1.0 + ratio));
+    if !value.is_finite() || value <= 0.0 {
+        return Err(CaeError::new(
+            "material/invalid-shear",
+            "the derived shear modulus must be positive and finite; supply an explicit shear modulus",
+        ));
+    }
+    Ok(value)
+}
+
+/// Builds the local axis triad of a `beam3d` member as rows `[x, y, z]`.
+///
+/// `axis` must be the unit vector from the start to the end node. The local `z`
+/// axis is the component of the reference vector (default `(0, 0, 1)`, falling
+/// back to `(0, 1, 0)` for vertical members) perpendicular to `axis`; the local
+/// `y` axis completes the right-handed triad as `z × x`. A non-zero
+/// `orientation_angle` then rotates `y` and `z` about `x`.
+fn frame_local_axes(element: &Element, axis: &[f64; 3]) -> Result<[[f64; 3]; 3], CaeError> {
+    let mut reference = match element.orientation_vector {
+        Some(vector) => {
+            if !vector.iter().all(|value| value.is_finite()) {
+                return Err(CaeError::new("element/invalid-orientation", "orientation vector must be finite"));
+            }
+            let norm = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
+            if norm <= 0.0 {
+                return Err(CaeError::new("element/invalid-orientation", "orientation vector must not be zero"));
+            }
+            let dot = (vector[0] * axis[0] + vector[1] * axis[1] + vector[2] * axis[2]) / norm;
+            if 1.0 - dot * dot < 1e-18 {
+                return Err(CaeError::new(
+                    "element/invalid-orientation",
+                    "orientation vector must not be parallel to the member axis",
+                ));
+            }
+            [vector[0] / norm, vector[1] / norm, vector[2] / norm]
+        }
+        None => {
+            // Vertical members are parallel to the default reference, so the
+            // fallback keeps the triad well defined.
+            if axis[2].abs() < 1.0 - 1e-9 { [0.0, 0.0, 1.0] } else { [0.0, 1.0, 0.0] }
+        }
+    };
+    // z' = normalize(reference − (reference·x) x)
+    let dot = reference[0] * axis[0] + reference[1] * axis[1] + reference[2] * axis[2];
+    reference = [reference[0] - dot * axis[0], reference[1] - dot * axis[1], reference[2] - dot * axis[2]];
+    let norm = (reference[0] * reference[0] + reference[1] * reference[1] + reference[2] * reference[2]).sqrt();
+    if norm <= 0.0 {
+        return Err(CaeError::new("element/invalid-orientation", "orientation vector must not be parallel to the member axis"));
+    }
+    let z = [reference[0] / norm, reference[1] / norm, reference[2] / norm];
+    // y = z × x
+    let y_base = [z[1] * axis[2] - z[2] * axis[1], z[2] * axis[0] - z[0] * axis[2], z[0] * axis[1] - z[1] * axis[0]];
+    if let Some(angle) = element.orientation_angle {
+        if !angle.is_finite() {
+            return Err(CaeError::new("element/invalid-orientation", "orientation angle must be finite"));
+        }
+        let (cos, sin) = (angle.cos(), angle.sin());
+        let y = [cos * y_base[0] + sin * z[0], cos * y_base[1] + sin * z[1], cos * y_base[2] + sin * z[2]];
+        let z = [-sin * y_base[0] + cos * z[0], -sin * y_base[1] + cos * z[1], -sin * y_base[2] + cos * z[2]];
+        return Ok([*axis, y, z]);
+    }
+    Ok([*axis, y_base, z])
+}
+
+/// Assembles the full 12×12 local stiffness of a spatial Euler-Bernoulli frame
+/// member with degrees of freedom `(u, v, w, rx, ry, rz)` per node.
+///
+/// Axial `EA/L` and torsion `GJ/L` are uncoupled; bending in the local `x-y`
+/// plane uses `inertia` (`Izz`, coupling `v` with `rz`) and bending in the
+/// local `x-z` plane uses `inertia_weak` (`Iyy`, coupling `w` with `ry`).
+fn frame_stiffness(
+    youngs_modulus: f64,
+    shear_modulus: f64,
+    area: f64,
+    inertia: f64,
+    inertia_weak: f64,
+    torsion: f64,
+    length: f64,
+) -> [[f64; 12]; 12] {
+    let mut stiffness = [[0.0_f64; 12]; 12];
+    let axial = youngs_modulus * area / length;
+    for (a, b) in [(0, 0), (6, 6)] {
+        stiffness[a][b] += axial;
+    }
+    stiffness[0][6] -= axial;
+    stiffness[6][0] -= axial;
+    let torsional = shear_modulus * torsion / length;
+    for (a, b) in [(3, 3), (9, 9)] {
+        stiffness[a][b] += torsional;
+    }
+    stiffness[3][9] -= torsional;
+    stiffness[9][3] -= torsional;
+    // Bending in the local x-y plane: (v1, rz1, v2, rz2) = (1, 5, 7, 11).
+    // `beam_stiffness` carries its own axial block, which is not reused here.
+    let strong = beam_stiffness(youngs_modulus, area, inertia, length);
+    let source = [1usize, 2, 4, 5];
+    let mapping = [1usize, 5, 7, 11];
+    for (a, &row) in mapping.iter().enumerate() {
+        for (b, &column) in mapping.iter().enumerate() {
+            stiffness[row][column] += strong[source[a]][source[b]];
+        }
+    }
+    // Bending in the local x-z plane: (w1, ry1, w2, ry2) = (2, 4, 8, 10). The
+    // rotation about `y` flips the sign of the coupling terms relative to the
+    // x-y block.
+    let weak = youngs_modulus * inertia_weak / length.powi(3);
+    let length2 = length * length;
+    let block = [
+        [12.0, -6.0 * length, -12.0, -6.0 * length],
+        [-6.0 * length, 4.0 * length2, 6.0 * length, 2.0 * length2],
+        [-12.0, 6.0 * length, 12.0, 6.0 * length],
+        [-6.0 * length, 2.0 * length2, 6.0 * length, 4.0 * length2],
+    ];
+    let mapping = [2usize, 4, 8, 10];
+    for (a, &row) in mapping.iter().enumerate() {
+        for (b, &column) in mapping.iter().enumerate() {
+            stiffness[row][column] += weak * block[a][b];
+        }
+    }
+    stiffness
+}
+
+/// Builds the 12×12 block-diagonal rotation matrix from a local axis triad.
+///
+/// Rows `0..3` are the translational block and rows `3..6` the rotational
+/// block, both equal to the direction-cosine matrix `rotation`.
+fn frame_transform(rotation: &[[f64; 3]; 3]) -> [[f64; 12]; 12] {
+    let mut transform = [[0.0_f64; 12]; 12];
+    for node in 0..2 {
+        let offset = node * 6;
+        // The same 3x3 direction-cosine block maps the translations and the
+        // rotations of each node end.
+        for block in 0..2 {
+            for row in 0..3 {
+                for column in 0..3 {
+                    transform[offset + block * 3 + row][offset + block * 3 + column] = rotation[row][column];
+                }
+            }
+        }
+    }
+    transform
+}
+
+/// Consistent nodal vector of a linear transverse load along local `+y`,
+/// acting on degrees of freedom `(v1, rz1, v2, rz2)`.
+fn add_linear_transverse_frame_y(load: &mut [f64; 12], q1: f64, q2: f64, length: f64) {
+    let length2 = length * length;
+    load[1] += length * (7.0 * q1 + 3.0 * q2) / 20.0;
+    load[5] += length2 * (3.0 * q1 + 2.0 * q2) / 60.0;
+    load[7] += length * (3.0 * q1 + 7.0 * q2) / 20.0;
+    load[11] -= length2 * (2.0 * q1 + 3.0 * q2) / 60.0;
+}
+
+/// Consistent nodal vector of a linear transverse load along local `+z`,
+/// acting on degrees of freedom `(w1, ry1, w2, ry2)`.
+///
+/// The rotation about `y` flips the sign of the moment entries relative to the
+/// local `y` vector.
+fn add_linear_transverse_frame_z(load: &mut [f64; 12], q1: f64, q2: f64, length: f64) {
+    let length2 = length * length;
+    load[2] += length * (7.0 * q1 + 3.0 * q2) / 20.0;
+    load[4] -= length2 * (3.0 * q1 + 2.0 * q2) / 60.0;
+    load[8] += length * (3.0 * q1 + 7.0 * q2) / 20.0;
+    load[10] += length2 * (2.0 * q1 + 3.0 * q2) / 60.0;
+}
+
+/// Consistent nodal vector of a partial-span transverse load along local `+y`.
+fn add_partial_transverse_frame(load: &mut [f64; 12], partial: PartialLoad, length: f64) {
+    const POINTS: [f64; 3] = [-0.774_596_669_241_483_4, 0.0, 0.774_596_669_241_483_4];
+    const WEIGHTS: [f64; 3] = [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0];
+    let start = partial.start * length;
+    let end = partial.end * length;
+    let half = 0.5 * (end - start);
+    let middle = 0.5 * (end + start);
+    for (point, weight) in POINTS.iter().zip(WEIGHTS) {
+        let position = middle + half * point;
+        let xi = position / length;
+        let intensity = partial.load_start + (partial.load_end - partial.load_start) * (position - start) / (end - start);
+        let shape = [
+            1.0 - 3.0 * xi * xi + 2.0 * xi * xi * xi,
+            length * (xi - 2.0 * xi * xi + xi * xi * xi),
+            3.0 * xi * xi - 2.0 * xi * xi * xi,
+            length * (-xi * xi + xi * xi * xi),
+        ];
+        let scale = weight * half * intensity;
+        load[1] += scale * shape[0];
+        load[5] += scale * shape[1];
+        load[7] += scale * shape[2];
+        load[11] += scale * shape[3];
+    }
 }
 
 /// Adds the consistent nodal vector of a linearly varying transverse load
@@ -5282,12 +6111,15 @@ fn solve_dense(mut matrix: Vec<f64>, mut rhs: Vec<f64>, size: usize) -> Result<V
 ///
 /// Rigid constraints report the residual `K·u − F`; elastic supports report the
 /// spring force `−k·u`. The two are mutually exclusive per degree of freedom,
-/// which validation enforces, so no component is counted twice.
+/// which validation enforces, so no component is counted twice. For spatial
+/// `beam3d` models the rotational resultants are checked as well.
 fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displacement: &[f64]) -> ReactionSummary {
     let layout = &system.layout;
     let translation_components = if model.dimension == 3 { 3 } else { 2 };
+    let spatial = layout.uses_spatial;
     let applied_forces = system.to_global_vector(&system.forces);
     let mut applied = ForceResultant::default();
+    let mut applied_moment = MomentResultant::default();
     for node in 0..model.nodes.len() {
         let mut loads = [0.0_f64; 3];
         for (component, value) in loads.iter_mut().enumerate().take(translation_components) {
@@ -5296,6 +6128,17 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
         applied.fx += loads[0];
         applied.fy += loads[1];
         applied.fz += loads[2];
+        if spatial {
+            // The wrench balance is taken about the document origin, so the
+            // translational loads enter as `r × F` next to the nodal couples.
+            let position = &model.nodes[node];
+            applied_moment.mx += position.y * loads[2] - position.z * loads[1];
+            applied_moment.my += position.z * loads[0] - position.x * loads[2];
+            applied_moment.mz += position.x * loads[1] - position.y * loads[0];
+            applied_moment.mx += node_value(layout, &applied_forces, node, 3);
+            applied_moment.my += node_value(layout, &applied_forces, node, 4);
+            applied_moment.mz += node_value(layout, &applied_forces, node, 5);
+        }
     }
     let supports: Vec<SupportReaction> = model
         .supports
@@ -5328,18 +6171,44 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
                 fx,
                 fy,
                 fz: if model.dimension == 3 { component(support.dz, spring.kz, 2) } else { 0.0 },
-                mz: if layout.uses_rotation { component(support.rz, spring.kr, 2) } else { 0.0 },
+                mz: if spatial {
+                    component(support.rz, 0.0, 5)
+                }
+                else if layout.uses_rotation {
+                    component(support.rz, spring.kr, 2)
+                }
+                else {
+                    0.0
+                },
+                mx: spatial.then(|| component(support.rx, 0.0, 3)),
+                my: spatial.then(|| component(support.ry, 0.0, 4)),
             })
         })
         .collect();
     let mut reaction = ForceResultant::default();
+    let mut reaction_moment = MomentResultant::default();
     for support in &supports {
         reaction.fx += support.fx;
         reaction.fy += support.fy;
         reaction.fz += support.fz;
+        if spatial {
+            let node = model.nodes.iter().position(|entry| entry.id == support.node).unwrap_or(0);
+            let position = &model.nodes[node];
+            reaction_moment.mx += position.y * support.fz - position.z * support.fy;
+            reaction_moment.my += position.z * support.fx - position.x * support.fz;
+            reaction_moment.mz += position.x * support.fy - position.y * support.fx;
+            reaction_moment.mx += support.mx.unwrap_or_default();
+            reaction_moment.my += support.my.unwrap_or_default();
+            reaction_moment.mz += support.mz;
+        }
     }
     let unbalanced =
         ForceResultant { fx: reaction.fx + applied.fx, fy: reaction.fy + applied.fy, fz: reaction.fz + applied.fz };
+    let unbalanced_moment = spatial.then_some(MomentResultant {
+        mx: reaction_moment.mx + applied_moment.mx,
+        my: reaction_moment.my + applied_moment.my,
+        mz: reaction_moment.mz + applied_moment.mz,
+    });
     let scale = reaction
         .fx
         .abs()
@@ -5348,10 +6217,37 @@ fn summarize_reactions(model: &Model, system: &System, residual: &[f64], displac
         .max(applied.fx.abs())
         .max(applied.fy.abs())
         .max(applied.fz.abs())
+        .max(if spatial {
+            reaction_moment
+                .mx
+                .abs()
+                .max(reaction_moment.my.abs())
+                .max(reaction_moment.mz.abs())
+                .max(applied_moment.mx.abs())
+                .max(applied_moment.my.abs())
+                .max(applied_moment.mz.abs())
+        }
+        else {
+            0.0
+        })
         .max(1.0);
     let tolerance = 1e-8 * scale;
-    let balanced = unbalanced.fx.abs() <= tolerance && unbalanced.fy.abs() <= tolerance && unbalanced.fz.abs() <= tolerance;
-    ReactionSummary { supports, reaction, applied, unbalanced, tolerance, balanced }
+    let balanced = unbalanced.fx.abs() <= tolerance
+        && unbalanced.fy.abs() <= tolerance
+        && unbalanced.fz.abs() <= tolerance
+        && unbalanced_moment
+            .is_none_or(|moment| moment.mx.abs() <= tolerance && moment.my.abs() <= tolerance && moment.mz.abs() <= tolerance);
+    ReactionSummary {
+        supports,
+        reaction,
+        applied,
+        unbalanced,
+        reaction_moment: spatial.then_some(reaction_moment),
+        applied_moment: spatial.then_some(applied_moment),
+        unbalanced_moment,
+        tolerance,
+        balanced,
+    }
 }
 
 /// Cholesky factor of a symmetric positive-definite matrix stored row-major.
@@ -5595,6 +6491,7 @@ pub fn solve_influence_line(
     direction: InfluenceDirection,
     points: usize,
 ) -> Result<InfluenceLineSolution, CaeError> {
+    reject_spatial(model, "influence lines")?;
     if points < 2 {
         return Err(CaeError::new(
             "analysis/invalid-points",
@@ -5712,6 +6609,8 @@ pub fn solve_influence_line(
             fy: if direction == InfluenceDirection::Y { 1.0 } else { 0.0 },
             fz: 0.0,
             mz: 0.0,
+            mx: None,
+            my: None,
         });
         let solution = solve(&working)?;
         let value = match &quantity {

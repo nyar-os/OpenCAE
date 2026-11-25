@@ -40,6 +40,8 @@ fn model() -> Model {
             allowable_stress: None,
             alpha: None,
             conductivity: Some(K),
+            shear_modulus: None,
+            poissons_ratio: None,
             section: None,
         })
         .expect("material");

@@ -245,6 +245,12 @@ pub fn import_abaqus(text: &str, units: Units) -> Result<AbaqusImport, CaeError>
                 };
                 (section.area.expect("checked above"), Some(section.inertia.expect("checked above")))
             }
+            ElementKind::Beam3D => {
+                return Err(CaeError::new(
+                    "import/abaqus-unsupported-beam",
+                    format!("line {}: beam3d members are not produced by the Abaqus importer", element.line),
+                ));
+            }
         };
         let youngs_modulus = match section.and_then(|section| section.material.as_deref()) {
             Some(name) => *material_e.get(name).ok_or_else(|| {
@@ -311,6 +317,12 @@ pub fn import_abaqus(text: &str, units: Units) -> Result<AbaqusImport, CaeError>
                     "Dload",
                     dload.line,
                     "a uniform `PY` load on a truss element is ignored; distributed loads require beam elements".to_string(),
+                ),
+                ElementKind::Beam3D => losses.push(
+                    "import/abaqus-unsupported-load",
+                    "Dload",
+                    dload.line,
+                    "a uniform `PY` load on a beam3d member is ignored by the importer".to_string(),
                 ),
             }
         }
