@@ -555,7 +555,8 @@ export class CaeDocument {
      * SVG export by `axial`, `shear`, `moment` or `displacement` and adds a
      * colour bar; other formats reject it with `export/invalid-contour`.
      * `options.drawing` selects a dedicated SVG engineering drawing (`forces`,
-     * `displacement` or `reactions`); it is SVG-only and cannot combine with
+     * `shear`, `moment`, `displacement`, `reactions`, `overlay`, `modal`,
+     * `envelope` or `summary`); it is SVG-only and cannot combine with
      * `contour`.
      */
     export(format: ExportFormat, target: string, options: ExportOptions = {}): ExportReport {

@@ -78,7 +78,7 @@
             "  open-cae load-cases <file> [--out report.json]",
             "  open-cae matrices <file> [--out report.json]",
             "  open-cae spectrum <file> [--modes N] [--axis x|y|z] [--combination srss|cqc] [--damping <z>] --spectrum <T:Sa,...> [--out report.json]",
-            "  open-cae export <file> --format csv|vtk|md|svg|pdf --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement|reactions|overlay|modal|envelope|summary]",
+            "  open-cae export <file> --format csv|vtk|md|svg|pdf --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|shear|moment|displacement|reactions|overlay|modal|envelope|summary]",
             "  open-cae report <file>",
             "  open-cae capabilities"
         ],
@@ -285,7 +285,7 @@
             "format": "export format, `csv`, `vtk`, `md`, `svg` or `pdf`",
             "scale": "SVG/PDF deformation scale factor, automatic when omitted",
             "contour": "SVG/PDF contour quantity, `axial`, `shear`, `moment` or `displacement`",
-            "drawing": "engineering drawing kind: `forces` for shear and moment diagrams, `displacement` for nodal displacement vectors, `reactions` for support reaction vectors, `overlay` for the undeformed/deformed comparison, `modal` for mode shapes, `envelope` for combination force ranges, `summary` for the one-page result summary"
+            "drawing": "engineering drawing kind: `forces` for shear and moment diagrams, `shear` and `moment` for filled single-quantity diagrams on the member axis, `displacement` for nodal displacement vectors, `reactions` for support reaction vectors, `overlay` for the undeformed/deformed comparison, `modal` for mode shapes, `envelope` for combination force ranges, `summary` for the one-page result summary"
         },
         "message": {
             "created": "created {path} ({units}, dimension {dimension})",
@@ -334,7 +334,7 @@
             "unknownImportFormat": "unknown import format `{format}`; only abaqus or inp is supported",
             "unsupportedImportFormat": "cannot infer the import format of `{file}`; provide an Abaqus `.inp` file or use --format abaqus",
             "unknownContour": "unknown contour quantity `{value}`; use `axial`, `shear`, `moment` or `displacement`",
-            "unknownDrawing": "unknown drawing kind `{value}`; use `forces`, `displacement`, `reactions`, `overlay`, `modal`, `envelope` or `summary`",
+            "unknownDrawing": "unknown drawing kind `{value}`; use `forces`, `shear`, `moment`, `displacement`, `reactions`, `overlay`, `modal`, `envelope` or `summary`",
             "unknownAnalysis": "unknown analysis `{value}`; only static, modal, buckling or tension-only is supported",
             "invalidIterations": "`--iterations` value `{value}` is not a positive integer",
             "tensionOnlyOptionsRequireAnalysis": "`--iterations` and `--tolerance` require `--analysis tension-only`",

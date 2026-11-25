@@ -41,16 +41,28 @@ export type ContourQuantity = 'axial' | 'shear' | 'moment' | 'displacement';
  *
  * `forces` writes the shear `V(x)` and bending-moment `M(x)` diagram of every
  * beam-like member (axial `N(x)` for trusses), annotated with the sampled
- * extremes and the zero-shear crossings. `displacement` writes the deformed
- * shape with a scaled green arrow and the magnitude label at every displaced
- * node. `reactions` writes the undeformed shape with a purple arrow, magnitude
- * label and reaction-moment label at every supported node. `overlay` compares
- * the undeformed skeleton with the deformed centreline and labels only the
- * extreme node. `modal` draws the lowest mode shapes with their frequencies,
- * `envelope` draws the member force range across every load combination and
- * `summary` writes a one-page result summary with a model thumbnail.
+ * extremes and the zero-shear crossings. `shear` and `moment` draw one filled
+ * diagram on the member axis with the end values and the extreme labelled;
+ * truss members are skipped and named on the sheet. `displacement` writes the
+ * deformed shape with a scaled green arrow and the magnitude label at every
+ * displaced node. `reactions` writes the undeformed shape with a purple arrow,
+ * magnitude label and reaction-moment label at every supported node. `overlay`
+ * compares the undeformed skeleton with the deformed centreline and labels only
+ * the extreme node. `modal` draws the lowest mode shapes with their
+ * frequencies, `envelope` draws the member force range across every load
+ * combination and `summary` writes a one-page result summary with a model
+ * thumbnail.
  */
-export type DrawingKind = 'forces' | 'displacement' | 'reactions' | 'overlay' | 'modal' | 'envelope' | 'summary';
+export type DrawingKind =
+    | 'forces'
+    | 'shear'
+    | 'moment'
+    | 'displacement'
+    | 'reactions'
+    | 'overlay'
+    | 'modal'
+    | 'envelope'
+    | 'summary';
 
 /** Options of `export()`. */
 export interface ExportOptions {

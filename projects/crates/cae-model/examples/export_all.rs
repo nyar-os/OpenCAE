@@ -45,6 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     for (name, options) in [
         ("forces.svg", ExportOptions { drawing: Some("forces".parse()?), ..default }),
+        ("shear.svg", ExportOptions { drawing: Some("shear".parse()?), ..default }),
+        ("moment.svg", ExportOptions { drawing: Some("moment".parse()?), ..default }),
         ("displacements.svg", ExportOptions { drawing: Some("displacement".parse()?), ..default }),
         ("reactions.svg", ExportOptions { drawing: Some("reactions".parse()?), ..default }),
         ("overlay.svg", ExportOptions { drawing: Some("overlay".parse()?), ..default }),

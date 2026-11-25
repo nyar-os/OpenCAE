@@ -360,6 +360,8 @@ function drawingOption(ctx: CommandContext, b: Bound): DrawingKind | undefined {
     }
     if (
         value === 'forces' ||
+        value === 'shear' ||
+        value === 'moment' ||
         value === 'displacement' ||
         value === 'reactions' ||
         value === 'overlay' ||
@@ -2236,7 +2238,7 @@ cli
         attempt(ctx, async () => {
             const b = bind(ctx, options);
             const file = b.file(
-                'export <file> --format csv|vtk|md|svg|pdf --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|displacement|reactions|overlay|modal|envelope|summary]',
+                'export <file> --format csv|vtk|md|svg|pdf --out <dir|file> [--scale N] [--stations N] [--contour axial|shear|moment|displacement] [--drawing forces|shear|moment|displacement|reactions|overlay|modal|envelope|summary]',
             );
             const format = exportFormat(ctx, b.required('--format'));
             const out = b.required('--out');
