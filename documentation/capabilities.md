@@ -53,7 +53,7 @@ The machine-readable version is printed by `open-cae capabilities` (and by
 | `.ocae` JSON I/O | ✅ supported |
 | CSV (solution tables and the `envelope --csv` table) / legacy VTK / Markdown / HTML report export and deterministic SVG shape export | ✅ supported |
 | SVG result contours (`export --contour axial\|shear\|moment\|displacement`, sampled min/max colour bar) | ✅ supported |
-| SVG engineering drawings (`export --drawing forces\|displacement`, shear/moment diagram sheet and nodal displacement vector sheet) | ✅ supported |
+| SVG engineering drawings (`export --drawing forces\|displacement\|reactions`, shear/moment diagram sheet, nodal displacement vector sheet and support reaction vector sheet) | ✅ supported |
 | 3D beam (`beam3d`, spatial 6-DOF frame member: axial, torsion, bending about both axes, local-to-global transform with orientation vector/angle) | ✅ supported |
 | 3D frame (`frame3d`, spatial static frames of `beam3d` members with full fixity/hinge/roller supports, nodal forces and couples, local `+y`/`+z` distributed loads; displacements, reactions and end forces `N`/`T`/`Vy`/`Vz`/`My`/`Mz`) | ✅ supported |
 | material nonlinearity, beam/frame large displacement (`nonlinear`) | ❌ not implemented |
@@ -165,7 +165,16 @@ green arrow at every node with a non-zero displacement whose length is
 proportional to the magnitude and whose tip carries the magnitude in the
 displacement unit, with a legend naming the scale and the maximum magnitude;
 an invalid scale is rejected with `export/invalid-scale` exactly like the
-plain SVG. Both sheets are deterministic and contain no timestamps.
+plain SVG. `reactions` (`export_reactions_svg`, default file `reactions.svg`)
+draws the undeformed geometry with the green support triangles and, for every
+support row of the reaction summary — the same rows `reactions.csv` writes —
+a purple arrow along the projected reaction vector `(fx, fy, fz)` whose length
+is proportional to the translational magnitude, labelled with the magnitude in
+newtons; a non-zero reaction moment is labelled next to the node with its
+component and the moment unit, and the legend reports the maximum magnitude so
+the sheet and the tables agree. An empty model fails with `export/no-solution`
+and a model without supports with `export/no-reactions`. All sheets are
+deterministic and contain no timestamps.
 
 Model quantities are exposed as `summarize_model()` in Rust, `model_summary` in
 the addon and `modelSummary()` in the SDK, with CLI subcommand `model summary`.
@@ -727,9 +736,12 @@ and check the legend values and colours.
 `tests/drawings.rs`: the `forces` sheet of a uniformly loaded beam and of a
 cantilever, the `displacement` sheet of a tension bar (tip `FL/(EA) = 0.4762`
 labelled) and of a cantilever (tip `PL³/(3EI) = 1.587`, one arrow only at the
-free node), byte-identical repeated exports, and the stable
-`export/invalid-drawing`, `export/invalid-scale`, `export/no-beam-diagram` and
-`export/no-solution` errors plus the directory default file names.
+free node), the `reactions` sheet of a two-bar truss (`|R| = 707.1 N` at both
+supports) and of a cantilever (`1000 N` and `1.000e6 N·mm` at the fixed end),
+byte-identical repeated exports, and the stable
+`export/invalid-drawing`, `export/invalid-scale`, `export/no-beam-diagram`,
+`export/no-reactions` and `export/no-solution` errors plus the directory
+default file names.
 
 `tests/deflection.rs`: simply supported uniform load (`5wL⁴/384EI`),
 cantilever tip load (`PL³/3EI` and `PL²/2EI`), cantilever uniform load
