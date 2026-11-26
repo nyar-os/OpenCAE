@@ -98,4 +98,15 @@ export default defineConfig({
         ts: { packages: ['@wae/open-cae'] },
         outputs: ['projects/packages/open-cae/dist/cli.js', 'projects/packages/open-cae/dist/index.js'],
     },
+    skills: {
+        packages: [
+            {
+                dir: 'projects/packages/open-cae-skills/skills',
+                packageJson: 'projects/packages/open-cae-skills/package.json',
+                appPackageJson: 'projects/packages/open-cae/package.json',
+                cliEntry: 'projects/packages/open-cae/dist/cli.js',
+                commandName: 'open-cae',
+            },
+        ],
+    },
 });

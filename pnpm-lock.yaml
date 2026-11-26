@@ -58,6 +58,8 @@ importers:
 
   projects/packages/open-cae-linux-x64: {}
 
+  projects/packages/open-cae-skills: {}
+
   projects/packages/open-cae-win32-x64: {}
 
   projects/sites/homepage:
