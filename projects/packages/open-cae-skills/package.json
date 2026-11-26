@@ -1,6 +1,6 @@
 {
     "name": "@wae/open-cae-skills",
-    "version": "0.0.9",
+    "version": "0.0.10",
     "description": "Agent skills for OpenCAE: build, load, solve and export structural and heat models",
     "license": "Apache-2.0",
     "type": "module",
